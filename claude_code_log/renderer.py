@@ -3,7 +3,7 @@
 
 import json
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any, cast, TYPE_CHECKING
+from typing import List, Optional, Dict, Any, cast, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .cache import CacheManager
@@ -131,8 +131,13 @@ def format_timestamp(timestamp_str: str | None) -> str:
 
 
 def escape_html(text: str) -> str:
-    """Escape HTML special characters in text."""
-    return html.escape(text)
+    """Escape HTML special characters in text.
+
+    Also normalizes line endings (CRLF -> LF) to prevent double spacing in <pre> blocks.
+    """
+    # Normalize CRLF to LF to prevent double line breaks in HTML
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return html.escape(normalized)
 
 
 def create_collapsible_details(
@@ -285,35 +290,258 @@ def format_todowrite_content(tool_use: ToolUseContent) -> str:
     """
 
 
+def format_bash_tool_content(tool_use: ToolUseContent) -> str:
+    """Format Bash tool use content in VS Code extension style."""
+    command = tool_use.input.get("command", "")
+    description = tool_use.input.get("description", "")
+
+    escaped_command = escape_html(command)
+
+    html_parts = ["<div class='bash-tool-content'>"]
+
+    # Add description if present
+    if description:
+        escaped_desc = escape_html(description)
+        html_parts.append(f"<div class='bash-tool-description'>{escaped_desc}</div>")
+
+    # Add command in preformatted block
+    html_parts.append(f"<pre class='bash-tool-command'>{escaped_command}</pre>")
+    html_parts.append("</div>")
+
+    return "".join(html_parts)
+
+
+def render_params_table(params: Dict[str, Any]) -> str:
+    """Render a dictionary of parameters as an HTML table.
+
+    Reusable for tool parameters, diagnostic objects, etc.
+    """
+    if not params:
+        return "<div class='tool-params-empty'>No parameters</div>"
+
+    html_parts = ["<table class='tool-params-table'>"]
+
+    for key, value in params.items():
+        escaped_key = escape_html(str(key))
+
+        # If value is structured (dict/list), render as JSON
+        if isinstance(value, (dict, list)):
+            try:
+                formatted_value = json.dumps(value, indent=2)  # type: ignore[arg-type]
+                escaped_value = escape_html(formatted_value)
+
+                # Make long structured values collapsible
+                if len(formatted_value) > 200:
+                    preview = escape_html(formatted_value[:100]) + "..."
+                    value_html = f"""
+                        <details class='tool-param-collapsible'>
+                            <summary>{preview}</summary>
+                            <pre class='tool-param-structured'>{escaped_value}</pre>
+                        </details>
+                    """
+                else:
+                    value_html = (
+                        f"<pre class='tool-param-structured'>{escaped_value}</pre>"
+                    )
+            except (TypeError, ValueError):
+                escaped_value = escape_html(str(value))  # type: ignore[arg-type]
+                value_html = escaped_value
+        else:
+            # Simple value, render as-is (or collapsible if long)
+            escaped_value = escape_html(str(value))
+
+            # Make long string values collapsible
+            if len(str(value)) > 100:
+                preview = escape_html(str(value)[:80]) + "..."
+                value_html = f"""
+                    <details class='tool-param-collapsible'>
+                        <summary>{preview}</summary>
+                        <div class='tool-param-full'>{escaped_value}</div>
+                    </details>
+                """
+            else:
+                value_html = escaped_value
+
+        html_parts.append(f"""
+            <tr>
+                <td class='tool-param-key'>{escaped_key}</td>
+                <td class='tool-param-value'>{value_html}</td>
+            </tr>
+        """)
+
+    html_parts.append("</table>")
+    return "".join(html_parts)
+
+
+def format_edit_tool_content(tool_use: ToolUseContent) -> str:
+    """Format Edit tool use content as a diff view with intra-line highlighting."""
+    import difflib
+
+    file_path = tool_use.input.get("file_path", "")
+    old_string = tool_use.input.get("old_string", "")
+    new_string = tool_use.input.get("new_string", "")
+    replace_all = tool_use.input.get("replace_all", False)
+
+    escaped_path = escape_html(file_path)
+
+    html_parts = ["<div class='edit-tool-content'>"]
+
+    # File path header
+    html_parts.append(f"<div class='edit-file-path'>📝 {escaped_path}</div>")
+
+    if replace_all:
+        html_parts.append(
+            "<div class='edit-replace-all'>🔄 Replace all occurrences</div>"
+        )
+
+    # Split into lines for diff
+    old_lines = old_string.splitlines(keepends=True)
+    new_lines = new_string.splitlines(keepends=True)
+
+    # Generate unified diff to identify changed lines
+    differ = difflib.Differ()
+    diff: list[str] = list(differ.compare(old_lines, new_lines))
+
+    html_parts.append("<div class='edit-diff'>")
+
+    i = 0
+    while i < len(diff):
+        line = diff[i]
+        prefix = line[0:2]
+        content = line[2:]
+
+        if prefix == "- ":
+            # Removed line - look ahead for corresponding addition
+            removed_lines: list[str] = [content]
+            j = i + 1
+
+            # Collect consecutive removed lines
+            while j < len(diff) and diff[j].startswith("- "):
+                removed_lines.append(diff[j][2:])
+                j += 1
+
+            # Skip '? ' hint lines
+            while j < len(diff) and diff[j].startswith("? "):
+                j += 1
+
+            # Collect consecutive added lines
+            added_lines: list[str] = []
+            while j < len(diff) and diff[j].startswith("+ "):
+                added_lines.append(diff[j][2:])
+                j += 1
+
+            # Skip '? ' hint lines
+            while j < len(diff) and diff[j].startswith("? "):
+                j += 1
+
+            # Generate character-level diff for paired lines
+            if added_lines:
+                for old_line, new_line in zip(removed_lines, added_lines):
+                    html_parts.append(_render_line_diff(old_line, new_line))
+
+                # Handle any unpaired lines
+                for old_line in removed_lines[len(added_lines) :]:
+                    escaped = escape_html(old_line.rstrip("\n"))
+                    html_parts.append(
+                        f"<div class='diff-line diff-removed'><span class='diff-marker'>-</span>{escaped}</div>"
+                    )
+
+                for new_line in added_lines[len(removed_lines) :]:
+                    escaped = escape_html(new_line.rstrip("\n"))
+                    html_parts.append(
+                        f"<div class='diff-line diff-added'><span class='diff-marker'>+</span>{escaped}</div>"
+                    )
+            else:
+                # No corresponding addition - just removed
+                for old_line in removed_lines:
+                    escaped = escape_html(old_line.rstrip("\n"))
+                    html_parts.append(
+                        f"<div class='diff-line diff-removed'><span class='diff-marker'>-</span>{escaped}</div>"
+                    )
+
+            i = j
+
+        elif prefix == "+ ":
+            # Added line without corresponding removal
+            escaped = escape_html(content.rstrip("\n"))
+            html_parts.append(
+                f"<div class='diff-line diff-added'><span class='diff-marker'>+</span>{escaped}</div>"
+            )
+            i += 1
+
+        elif prefix == "? ":
+            # Skip hint lines (already processed)
+            i += 1
+
+        else:
+            # Unchanged line - show for context
+            escaped = escape_html(content.rstrip("\n"))
+            html_parts.append(
+                f"<div class='diff-line diff-context'><span class='diff-marker'> </span>{escaped}</div>"
+            )
+            i += 1
+
+    html_parts.append("</div></div>")
+
+    return "".join(html_parts)
+
+
+def _render_line_diff(old_line: str, new_line: str) -> str:
+    """Render a pair of changed lines with character-level highlighting."""
+    import difflib
+
+    # Use SequenceMatcher for character-level diff
+    sm = difflib.SequenceMatcher(None, old_line.rstrip("\n"), new_line.rstrip("\n"))
+
+    # Build old line with highlighting
+    old_parts: list[str] = []
+    old_parts.append(
+        "<div class='diff-line diff-removed'><span class='diff-marker'>-</span>"
+    )
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        chunk = old_line[i1:i2]
+        if tag == "equal":
+            old_parts.append(escape_html(chunk))
+        elif tag in ("delete", "replace"):
+            old_parts.append(
+                f"<mark class='diff-char-removed'>{escape_html(chunk)}</mark>"
+            )
+    old_parts.append("</div>")
+
+    # Build new line with highlighting
+    new_parts: list[str] = []
+    new_parts.append(
+        "<div class='diff-line diff-added'><span class='diff-marker'>+</span>"
+    )
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        chunk = new_line[j1:j2]
+        if tag == "equal":
+            new_parts.append(escape_html(chunk))
+        elif tag in ("insert", "replace"):
+            new_parts.append(
+                f"<mark class='diff-char-added'>{escape_html(chunk)}</mark>"
+            )
+    new_parts.append("</div>")
+
+    return "".join(old_parts) + "".join(new_parts)
+
+
 def format_tool_use_content(tool_use: ToolUseContent) -> str:
     """Format tool use content as HTML."""
     # Special handling for TodoWrite
     if tool_use.name == "TodoWrite":
         return format_todowrite_content(tool_use)
 
-    # Format the input parameters
-    try:
-        formatted_input = json.dumps(tool_use.input, indent=2)
-        escaped_input = escape_html(formatted_input)
-    except (TypeError, ValueError):
-        escaped_input = escape_html(str(tool_use.input))
+    # Special handling for Bash
+    if tool_use.name == "Bash":
+        return format_bash_tool_content(tool_use)
 
-    # For simple content, show directly without collapsible wrapper
-    if len(escaped_input) <= 200:
-        return f"<pre>{escaped_input}</pre>"
+    # Special handling for Edit
+    if tool_use.name == "Edit":
+        return format_edit_tool_content(tool_use)
 
-    # For longer content, use collapsible details but no extra wrapper
-    preview_text = escaped_input[:200] + "..."
-    return f"""
-    <details class="collapsible-details">
-        <summary>
-            <div class="preview-content"><pre>{preview_text}</pre></div>
-        </summary>
-        <div class="details-content">
-            <pre>{escaped_input}</pre>
-        </div>
-    </details>
-    """
+    # Default: render as key/value table using shared renderer
+    return render_params_table(tool_use.input)
 
 
 def format_tool_result_content(tool_result: ToolResultContent) -> str:
@@ -431,22 +659,26 @@ def _looks_like_bash_output(content: str) -> bool:
 
 
 def format_thinking_content(thinking: ThinkingContent) -> str:
-    """Format thinking content as HTML."""
-    escaped_thinking = escape_html(thinking.thinking.strip())
+    """Format thinking content as HTML with markdown rendering."""
+    thinking_text = thinking.thinking.strip()
+
+    # Render markdown to HTML
+    rendered_html = render_markdown(thinking_text)
 
     # For simple content, show directly without collapsible wrapper
-    if len(escaped_thinking) <= 200:
-        return f'<div class="thinking-text">{escaped_thinking}</div>'
+    if len(thinking_text) <= 200:
+        return f'<div class="thinking-text">{rendered_html}</div>'
 
     # For longer content, use collapsible details but no extra wrapper
-    preview_text = escaped_thinking[:200] + "..."
+    # Use plain text for preview (first 200 chars)
+    preview_text = escape_html(thinking_text[:200]) + "..."
     return f"""
     <details class="collapsible-details">
         <summary>
             <div class="preview-content"><div class="thinking-text">{preview_text}</div></div>
         </summary>
         <div class="details-content">
-            <div class="thinking-text">{escaped_thinking}</div>
+            <div class="thinking-text">{rendered_html}</div>
         </div>
     </details>
     """
@@ -460,18 +692,170 @@ def format_image_content(image: ImageContent) -> str:
     return f'<img src="{data_url}" alt="Uploaded image" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin: 10px 0;" />'
 
 
-def render_message_content(
-    content: Union[str, List[ContentItem]], message_type: str
-) -> str:
-    """Render message content with proper tool use and tool result formatting."""
-    if isinstance(content, str):
+def _is_compacted_session_summary(text: str) -> bool:
+    """Check if text is a compacted session summary (model-generated markdown).
+
+    Compacted summaries are generated when a session runs out of context and
+    needs to be continued. They are well-formed markdown and should be rendered
+    as such rather than in preformatted blocks.
+    """
+    return text.startswith(
+        "This session is being continued from a previous conversation that ran out of context"
+    )
+
+
+def extract_ide_notifications(text: str) -> tuple[List[str], str]:
+    """Extract IDE notification tags from user message text.
+
+    Handles:
+    - <ide_opened_file>: Simple file open notifications
+    - <ide_selection>: Code selection notifications (collapsible for large selections)
+    - <post-tool-use-hook><ide_diagnostics>: JSON diagnostic arrays
+
+    Returns:
+        A tuple of (notifications_html_list, remaining_text)
+        where notifications are pre-rendered HTML divs and remaining_text
+        is the message content with IDE tags removed.
+    """
+    import re
+
+    notifications: List[str] = []
+    remaining_text = text
+
+    # Pattern 1: <ide_opened_file>content</ide_opened_file>
+    ide_file_pattern = r"<ide_opened_file>(.*?)</ide_opened_file>"
+    file_matches = list(re.finditer(ide_file_pattern, remaining_text, flags=re.DOTALL))
+
+    for match in file_matches:
+        content = match.group(1).strip()
+        escaped_content = escape_html(content)
+        notification_html = f"<div class='ide-notification'>🤖 {escaped_content}</div>"
+        notifications.append(notification_html)
+
+    # Remove ide_opened_file tags
+    remaining_text = re.sub(ide_file_pattern, "", remaining_text, flags=re.DOTALL)
+
+    # Pattern 2: <ide_selection>content</ide_selection>
+    selection_pattern = r"<ide_selection>(.*?)</ide_selection>"
+    selection_matches = list(
+        re.finditer(selection_pattern, remaining_text, flags=re.DOTALL)
+    )
+
+    for match in selection_matches:
+        content = match.group(1).strip()
+        escaped_content = escape_html(content)
+
+        # For large selections, make them collapsible
+        if len(content) > 200:
+            preview = escape_html(content[:150]) + "..."
+            notification_html = f"""
+                <div class='ide-notification ide-selection'>
+                    <details class='ide-selection-collapsible'>
+                        <summary>📝 {preview}</summary>
+                        <pre class='ide-selection-content'>{escaped_content}</pre>
+                    </details>
+                </div>
+            """
+        else:
+            notification_html = f"<div class='ide-notification ide-selection'>📝 {escaped_content}</div>"
+
+        notifications.append(notification_html)
+
+    # Remove ide_selection tags
+    remaining_text = re.sub(selection_pattern, "", remaining_text, flags=re.DOTALL)
+
+    # Pattern 3: <post-tool-use-hook><ide_diagnostics>JSON</ide_diagnostics></post-tool-use-hook>
+    hook_pattern = r"<post-tool-use-hook>\s*<ide_diagnostics>(.*?)</ide_diagnostics>\s*</post-tool-use-hook>"
+    hook_matches = list(re.finditer(hook_pattern, remaining_text, flags=re.DOTALL))
+
+    for match in hook_matches:
+        json_content = match.group(1).strip()
+        try:
+            # Parse JSON array of diagnostic objects
+            diagnostics: Any = json.loads(json_content)
+            if isinstance(diagnostics, list):
+                # Render each diagnostic as a table
+                for diagnostic in cast(List[Any], diagnostics):
+                    if isinstance(diagnostic, dict):
+                        # Type assertion: we've confirmed it's a dict
+                        diagnostic_dict = cast(Dict[str, Any], diagnostic)
+                        table_html = render_params_table(diagnostic_dict)
+                        notification_html = (
+                            f"<div class='ide-notification ide-diagnostic'>"
+                            f"⚠️ IDE Diagnostic<br>{table_html}"
+                            f"</div>"
+                        )
+                        notifications.append(notification_html)
+        except (json.JSONDecodeError, ValueError):
+            # If JSON parsing fails, render as plain text
+            escaped_content = escape_html(json_content[:200])
+            notification_html = (
+                f"<div class='ide-notification'>🤖 IDE Diagnostics (parse error)<br>"
+                f"<pre>{escaped_content}...</pre></div>"
+            )
+            notifications.append(notification_html)
+
+    # Remove hook tags
+    remaining_text = re.sub(hook_pattern, "", remaining_text, flags=re.DOTALL)
+
+    return notifications, remaining_text.strip()
+
+
+def render_user_message_content(content_list: List[ContentItem]) -> tuple[str, bool]:
+    """Render user message content with IDE tag extraction and compacted summary handling.
+
+    Returns:
+        A tuple of (content_html, is_compacted)
+    """
+    # Check first text item
+    if content_list and hasattr(content_list[0], "text"):
+        first_text = getattr(content_list[0], "text", "")
+
+        # Check for compacted session summary first
+        if _is_compacted_session_summary(first_text):
+            # Render entire content as markdown for compacted summaries
+            # Use "assistant" to trigger markdown rendering instead of pre-formatted text
+            content_html = render_message_content(content_list, "assistant")
+            return content_html, True
+
+        # Extract IDE notifications from first text item
+        ide_notifications_html, remaining_text = extract_ide_notifications(first_text)
+        modified_content = content_list[1:]
+
+        # Build new content list with remaining text
+        if remaining_text:
+            # Replace first item with remaining text
+            modified_content = [
+                TextContent(type="text", text=remaining_text)
+            ] + modified_content
+
+        # Render the content
+        content_html = render_message_content(modified_content, "user")
+
+        # Prepend IDE notifications
+        if ide_notifications_html:
+            content_html = "".join(ide_notifications_html) + content_html
+    else:
+        # No text in first item or empty list, render normally
+        content_html = render_message_content(content_list, "user")
+
+    return content_html, False
+
+
+def render_message_content(content: List[ContentItem], message_type: str) -> str:
+    """Render message content with proper tool use and tool result formatting.
+
+    Note: This does NOT handle user-specific preprocessing like IDE tags or
+    compacted session summaries. Those should be handled by render_user_message_content.
+    """
+    if len(content) == 1 and isinstance(content[0], TextContent):
         if message_type == "user":
             # User messages are shown as-is in preformatted blocks
-            escaped_text = escape_html(content)
+            escaped_text = escape_html(content[0].text)
             return "<pre>" + escaped_text + "</pre>"
         else:
             # Assistant messages get markdown rendering
-            return render_markdown(content)
+            return render_markdown(content[0].text)
 
     # content is a list of ContentItem objects
     rendered_parts: List[str] = []
@@ -564,6 +948,8 @@ class TemplateMessage:
         session_id: Optional[str] = None,
         is_session_header: bool = False,
         token_usage: Optional[str] = None,
+        tool_use_id: Optional[str] = None,
+        title_hint: Optional[str] = None,
     ):
         self.type = message_type
         self.content_html = content_html
@@ -576,6 +962,11 @@ class TemplateMessage:
         self.is_session_header = is_session_header
         self.session_subtitle: Optional[str] = None
         self.token_usage = token_usage
+        self.tool_use_id = tool_use_id
+        self.title_hint = title_hint
+        # Pairing metadata
+        self.is_paired = False
+        self.pair_role: Optional[str] = None  # "pair_first", "pair_last", "pair_middle"
 
 
 class TemplateProject:
@@ -1017,13 +1408,27 @@ def _process_local_command_output(text_content: str) -> tuple[str, str, str]:
     )
     if stdout_match:
         stdout_content = stdout_match.group(1).strip()
-        # Convert ANSI codes to HTML for colored display
-        html_content = _convert_ansi_to_html(stdout_content)
-        # Use <pre> to preserve formatting and line breaks
-        content_html = (
-            f"<strong>Command Output:</strong><br>"
-            f"<pre class='command-output-content'>{html_content}</pre>"
-        )
+
+        # Check if content looks like markdown (starts with markdown headers)
+        is_markdown = bool(re.match(r"^#+\s+", stdout_content, re.MULTILINE))
+
+        if is_markdown:
+            # Render as markdown
+            import mistune
+
+            markdown_html = mistune.html(stdout_content)
+            content_html = (
+                f"<strong>Command Output:</strong><br>"
+                f"<div class='command-output-content'>{markdown_html}</div>"
+            )
+        else:
+            # Convert ANSI codes to HTML for colored display
+            html_content = _convert_ansi_to_html(stdout_content)
+            # Use <pre> to preserve formatting and line breaks
+            content_html = (
+                f"<strong>Command Output:</strong><br>"
+                f"<pre class='command-output-content'>{html_content}</pre>"
+            )
     else:
         content_html = escape_html(text_content)
 
@@ -1099,20 +1504,38 @@ def _process_bash_output(text_content: str) -> tuple[str, str, str]:
 
 
 def _process_regular_message(
-    text_only_content: Union[str, List[ContentItem]],
+    text_only_content: List[ContentItem],
     message_type: str,
     is_sidechain: bool,
 ) -> tuple[str, str, str]:
     """Process regular message and return (css_class, content_html, message_type)."""
     css_class = f"{message_type}"
-    content_html = render_message_content(text_only_content, message_type)
+
+    # Handle user-specific preprocessing
+    if message_type == "user":
+        # Sub-assistant prompts (sidechain user messages) should be rendered as markdown
+        if is_sidechain:
+            content_html = render_message_content(text_only_content, "assistant")
+            is_compacted = False
+        else:
+            content_html, is_compacted = render_user_message_content(text_only_content)
+            if is_compacted:
+                css_class = f"{message_type} compacted"
+                message_type = "🤖 User (compacted conversation)"
+    else:
+        # Non-user messages: render directly
+        content_html = render_message_content(text_only_content, message_type)
+        is_compacted = False
 
     if is_sidechain:
-        css_class = f"{message_type} sidechain"
+        css_class = f"{css_class} sidechain"
         # Update message type for display
-        message_type = (
-            "📝 Sub-assistant prompt" if message_type == "user" else "🔗 Sub-assistant"
-        )
+        if not is_compacted:  # Don't override compacted message type
+            message_type = (
+                "📝 Sub-assistant prompt"
+                if message_type == "user"
+                else "🔗 Sub-assistant"
+            )
 
     return css_class, content_html, message_type
 
@@ -1126,6 +1549,73 @@ def _get_combined_transcript_link(cache_manager: "CacheManager") -> Optional[str
         return None
     except Exception:
         return None
+
+
+def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
+    """Identify and mark paired messages (e.g., command + output, tool use + result).
+
+    Modifies messages in-place by setting is_paired and pair_role fields.
+    """
+    i = 0
+    while i < len(messages):
+        current = messages[i]
+
+        # Skip session headers
+        if current.is_session_header:
+            i += 1
+            continue
+
+        # Check for system command + command output pair
+        if current.css_class == "system" and i + 1 < len(messages):
+            next_msg = messages[i + 1]
+            if "command-output" in next_msg.css_class:
+                current.is_paired = True
+                current.pair_role = "pair_first"
+                next_msg.is_paired = True
+                next_msg.pair_role = "pair_last"
+                i += 2
+                continue
+
+        # Check for tool_use + tool_result pair (match by tool_use_id)
+        if "tool_use" in current.css_class and current.tool_use_id:
+            # Look ahead for matching tool_result
+            for j in range(
+                i + 1, min(i + 10, len(messages))
+            ):  # Look ahead up to 10 messages
+                next_msg = messages[j]
+                if (
+                    "tool_result" in next_msg.css_class
+                    and next_msg.tool_use_id == current.tool_use_id
+                ):
+                    current.is_paired = True
+                    current.pair_role = "pair_first"
+                    next_msg.is_paired = True
+                    next_msg.pair_role = "pair_last"
+                    break
+
+        # Check for bash-input + bash-output pair
+        if current.css_class == "bash-input" and i + 1 < len(messages):
+            next_msg = messages[i + 1]
+            if next_msg.css_class == "bash-output":
+                current.is_paired = True
+                current.pair_role = "pair_first"
+                next_msg.is_paired = True
+                next_msg.pair_role = "pair_last"
+                i += 2
+                continue
+
+        # Check for thinking + assistant pair
+        if "thinking" in current.css_class and i + 1 < len(messages):
+            next_msg = messages[i + 1]
+            if "assistant" in next_msg.css_class:
+                current.is_paired = True
+                current.pair_role = "pair_first"
+                next_msg.is_paired = True
+                next_msg.pair_role = "pair_last"
+                i += 2
+                continue
+
+        i += 1
 
 
 def generate_session_html(
@@ -1239,8 +1729,9 @@ def generate_html(
             level_icon = {"warning": "⚠️", "error": "❌", "info": "ℹ️"}.get(level, "ℹ️")
             level_css = f"system system-{level}"
 
-            escaped_content = escape_html(message.content)
-            content_html = f"<strong>{level_icon} System {level.title()}:</strong> {escaped_content}"
+            # Process ANSI codes in system messages (they may contain command output)
+            html_content = _convert_ansi_to_html(message.content)
+            content_html = f"<strong>{level_icon}</strong> {html_content}"
 
             system_template_message = TemplateMessage(
                 message_type=f"System {level.title()}",
@@ -1260,7 +1751,7 @@ def generate_html(
 
         # Separate tool/thinking/image content from text content
         tool_items: List[ContentItem] = []
-        text_only_content: Union[str, List[ContentItem]] = []
+        text_only_content: List[ContentItem] = []
 
         if isinstance(message_content, list):
             text_only_items: List[ContentItem] = []
@@ -1279,7 +1770,9 @@ def generate_html(
             text_only_content = text_only_items
         else:
             # Single string content
-            text_only_content = message_content
+            message_content = message_content.strip()
+            if message_content:
+                text_only_content = [TextContent(type="text", text=message_content)]
 
         # Skip if no meaningful content
         if not text_content.strip() and not tool_items:
@@ -1447,12 +1940,7 @@ def generate_html(
             )
 
         # Create main message (if it has text content)
-        if text_only_content and (
-            isinstance(text_only_content, str)
-            and text_only_content.strip()
-            or isinstance(text_only_content, list)
-            and text_only_content
-        ):
+        if text_only_content:
             template_message = TemplateMessage(
                 message_type=message_type,
                 content_html=content_html,
@@ -1474,6 +1962,8 @@ def generate_html(
 
             # Handle both custom types and Anthropic types
             item_type = getattr(tool_item, "type", None)
+            item_tool_use_id: Optional[str] = None
+            tool_title_hint: Optional[str] = None
 
             if isinstance(tool_item, ToolUseContent) or item_type == "tool_use":
                 # Convert Anthropic type to our format if necessary
@@ -1490,10 +1980,13 @@ def generate_html(
                 tool_content_html = format_tool_use_content(tool_use_converted)
                 escaped_name = escape_html(tool_use_converted.name)
                 escaped_id = escape_html(tool_use_converted.id)
+                item_tool_use_id = tool_use_converted.id
+                tool_title_hint = f"ID: {escaped_id}"
+                # Use simplified display names without "Tool Use:" prefix
                 if tool_use_converted.name == "TodoWrite":
-                    tool_message_type = f"📝 Todo List (ID: {escaped_id})"
+                    tool_message_type = "📝 Todo List"
                 else:
-                    tool_message_type = f"Tool Use: {escaped_name} (ID: {escaped_id})"
+                    tool_message_type = escaped_name
                 tool_css_class = "tool_use"
             elif isinstance(tool_item, ToolResultContent) or item_type == "tool_result":
                 # Convert Anthropic type to our format if necessary
@@ -1509,11 +2002,16 @@ def generate_html(
 
                 tool_content_html = format_tool_result_content(tool_result_converted)
                 escaped_id = escape_html(tool_result_converted.tool_use_id)
-                error_indicator = (
-                    " (🚨 Error)" if tool_result_converted.is_error else ""
+                item_tool_use_id = tool_result_converted.tool_use_id
+                tool_title_hint = f"ID: {escaped_id}"
+                # Simplified: no "Tool Result" heading, just show error indicator if present
+                error_indicator = "🚨 Error" if tool_result_converted.is_error else ""
+                tool_message_type = error_indicator if error_indicator else ""
+                tool_css_class = (
+                    "tool_result error"
+                    if tool_result_converted.is_error
+                    else "tool_result"
                 )
-                tool_message_type = f"Tool Result{error_indicator}: {escaped_id}"
-                tool_css_class = "tool_result"
             elif isinstance(tool_item, ThinkingContent) or item_type == "thinking":
                 # Convert Anthropic type to our format if necessary
                 if not isinstance(tool_item, ThinkingContent):
@@ -1556,6 +2054,8 @@ def generate_html(
                 raw_timestamp=tool_timestamp,
                 session_summary=session_summary,
                 session_id=session_id,
+                tool_use_id=item_tool_use_id,
+                title_hint=tool_title_hint,
             )
             template_messages.append(tool_template_message)
 
@@ -1611,6 +2111,9 @@ def generate_html(
                 "token_summary": token_summary,
             }
         )
+
+    # Identify and mark paired messages (command+output, tool_use+tool_result, etc.)
+    _identify_message_pairs(template_messages)
 
     # Render template
     env = _get_template_environment()
