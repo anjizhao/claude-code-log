@@ -156,7 +156,13 @@ def load_transcript(
 
                     entry_type: str | None = entry_dict.get("type")
 
-                    if entry_type in ["user", "assistant", "summary", "system"]:
+                    if entry_type in [
+                        "user",
+                        "assistant",
+                        "summary",
+                        "system",
+                        "queue-operation",
+                    ]:
                         # Parse using Pydantic models
                         entry = parse_transcript_entry(entry_dict)
                         messages.append(entry)

@@ -225,11 +225,26 @@ class SystemTranscriptEntry(BaseTranscriptEntry):
     level: Optional[str] = None  # e.g., "warning", "info", "error"
 
 
+class QueueOperationTranscriptEntry(BaseModel):
+    """Queue operations (enqueue/dequeue) for message queueing tracking.
+
+    These are internal operations that track when messages are queued and dequeued.
+    They are parsed but not rendered, as the content duplicates actual user messages.
+    """
+
+    type: Literal["queue-operation"]
+    operation: Literal["enqueue", "dequeue"]
+    timestamp: str
+    sessionId: str
+    content: Optional[List[ContentItem]] = None  # Only present for enqueue operations
+
+
 TranscriptEntry = Union[
     UserTranscriptEntry,
     AssistantTranscriptEntry,
     SummaryTranscriptEntry,
     SystemTranscriptEntry,
+    QueueOperationTranscriptEntry,
 ]
 
 
@@ -397,6 +412,13 @@ def parse_transcript_entry(data: Dict[str, Any]) -> TranscriptEntry:
 
     elif entry_type == "system":
         return SystemTranscriptEntry.model_validate(data)
+
+    elif entry_type == "queue-operation":
+        # Parse content if present (only in enqueue operations)
+        data_copy = data.copy()
+        if "content" in data_copy and isinstance(data_copy["content"], list):
+            data_copy["content"] = parse_message_content(data_copy["content"])
+        return QueueOperationTranscriptEntry.model_validate(data_copy)
 
     else:
         raise ValueError(f"Unknown transcript entry type: {entry_type}")

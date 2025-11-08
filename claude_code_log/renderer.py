@@ -20,6 +20,7 @@ from .models import (
     TranscriptEntry,
     SummaryTranscriptEntry,
     SystemTranscriptEntry,
+    QueueOperationTranscriptEntry,
     ContentItem,
     TextContent,
     ToolResultContent,
@@ -2363,6 +2364,10 @@ def generate_html(
 
         # Skip summary messages - they should already be attached to their sessions
         if isinstance(message, SummaryTranscriptEntry):
+            continue
+
+        # Skip queue-operation messages - they duplicate user messages
+        if isinstance(message, QueueOperationTranscriptEntry):
             continue
 
         # Handle system messages separately
