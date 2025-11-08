@@ -745,7 +745,7 @@ class TestSessionBrowser:
                 app_wide.update_stats()
 
                 stats = cast(Label, app_wide.query_one("#stats"))
-                stats_text = str(stats.renderable)
+                stats_text = str(stats.content)
 
                 # Wide terminal should display project and session info
                 assert "Project:" in stats_text
@@ -773,7 +773,7 @@ class TestSessionBrowser:
                 app_narrow.update_stats()
 
                 stats = cast(Label, app_narrow.query_one("#stats"))
-                stats_text = str(stats.renderable)
+                stats_text = str(stats.content)
 
                 # Narrow terminal should also display project and session info
                 assert "Project:" in stats_text
@@ -880,11 +880,7 @@ class TestIntegration:
 
                 # Check that stats are updated
                 stats = cast(Label, app.query_one("#stats"))
-                stats_text = (
-                    str(stats.renderable)
-                    if hasattr(stats.renderable, "__str__")
-                    else str(stats.renderable)
-                )
+                stats_text = str(stats.content)
                 assert "Project:" in stats_text
 
     @pytest.mark.asyncio
@@ -909,9 +905,5 @@ class TestIntegration:
 
                 # Stats should show zero sessions
                 stats = cast(Label, app.query_one("#stats"))
-                stats_text = (
-                    str(stats.renderable)
-                    if hasattr(stats.renderable, "__str__")
-                    else str(stats.renderable)
-                )
+                stats_text = str(stats.content)
                 assert "Sessions:[/bold] 0" in stats_text
