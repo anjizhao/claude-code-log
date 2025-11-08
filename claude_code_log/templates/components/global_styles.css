@@ -56,6 +56,16 @@ h1 {
 }
 
 /* Common typography */
+
+code {
+    background-color: var(--code-bg-color);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: var(--font-monospace);
+    line-height: 1.5;
+}
+
+
 pre {
     background-color: #12121212;
     padding: 10px;
@@ -94,6 +104,22 @@ pre {
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
+}
+
+.header > span:first-child {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Tool summary in header */
+.tool-summary {
+    font-weight: normal;
+    color: var(--text-muted);
+    font-size: 0.95em;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    display: inline;
 }
 
 /* Timestamps */

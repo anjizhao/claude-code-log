@@ -16,6 +16,7 @@
 {% include 'components/timeline_styles.css' %}
 {% include 'components/search_styles.css' %}
 {% include 'components/edit_diff_styles.css' %}
+{% include 'components/pygments_styles.css' %}
     </style>
 </head>
 
@@ -80,20 +81,27 @@
 
     </div>
     {% else %}
+    {% set markdown = message.css_class in ['assistant', 'thinking', 'sidechain'] or (message.css_class and 'compacted' in message.css_class) %}
     <div class='message {{ message.css_class }}{% if message.is_paired %} paired-message {{ message.pair_role }}{% endif %}'>
         <div class='header'>
-            <span{% if message.title_hint %} title="{{ message.title_hint }}"{% endif %}>{% if message.display_type %}{% if message.css_class == 'user' %}🤷 {% elif message.css_class == 'assistant' %}🤖 {% elif
-                message.css_class == 'system' %}⚙️ {% elif message.css_class == 'tool_use' %}🛠️ {% elif
-                message.css_class == 'tool_result' %}🧰 {% elif message.css_class == 'thinking' %}💭 {% elif
-                message.css_class == 'image' %}🖼️ {% endif %}{{ message.display_type }}{% endif %}</span>
-            <div style='display: flex; flex-direction: column; align-items: flex-end; gap: 2px;'>
-                <span class='timestamp'{% if message.raw_timestamp %} data-timestamp='{{ message.raw_timestamp }}'{% endif %}>{{ message.formatted_timestamp }}</span>
+            <span{% if message.title_hint %} title="{{ message.title_hint }}"{% endif %}>{% if message.message_title %}{%
+                if message.css_class == 'user' %}🤷 {%
+                elif message.css_class == 'assistant' %}🤖 {%
+                elif message.css_class == 'system' %}⚙️ {%
+                elif message.css_class == 'tool_use' and not starts_with_emoji(message.message_title) %}🛠️ {%
+                elif message.css_class == 'tool_result' %}🧰 {%
+                elif message.css_class == 'thinking' %}💭 {%
+                elif message.css_class == 'image' %}🖼️ {% endif %}{{ message.message_title | safe }}{% endif %}</span>
+            <div class='header-info'>
+                <div class='timestamp-row'>
+                    <span class='timestamp'{% if message.raw_timestamp %} data-timestamp='{{ message.raw_timestamp }}'{% if message.pair_duration %} data-duration='{{ message.pair_duration }}'{% endif %}{% endif %}>{{ message.formatted_timestamp }}</span>
+                </div>
                 {% if message.token_usage %}
-                <span class='token-usage' style='font-size: 0.75em; color: #888;'>{{ message.token_usage }}</span>
+                <span class='token-usage'>{{ message.token_usage }}</span>
                 {% endif %}
             </div>
         </div>
-        <div class='content'>{{ message.content_html | safe }}</div>
+        <div class='content{% if markdown %} markdown{% endif %}'>{{ message.content_html | safe }}</div>
     </div>
     {% endif %}
     {% endfor %}
