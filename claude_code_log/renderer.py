@@ -2,6 +2,7 @@
 """Render Claude transcript data to HTML format."""
 
 import json
+import re
 from pathlib import Path
 from typing import List, Optional, Dict, Any, cast, TYPE_CHECKING
 
@@ -19,7 +20,6 @@ from pygments.util import ClassNotFound  # type: ignore[reportUnknownVariableTyp
 from .models import (
     TranscriptEntry,
     SummaryTranscriptEntry,
-    SystemTranscriptEntry,
     QueueOperationTranscriptEntry,
     ContentItem,
     TextContent,
@@ -716,6 +716,24 @@ def _render_line_diff(old_line: str, new_line: str) -> str:
     return "".join(old_parts) + "".join(new_parts)
 
 
+def format_task_tool_content(tool_use: ToolUseContent) -> str:
+    """Format Task tool content with markdown-rendered prompt.
+
+    Task tool spawns sub-agents. We render the prompt as the main content
+    (like it would appear in the "Sub-assistant prompt" message).
+    """
+    prompt = tool_use.input.get("prompt", "")
+
+    if not prompt:
+        # No prompt, show parameters table as fallback
+        return render_params_table(tool_use.input)
+
+    # Render prompt as markdown with Pygments syntax highlighting
+    rendered_html = render_markdown(prompt)
+
+    return f'<div class="task-prompt markdown">{rendered_html}</div>'
+
+
 def get_tool_summary(tool_use: ToolUseContent) -> Optional[str]:
     """Extract a one-line summary from tool parameters for display in header.
 
@@ -734,6 +752,12 @@ def get_tool_summary(tool_use: ToolUseContent) -> Optional[str]:
         file_path = params.get("file_path")
         if file_path:
             return file_path
+
+    elif tool_name == "Task":
+        # Return description if present
+        description = params.get("description")
+        if description:
+            return description
 
     # No summary for other tools
     return None
@@ -764,6 +788,10 @@ def format_tool_use_content(tool_use: ToolUseContent) -> str:
     # Special handling for Write
     if tool_use.name == "Write":
         return format_write_tool_content(tool_use)
+
+    # Special handling for Task (agent spawning)
+    if tool_use.name == "Task":
+        return format_task_tool_content(tool_use)
 
     # Default: render as key/value table using shared renderer
     return render_params_table(tool_use.input)
@@ -889,7 +917,7 @@ def format_tool_result_content(
     Args:
         tool_result: The tool result content
         file_path: Optional file path for context (used for Read/Edit/Write tool rendering)
-        tool_name: Optional tool name for specialized rendering (e.g., "Write", "Read", "Edit")
+        tool_name: Optional tool name for specialized rendering (e.g., "Write", "Read", "Edit", "Task")
     """
     # Handle both string and structured content
     if isinstance(tool_result.content, str):
@@ -1030,6 +1058,12 @@ def format_tool_result_content(
 
             result_parts.append("</div>")
             return "".join(result_parts)
+
+    # Special handling for Task tool: render result as markdown with Pygments (agent's final message)
+    # Deduplication is now handled retroactively by replacing the sub-assistant content
+    if tool_name == "Task" and not has_images:
+        rendered_html = render_markdown(raw_content)
+        return f'<div class="task-result markdown">{rendered_html}</div>'
 
     # Check if this looks like Bash tool output and process ANSI codes
     # Bash tool results often contain ANSI escape sequences and terminal output
@@ -1255,11 +1289,13 @@ def extract_ide_notifications(text: str) -> tuple[List[str], str]:
     return notifications, remaining_text.strip()
 
 
-def render_user_message_content(content_list: List[ContentItem]) -> tuple[str, bool]:
+def render_user_message_content(
+    content_list: List[ContentItem],
+) -> tuple[str, bool, bool]:
     """Render user message content with IDE tag extraction and compacted summary handling.
 
     Returns:
-        A tuple of (content_html, is_compacted)
+        A tuple of (content_html, is_compacted, is_memory_input)
     """
     # Check first text item
     if content_list and hasattr(content_list[0], "text"):
@@ -1270,7 +1306,22 @@ def render_user_message_content(content_list: List[ContentItem]) -> tuple[str, b
             # Render entire content as markdown for compacted summaries
             # Use "assistant" to trigger markdown rendering instead of pre-formatted text
             content_html = render_message_content(content_list, "assistant")
-            return content_html, True
+            return content_html, True, False
+
+        # Check for user memory input
+        memory_match = re.search(
+            r"<user-memory-input>(.*?)</user-memory-input>",
+            first_text,
+            re.DOTALL,
+        )
+        if memory_match:
+            memory_content = memory_match.group(1).strip()
+            # Render the memory content as user message
+            memory_content_list: List[ContentItem] = [
+                TextContent(type="text", text=memory_content)
+            ]
+            content_html = render_message_content(memory_content_list, "user")
+            return content_html, False, True
 
         # Extract IDE notifications from first text item
         ide_notifications_html, remaining_text = extract_ide_notifications(first_text)
@@ -1293,7 +1344,7 @@ def render_user_message_content(content_list: List[ContentItem]) -> tuple[str, b
         # No text in first item or empty list, render normally
         content_html = render_message_content(content_list, "user")
 
-    return content_html, False
+    return content_html, False, False
 
 
 def render_message_content(content: List[ContentItem], message_type: str) -> str:
@@ -1391,6 +1442,82 @@ def _get_template_environment() -> Environment:
     return env
 
 
+def _format_type_counts(type_counts: dict[str, int]) -> str:
+    """Format type counts into human-readable label.
+
+    Args:
+        type_counts: Dictionary of message type to count
+
+    Returns:
+        Human-readable label like "3 assistant, 4 tools" or "8 messages"
+
+    Examples:
+        {"assistant": 3, "tool_use": 4} -> "3 assistant, 4 tools"
+        {"tool_use": 2, "tool_result": 2} -> "2 tool pairs"
+        {"assistant": 1} -> "1 assistant"
+        {"thinking": 3} -> "3 thoughts"
+    """
+    if not type_counts:
+        return "0 messages"
+
+    # Type name mapping for better readability
+    type_labels = {
+        "assistant": ("assistant", "assistants"),
+        "user": ("user", "users"),
+        "tool_use": ("tool", "tools"),
+        "tool_result": ("result", "results"),
+        "thinking": ("thought", "thoughts"),
+        "system": ("system", "systems"),
+        "system-warning": ("warning", "warnings"),
+        "system-error": ("error", "errors"),
+        "system-info": ("info", "infos"),
+        "sidechain": ("task", "tasks"),
+    }
+
+    # Handle special case: tool_use and tool_result together = "tool pairs"
+    # Create a modified counts dict that combines tool pairs
+    modified_counts = dict(type_counts)
+    if (
+        "tool_use" in modified_counts
+        and "tool_result" in modified_counts
+        and modified_counts["tool_use"] == modified_counts["tool_result"]
+    ):
+        # Replace tool_use and tool_result with tool_pair
+        pair_count = modified_counts["tool_use"]
+        del modified_counts["tool_use"]
+        del modified_counts["tool_result"]
+        modified_counts["tool_pair"] = pair_count
+
+    # Add tool_pair label
+    type_labels_with_pairs = {
+        **type_labels,
+        "tool_pair": ("tool pair", "tool pairs"),
+    }
+
+    # Build label parts
+    parts: list[str] = []
+    for msg_type, count in sorted(
+        modified_counts.items(), key=lambda x: x[1], reverse=True
+    ):
+        singular, plural = type_labels_with_pairs.get(
+            msg_type, (msg_type, f"{msg_type}s")
+        )
+        label = singular if count == 1 else plural
+        parts.append(f"{count} {label}")
+
+    # Return combined label
+    if len(parts) == 1:
+        return parts[0]
+    elif len(parts) == 2:
+        return f"{parts[0]}, {parts[1]}"
+    else:
+        # For 3+ types, show top 2 and "X more"
+        remaining = sum(type_counts.values()) - sum(
+            type_counts[t] for t in list(type_counts.keys())[:2]
+        )
+        return f"{parts[0]}, {parts[1]}, {remaining} more"
+
+
 class TemplateMessage:
     """Structured message data for template rendering."""
 
@@ -1409,6 +1536,11 @@ class TemplateMessage:
         title_hint: Optional[str] = None,
         has_markdown: bool = False,
         message_title: Optional[str] = None,
+        message_id: Optional[str] = None,
+        ancestry: Optional[List[str]] = None,
+        has_children: bool = False,
+        uuid: Optional[str] = None,
+        parent_uuid: Optional[str] = None,
     ):
         self.type = message_type
         self.content_html = content_html
@@ -1426,11 +1558,32 @@ class TemplateMessage:
         self.token_usage = token_usage
         self.tool_use_id = tool_use_id
         self.title_hint = title_hint
+        self.message_id = message_id
+        self.ancestry = ancestry or []
+        self.has_children = has_children
         self.has_markdown = has_markdown
+        self.uuid = uuid
+        self.parent_uuid = parent_uuid
+        # Fold/unfold counts
+        self.immediate_children_count = 0  # Direct children only
+        self.total_descendants_count = 0  # All descendants recursively
+        # Type-aware counting for smarter labels
+        self.immediate_children_by_type: dict[
+            str, int
+        ] = {}  # {"assistant": 2, "tool_use": 3}
+        self.total_descendants_by_type: dict[str, int] = {}  # All descendants by type
         # Pairing metadata
         self.is_paired = False
         self.pair_role: Optional[str] = None  # "pair_first", "pair_last", "pair_middle"
         self.pair_duration: Optional[str] = None  # Duration for pair_last messages
+
+    def get_immediate_children_label(self) -> str:
+        """Generate human-readable label for immediate children."""
+        return _format_type_counts(self.immediate_children_by_type)
+
+    def get_total_descendants_label(self) -> str:
+        """Generate human-readable label for all descendants."""
+        return _format_type_counts(self.total_descendants_by_type)
 
 
 class TemplateProject:
@@ -1986,11 +2139,16 @@ def _process_regular_message(
         if is_sidechain:
             content_html = render_message_content(text_only_content, "assistant")
             is_compacted = False
+            is_memory_input = False
         else:
-            content_html, is_compacted = render_user_message_content(text_only_content)
+            content_html, is_compacted, is_memory_input = render_user_message_content(
+                text_only_content
+            )
             if is_compacted:
                 css_class = f"{message_type} compacted"
                 message_title = "User (compacted conversation)"
+            elif is_memory_input:
+                message_title = "Memory"
     else:
         # Non-user messages: render directly
         content_html = render_message_content(text_only_content, message_type)
@@ -2027,12 +2185,14 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
 
     Uses a two-pass algorithm:
     1. First pass: Build index of tool_use_id -> message index for tool_use and tool_result
+                   Build index of uuid -> message index for parent-child system messages
     2. Second pass: Sequential scan for adjacent pairs (system+output, bash, thinking+assistant)
-                   and match tool_use/tool_result using the index
+                   and match tool_use/tool_result and uuid-based pairs using the index
     """
     # Pass 1: Build index of tool_use messages and tool_result messages by tool_use_id
     tool_use_index: Dict[str, int] = {}  # tool_use_id -> message index
     tool_result_index: Dict[str, int] = {}  # tool_use_id -> message index
+    uuid_index: Dict[str, int] = {}  # uuid -> message index for parent-child pairing
 
     for i, msg in enumerate(messages):
         if msg.tool_use_id:
@@ -2040,6 +2200,9 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
                 tool_use_index[msg.tool_use_id] = i
             elif "tool_result" in msg.css_class:
                 tool_result_index[msg.tool_use_id] = i
+        # Build UUID index for system messages (both parent and child)
+        if msg.uuid and "system" in msg.css_class:
+            uuid_index[msg.uuid] = i
 
     # Pass 2: Sequential scan to identify pairs
     i = 0
@@ -2071,6 +2234,16 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
                 current.pair_role = "pair_first"
                 result_msg.is_paired = True
                 result_msg.pair_role = "pair_last"
+
+        # Check for UUID-based parent-child system message pair (no distance limit)
+        if "system" in current.css_class and current.parent_uuid:
+            if current.parent_uuid in uuid_index:
+                parent_idx = uuid_index[current.parent_uuid]
+                parent_msg = messages[parent_idx]
+                parent_msg.is_paired = True
+                parent_msg.pair_role = "pair_first"
+                current.is_paired = True
+                current.pair_role = "pair_last"
 
         # Check for bash-input + bash-output pair (adjacent only)
         if current.css_class == "bash-input" and i + 1 < len(messages):
@@ -2200,6 +2373,144 @@ def generate_session_html(
     )
 
 
+def _get_message_hierarchy_level(css_class: str, is_sidechain: bool) -> int:
+    """Determine the hierarchy level for a message based on its type and sidechain status.
+
+    Correct hierarchy based on logical nesting:
+    - Level 0: Session headers
+    - Level 1: User messages
+    - Level 2: System messages, Assistant, Thinking
+    - Level 3: Tool use/result (nested under assistant), Sidechain user (sub-assistant prompt)
+    - Level 4: Sidechain assistant/thinking (nested under sidechain user)
+    - Level 5: Sidechain tools (nested under sidechain assistant)
+
+    Returns:
+        Integer hierarchy level (1-5, session headers are 0)
+    """
+    # User messages at level 1 (under session)
+    if "user" in css_class and not is_sidechain:
+        return 1
+
+    # System messages at level 2 (siblings to assistant, under user)
+    if "system" in css_class and not is_sidechain:
+        return 2
+
+    # Sidechain user (sub-assistant prompt) at level 3 (conceptually under Tool use that spawned it)
+    if is_sidechain and "user" in css_class:
+        return 3
+
+    # Sidechain assistant/thinking at level 4
+    if is_sidechain and ("assistant" in css_class or "thinking" in css_class):
+        return 4
+
+    # Sidechain tools at level 5
+    if is_sidechain and ("tool" in css_class):
+        return 5
+
+    # Main assistant/thinking at level 2 (nested under user)
+    if "assistant" in css_class or "thinking" in css_class:
+        return 2
+
+    # Main tools at level 3 (nested under assistant)
+    if "tool" in css_class:
+        return 3
+
+    # Default to level 1
+    return 1
+
+
+def _update_hierarchy_stack(
+    hierarchy_stack: List[tuple[int, str]],
+    current_level: int,
+    message_id_counter: int,
+) -> tuple[str, List[str], int]:
+    """Update the hierarchy stack and return message ID and ancestry.
+
+    Args:
+        hierarchy_stack: Current stack of (level, message_id) tuples
+        current_level: Hierarchy level of the current message
+        message_id_counter: Current message ID counter
+
+    Returns:
+        Tuple of (message_id, ancestry, updated_counter)
+        - message_id: Unique ID for this message (e.g., "d-42")
+        - ancestry: List of ancestor message IDs (e.g., ["d-10", "d-23", "d-35"])
+        - updated_counter: Incremented message ID counter
+    """
+    # Pop stack until we find the appropriate parent level
+    # The parent is the last message at a level strictly less than current_level
+    while hierarchy_stack and hierarchy_stack[-1][0] >= current_level:
+        hierarchy_stack.pop()
+
+    # Build ancestry from remaining stack
+    ancestry = [msg_id for _, msg_id in hierarchy_stack]
+
+    # Generate new message ID
+    message_id = f"d-{message_id_counter}"
+    message_id_counter += 1
+
+    # Push current message onto stack (it could be a parent for future messages)
+    hierarchy_stack.append((current_level, message_id))
+
+    return (message_id, ancestry, message_id_counter)
+
+
+def _mark_messages_with_children(messages: List[TemplateMessage]) -> None:
+    """Mark messages that have children and calculate descendant counts.
+
+    Efficiently calculates:
+    - has_children: Whether message has any children
+    - immediate_children_count: Count of direct children only
+    - total_descendants_count: Count of all descendants recursively
+
+    Time complexity: O(n) where n is the number of messages.
+
+    Args:
+        messages: List of template messages to process
+    """
+    # Build index of messages by ID for O(1) lookup
+    message_by_id: dict[str, TemplateMessage] = {}
+    for message in messages:
+        if message.message_id:
+            message_by_id[message.message_id] = message
+
+    # Process each message and update counts for ancestors
+    for message in messages:
+        if not message.ancestry:
+            continue  # Top-level message, no parents
+
+        # Skip counting pair_last messages (second in a pair)
+        # Pairs are visually presented as a single unit, so we only count the first
+        if message.is_paired and message.pair_role == "pair_last":
+            continue
+
+        # Get immediate parent (last in ancestry list)
+        immediate_parent_id = message.ancestry[-1]
+
+        # Get message type for categorization
+        msg_type = message.css_class or message.type
+
+        # Increment immediate parent's child count
+        if immediate_parent_id in message_by_id:
+            parent = message_by_id[immediate_parent_id]
+            parent.immediate_children_count += 1
+            parent.has_children = True
+            # Track by type
+            parent.immediate_children_by_type[msg_type] = (
+                parent.immediate_children_by_type.get(msg_type, 0) + 1
+            )
+
+        # Increment descendant count for ALL ancestors
+        for ancestor_id in message.ancestry:
+            if ancestor_id in message_by_id:
+                ancestor = message_by_id[ancestor_id]
+                ancestor.total_descendants_count += 1
+                # Track by type
+                ancestor.total_descendants_by_type[msg_type] = (
+                    ancestor.total_descendants_by_type.get(msg_type, 0) + 1
+                )
+
+
 def generate_html(
     messages: List[TranscriptEntry],
     title: Optional[str] = None,
@@ -2209,82 +2520,33 @@ def generate_html(
     if not title:
         title = "Claude Transcript"
 
-    # Deduplicate messages caused by Claude Code version upgrade during session
-    # Only deduplicate when same message.id appears with DIFFERENT versions
-    # Streaming fragments (same message.id, same version) are kept as separate messages
-    from claude_code_log.models import AssistantTranscriptEntry, UserTranscriptEntry
-    from packaging.version import parse as parse_version
-    from collections import defaultdict
+    # Deduplicate messages by (message_type, timestamp)
+    # Messages with the exact same timestamp are duplicates by definition -
+    # the differences (like IDE selection tags) are just logging artifacts
+    from claude_code_log.models import AssistantTranscriptEntry, SystemTranscriptEntry
 
-    # Group messages by their unique identifier
-    message_groups: Dict[str, List[tuple[int, str, TranscriptEntry]]] = defaultdict(
-        list
-    )
-
-    for idx, message in enumerate(messages):
-        unique_id = None
-        version_str = getattr(message, "version", "0.0.0")
-
-        # Determine unique identifier based on message type
-        if isinstance(message, AssistantTranscriptEntry):
-            # Assistant messages: use message.id
-            if hasattr(message.message, "id"):
-                unique_id = f"msg:{message.message.id}"  # type: ignore
-
-        elif isinstance(message, UserTranscriptEntry):
-            # User messages (tool results): use tool_use_id
-            if hasattr(message, "message") and message.message.content:
-                for item in message.message.content:
-                    if hasattr(item, "tool_use_id"):
-                        unique_id = f"tool:{item.tool_use_id}"  # type: ignore
-                        break
-
-        if unique_id:
-            message_groups[unique_id].append((idx, version_str, message))
-
-    # Determine which indices to keep
-    indices_to_keep: set[int] = set()
-
-    for unique_id, group in message_groups.items():
-        if len(group) == 1:
-            # Single message, always keep
-            indices_to_keep.add(group[0][0])
-        else:
-            # Multiple messages with same ID - check if they have different versions
-            versions = {version_str for _, version_str, _ in group}
-
-            if len(versions) == 1:
-                # All same version = streaming fragments, keep ALL of them
-                for idx, _, _ in group:
-                    indices_to_keep.add(idx)
-            else:
-                # Different versions = version duplicates, keep only highest version
-                try:
-                    # Sort by semantic version, keep highest
-                    sorted_group = sorted(
-                        group, key=lambda x: parse_version(x[1]), reverse=True
-                    )
-                    indices_to_keep.add(sorted_group[0][0])
-                except Exception:
-                    # If version parsing fails, keep first occurrence
-                    indices_to_keep.add(group[0][0])
-
-    # Build deduplicated list
+    # Track seen (message_type, timestamp) pairs
+    seen: set[tuple[str, str]] = set()
     deduplicated_messages: List[TranscriptEntry] = []
 
-    for idx, message in enumerate(messages):
-        # Check if this message has a unique ID
-        has_unique_id = False
-        if isinstance(message, AssistantTranscriptEntry):
-            has_unique_id = hasattr(message.message, "id")
-        elif isinstance(message, UserTranscriptEntry):
-            if hasattr(message, "message") and message.message.content:
-                has_unique_id = any(
-                    hasattr(item, "tool_use_id") for item in message.message.content
-                )
+    for message in messages:
+        # Get basic message type
+        message_type = getattr(message, "type", "unknown")
 
-        # Keep message if: no unique ID (e.g., queue-operation) OR in keep set
-        if not has_unique_id or idx in indices_to_keep:
+        # For system messages, include level to differentiate info/warning/error
+        if isinstance(message, SystemTranscriptEntry):
+            level = getattr(message, "level", "info")
+            message_type = f"system-{level}"
+
+        # Get timestamp
+        timestamp = getattr(message, "timestamp", "")
+
+        # Create deduplication key
+        dedup_key = (message_type, timestamp)
+
+        # Keep only first occurrence
+        if dedup_key not in seen:
+            seen.add(dedup_key)
             deduplicated_messages.append(message)
 
     messages = deduplicated_messages
@@ -2351,13 +2613,34 @@ def generate_html(
                             tool_name = getattr(item, "name", "")  # type: ignore[reportUnknownArgumentType]
                             tool_input = getattr(item, "input", {})  # type: ignore[reportUnknownArgumentType]
                             if tool_id:
-                                tool_use_context[tool_id] = {
+                                tool_ctx: Dict[str, Any] = {
                                     "name": tool_name,
                                     "input": tool_input,
                                 }
+                                # For Task tools, store the prompt for comparison
+                                if tool_name == "Task" and isinstance(tool_input, dict):
+                                    prompt_value = tool_input.get("prompt", "")  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+                                    tool_ctx["prompt"] = (
+                                        prompt_value
+                                        if isinstance(prompt_value, str)
+                                        else ""
+                                    )
+                                tool_use_context[tool_id] = tool_ctx
 
     # Process messages into template-friendly format
     template_messages: List[TemplateMessage] = []
+
+    # Hierarchy tracking for message folding
+    # Stack of (level, message_id) tuples representing current nesting
+    hierarchy_stack: List[tuple[int, str]] = []
+    message_id_counter = 0
+
+    # UUID to message ID mapping for parent-child relationships
+    uuid_to_msg_id: Dict[str, str] = {}
+
+    # Track Task results and sidechain assistants for deduplication
+    # Maps raw content -> (template_messages index, message_id, type: "task" or "assistant")
+    content_map: Dict[str, tuple[int, str, str]] = {}
 
     for message in messages:
         message_type = message.type
@@ -2376,14 +2659,83 @@ def generate_html(
             timestamp = getattr(message, "timestamp", "")
             formatted_timestamp = format_timestamp(timestamp) if timestamp else ""
 
+            # Extract command name if present
+            command_name_match = re.search(
+                r"<command-name>(.*?)</command-name>", message.content, re.DOTALL
+            )
+            # Also check for command output (child of user command)
+            command_output_match = re.search(
+                r"<local-command-stdout>(.*?)</local-command-stdout>",
+                message.content,
+                re.DOTALL,
+            )
+
             # Create level-specific styling and icons
             level = getattr(message, "level", "info")
             level_icon = {"warning": "⚠️", "error": "❌", "info": "ℹ️"}.get(level, "ℹ️")
-            level_css = f"system system-{level}"
 
-            # Process ANSI codes in system messages (they may contain command output)
-            html_content = _convert_ansi_to_html(message.content)
-            content_html = f"<strong>{level_icon}</strong> {html_content}"
+            # Determine CSS class:
+            # - Command name (user-initiated): "system" only
+            # - Command output (assistant response): "system system-{level}"
+            # - Other system messages: "system system-{level}"
+            if command_name_match:
+                # User-initiated command
+                level_css = "system"
+            else:
+                # Command output or other system message
+                level_css = f"system system-{level}"
+
+            # Process content: extract command name or command output, or use full content
+            if command_name_match:
+                # Show just the command name
+                command_name = command_name_match.group(1).strip()
+                html_content = f"<code>{html.escape(command_name)}</code>"
+                content_html = f"<strong>{level_icon}</strong> {html_content}"
+            elif command_output_match:
+                # Extract and process command output
+                output = command_output_match.group(1).strip()
+                html_content = _convert_ansi_to_html(output)
+                content_html = f"<strong>{level_icon}</strong> {html_content}"
+            else:
+                # Process ANSI codes in system messages (they may contain command output)
+                html_content = _convert_ansi_to_html(message.content)
+                content_html = f"<strong>{level_icon}</strong> {html_content}"
+
+            # Check if this message has a parent (for pairing system-info messages)
+            parent_uuid = getattr(message, "parentUuid", None)
+            is_sidechain = getattr(message, "isSidechain", False)
+
+            # Determine hierarchy: use parentUuid if available, otherwise use stack
+            if parent_uuid and parent_uuid in uuid_to_msg_id:
+                # This is a child message (e.g., command output following command invocation)
+                parent_msg_id = uuid_to_msg_id[parent_uuid]
+                # Find the parent's level in the stack
+                current_level: int
+                for idx, (stack_level, stack_msg_id) in enumerate(hierarchy_stack):
+                    if stack_msg_id == parent_msg_id:
+                        # Child is one level deeper than parent
+                        current_level = stack_level + 1
+                        # Update stack: keep parent, add child
+                        hierarchy_stack = hierarchy_stack[: idx + 1]
+                        break
+                else:
+                    # Parent not found in stack, use default
+                    current_level = _get_message_hierarchy_level(
+                        level_css, is_sidechain
+                    )
+
+                msg_id, ancestry, message_id_counter = _update_hierarchy_stack(
+                    hierarchy_stack, current_level, message_id_counter
+                )
+            else:
+                # No parent, use normal hierarchy determination
+                current_level = _get_message_hierarchy_level(level_css, is_sidechain)
+                msg_id, ancestry, message_id_counter = _update_hierarchy_stack(
+                    hierarchy_stack, current_level, message_id_counter
+                )
+
+            # Track this message's UUID for potential children
+            uuid_to_msg_id[message.uuid] = msg_id
 
             system_template_message = TemplateMessage(
                 message_type="system",
@@ -2393,6 +2745,10 @@ def generate_html(
                 raw_timestamp=timestamp,
                 session_id=session_id,
                 message_title=f"System {level.title()}",
+                message_id=msg_id,
+                ancestry=ancestry,
+                uuid=message.uuid,  # Store UUID for pairing
+                parent_uuid=parent_uuid,  # Store parent UUID for pairing
             )
             template_messages.append(system_template_message)
             continue
@@ -2403,6 +2759,7 @@ def generate_html(
         text_content = extract_text_content(message_content)
 
         # Separate tool/thinking/image content from text content
+        # Images in user messages stay inline, images in assistant messages are separate
         tool_items: List[ContentItem] = []
         text_only_content: List[ContentItem] = []
 
@@ -2411,12 +2768,16 @@ def generate_html(
             for item in message_content:
                 # Check for both custom types and Anthropic types
                 item_type = getattr(item, "type", None)
+                is_image = isinstance(item, ImageContent) or item_type == "image"
                 is_tool_item = isinstance(
                     item,
-                    (ToolUseContent, ToolResultContent, ThinkingContent, ImageContent),
-                ) or item_type in ("tool_use", "tool_result", "thinking", "image")
+                    (ToolUseContent, ToolResultContent, ThinkingContent),
+                ) or item_type in ("tool_use", "tool_result", "thinking")
 
-                if is_tool_item:
+                # Keep images inline for user messages, extract for assistant messages
+                if is_image and message_type == "user":
+                    text_only_items.append(item)
+                elif is_tool_item or is_image:
                     tool_items.append(item)
                 else:
                     text_only_items.append(item)
@@ -2484,6 +2845,11 @@ def generate_html(
                     else session_id[:8]
                 )
 
+                # Reset hierarchy stack for new session
+                hierarchy_stack.clear()
+
+                # Create session header with unique message ID so it can be a fold parent
+                session_message_id = f"session-{session_id}"
                 session_header = TemplateMessage(
                     message_type="session_header",
                     content_html=session_title,
@@ -2493,8 +2859,13 @@ def generate_html(
                     session_summary=current_session_summary,
                     session_id=session_id,
                     is_session_header=True,
+                    message_id=session_message_id,
+                    ancestry=[],  # Session headers are top-level
                 )
                 template_messages.append(session_header)
+
+                # Session header becomes the parent for all messages in this session
+                hierarchy_stack.append((0, session_message_id))
 
         # Update first user message if this is a user message and we don't have one yet
         elif message_type == "user" and not sessions[session_id]["first_user_message"]:
@@ -2600,8 +2971,17 @@ def generate_html(
                 )
             )
 
-        # Create main message (if it has text content)
+        # Only create main message if it has text content
+        # For assistant/thinking with only tools (no text), we don't create a container message
+        # The tools will be direct children of the current hierarchy level
         if text_only_content:
+            # Determine hierarchy level and update stack
+            is_sidechain = getattr(message, "isSidechain", False)
+            current_level = _get_message_hierarchy_level(css_class, is_sidechain)
+            msg_id, ancestry, message_id_counter = _update_hierarchy_stack(
+                hierarchy_stack, current_level, message_id_counter
+            )
+
             template_message = TemplateMessage(
                 message_type=message_type,
                 content_html=content_html,
@@ -2612,8 +2992,30 @@ def generate_html(
                 session_id=session_id,
                 token_usage=token_usage_str,
                 message_title=message_title,
+                message_id=msg_id,
+                ancestry=ancestry,
             )
             template_messages.append(template_message)
+
+            # Track sidechain assistant messages for deduplication
+            if message_type == "assistant" and is_sidechain and text_content.strip():
+                template_msg_index = len(template_messages) - 1
+                content_key = text_content.strip()
+
+                # Check if we already have a Task result with this content
+                if content_key in content_map:
+                    existing_index, existing_id, existing_type = content_map[
+                        content_key
+                    ]
+                    if existing_type == "task":
+                        # Found matching Task result - deduplicate this assistant message
+                        forward_link_html = f'<p><em>(Task summary — already displayed in <a href="#msg-{existing_id}-last">Task tool result above</a>)</em></p>'
+                        template_messages[
+                            template_msg_index
+                        ].content_html = forward_link_html
+                else:
+                    # Track this assistant in case we see a matching Task result later
+                    content_map[content_key] = (template_msg_index, msg_id, "assistant")
 
         # Create separate messages for each tool/thinking/image item
         for tool_item in tool_items:
@@ -2626,6 +3028,9 @@ def generate_html(
             item_type = getattr(tool_item, "type", None)
             item_tool_use_id: Optional[str] = None
             tool_title_hint: Optional[str] = None
+            pending_dedup: Optional[str] = (
+                None  # Holds task result content for deduplication
+            )
 
             if isinstance(tool_item, ToolUseContent) or item_type == "tool_use":
                 # Convert Anthropic type to our format if necessary
@@ -2652,6 +3057,24 @@ def generate_html(
                 tool_message_type = "tool_use"
                 if tool_use_converted.name == "TodoWrite":
                     tool_message_title = "📝 Todo List"
+                elif tool_use_converted.name == "Task":
+                    # Special handling for Task tool: show subagent_type and description
+                    subagent_type = tool_use_converted.input.get("subagent_type", "")
+                    description = tool_use_converted.input.get("description", "")
+                    escaped_subagent = (
+                        escape_html(subagent_type) if subagent_type else ""
+                    )
+
+                    if description and subagent_type:
+                        escaped_desc = escape_html(description)
+                        tool_message_title = f"🔧 {escaped_name} <span class='tool-summary'>{escaped_desc}</span> <span class='tool-subagent'>({escaped_subagent})</span>"
+                    elif description:
+                        escaped_desc = escape_html(description)
+                        tool_message_title = f"🔧 {escaped_name} <span class='tool-summary'>{escaped_desc}</span>"
+                    elif subagent_type:
+                        tool_message_title = f"🔧 {escaped_name} <span class='tool-subagent'>({escaped_subagent})</span>"
+                    else:
+                        tool_message_title = f"🔧 {escaped_name}"
                 elif tool_use_converted.name in ("Edit", "Write"):
                     # Use 📝 icon for Edit/Write
                     if summary:
@@ -2699,8 +3122,32 @@ def generate_html(
                         result_file_path = tool_ctx["input"]["file_path"]
 
                 tool_content_html = format_tool_result_content(
-                    tool_result_converted, result_file_path, result_tool_name
+                    tool_result_converted,
+                    result_file_path,
+                    result_tool_name,
                 )
+
+                # Retroactive deduplication: if Task result matches a sidechain assistant, replace that assistant with a forward link
+                if result_tool_name == "Task":
+                    # Extract text content from tool result
+                    # Note: tool_result.content can be str or List[Dict[str, Any]] (not List[ContentItem])
+                    if isinstance(tool_result_converted.content, str):
+                        task_result_content = tool_result_converted.content.strip()
+                    else:
+                        # Handle list of dicts (tool result format)
+                        content_parts: list[str] = []
+                        for item in tool_result_converted.content:
+                            # tool_result_converted.content is List[Dict[str, Any]]
+                            text_val = item.get("text", "")
+                            if isinstance(text_val, str):
+                                content_parts.append(text_val)
+                        task_result_content = "\n".join(content_parts).strip()
+
+                    # Store for deduplication - we'll check/update after we have the message_id
+                    pending_dedup = task_result_content if task_result_content else None
+                else:
+                    pending_dedup = None
+
                 escaped_id = escape_html(tool_result_converted.tool_use_id)
                 item_tool_use_id = tool_result_converted.tool_use_id
                 tool_title_hint = f"ID: {escaped_id}"
@@ -2748,8 +3195,16 @@ def generate_html(
                 tool_css_class = "unknown"
 
             # Preserve sidechain context for tool/thinking/image content within sidechain messages
-            if getattr(message, "isSidechain", False):
+            tool_is_sidechain = getattr(message, "isSidechain", False)
+            if tool_is_sidechain:
                 tool_css_class += " sidechain"
+
+            # Determine hierarchy level and generate unique message ID
+            # Note: Pairing logic is handled later by _identify_message_pairs()
+            tool_level = _get_message_hierarchy_level(tool_css_class, tool_is_sidechain)
+            tool_msg_id, tool_ancestry, message_id_counter = _update_hierarchy_stack(
+                hierarchy_stack, tool_level, message_id_counter
+            )
 
             tool_template_message = TemplateMessage(
                 message_type=tool_message_type,
@@ -2762,8 +3217,37 @@ def generate_html(
                 tool_use_id=item_tool_use_id,
                 title_hint=tool_title_hint,
                 message_title=tool_message_title,
+                message_id=tool_msg_id,
+                ancestry=tool_ancestry,
             )
             template_messages.append(tool_template_message)
+
+            # Track Task results and check for matching assistants
+            if pending_dedup is not None:
+                # pending_dedup contains the task result content
+                task_result_content = pending_dedup
+                template_msg_index = len(template_messages) - 1
+
+                # Check if we already have a sidechain assistant with this content
+                if task_result_content in content_map:
+                    existing_index, existing_id, existing_type = content_map[
+                        task_result_content
+                    ]
+                    if existing_type == "assistant":
+                        # Found matching assistant - deduplicate it by replacing with forward link
+                        forward_link_html = f'<p><em>(Task summary — already displayed in <a href="#msg-{tool_msg_id}-last">Task tool result below</a>)</em></p>'
+                        template_messages[
+                            existing_index
+                        ].content_html = forward_link_html
+                else:
+                    # Track this Task result in case we see a matching assistant later
+                    content_map[task_result_content] = (
+                        template_msg_index,
+                        tool_msg_id,
+                        "task",
+                    )
+
+                pending_dedup = None  # Reset for next iteration
 
     # Prepare session navigation data
     session_nav: List[Dict[str, Any]] = []
@@ -2823,6 +3307,9 @@ def generate_html(
 
     # Reorder messages so pairs are adjacent while preserving chronological order
     template_messages = _reorder_paired_messages(template_messages)
+
+    # Mark messages that have children for fold/unfold controls
+    _mark_messages_with_children(template_messages)
 
     # Render template
     env = _get_template_environment()
