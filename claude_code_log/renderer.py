@@ -182,41 +182,6 @@ def escape_html(text: str) -> str:
     return html.escape(normalized)
 
 
-def create_collapsible_details(
-    summary: str, content: str, css_classes: str = ""
-) -> str:
-    """Create a collapsible details element with consistent styling and preview functionality."""
-    class_attr = ' class="collapsible-details"'
-    wrapper_classes = f"tool-content{' ' + css_classes if css_classes else ''}"
-
-    if len(content) <= 200:
-        return f"""
-        <div class="{wrapper_classes}">
-            {summary}
-            <div class="details-content">
-                {content}
-            </div>
-        </div>
-        """
-
-    # Get first ~200 characters, break at word boundaries
-    preview_text = content[:200] + "..."
-
-    return f"""
-    <div class="{wrapper_classes}">
-        <details{class_attr}>
-            <summary>
-                {summary}
-                <div class="preview-content">{preview_text}</div>
-            </summary>
-            <div class="details-content">
-                {content}
-            </div>
-        </details>
-    </div>
-    """
-
-
 def _create_pygments_plugin() -> Any:
     """Create a mistune plugin that uses Pygments for code block syntax highlighting."""
     from pygments import highlight  # type: ignore[reportUnknownVariableType]
@@ -274,6 +239,131 @@ def render_markdown(text: str) -> str:
             hard_wrap=True,  # Line break for newlines (checklists in Assistant messages)
         )
         return str(renderer(text))
+
+
+def render_collapsible_code(
+    preview_html: str,
+    full_html: str,
+    line_count: int,
+    is_markdown: bool = False,
+) -> str:
+    """Render a collapsible code/content block with preview.
+
+    Creates a details element with a line count badge and preview content
+    that expands to show the full content.
+
+    Args:
+        preview_html: HTML content to show in the collapsed summary
+        full_html: HTML content to show when expanded
+        line_count: Number of lines (shown in the badge)
+        is_markdown: If True, adds 'markdown' class to preview and full content divs
+
+    Returns:
+        HTML string with collapsible details element
+    """
+    markdown_class = " markdown" if is_markdown else ""
+    return f"""<details class='collapsible-code'>
+        <summary>
+            <span class='line-count'>{line_count} lines</span>
+            <div class='preview-content{markdown_class}'>{preview_html}</div>
+        </summary>
+        <div class='code-full{markdown_class}'>{full_html}</div>
+    </details>"""
+
+
+def render_markdown_collapsible(
+    raw_content: str,
+    css_class: str,
+    line_threshold: int = 20,
+    preview_line_count: int = 5,
+) -> str:
+    """Render markdown content, making it collapsible if it exceeds a line threshold.
+
+    For long content, creates a collapsible details element with a preview.
+    For short content, renders inline with the specified CSS class.
+
+    Args:
+        raw_content: The raw text content to render as markdown
+        css_class: CSS class for the wrapper div (e.g., "task-prompt", "task-result")
+        line_threshold: Number of lines above which content becomes collapsible (default 20)
+        preview_line_count: Number of lines to show in the preview (default 5)
+
+    Returns:
+        HTML string with rendered markdown, optionally wrapped in collapsible details
+    """
+    rendered_html = render_markdown(raw_content)
+
+    lines = raw_content.splitlines()
+    if len(lines) <= line_threshold:
+        # Short content, show inline
+        return f'<div class="{css_class} markdown">{rendered_html}</div>'
+
+    # Long content - make collapsible with rendered preview
+    preview_lines = lines[:preview_line_count]
+    preview_text = "\n".join(preview_lines)
+    if len(lines) > preview_line_count:
+        preview_text += "\n\n..."
+    # Render truncated markdown (produces valid HTML with proper tag closure)
+    preview_html = render_markdown(preview_text)
+
+    collapsible = render_collapsible_code(
+        preview_html, rendered_html, len(lines), is_markdown=True
+    )
+    return f'<div class="{css_class}">{collapsible}</div>'
+
+
+def render_file_content_collapsible(
+    code_content: str,
+    file_path: str,
+    css_class: str,
+    linenostart: int = 1,
+    line_threshold: int = 12,
+    preview_line_count: int = 5,
+    suffix_html: str = "",
+) -> str:
+    """Render file content with syntax highlighting, collapsible if long.
+
+    Highlights code using Pygments and wraps in a collapsible details element
+    if the content exceeds the line threshold. Uses preview truncation from
+    already-highlighted HTML to avoid double Pygments calls.
+
+    Args:
+        code_content: The raw code content to highlight
+        file_path: File path for syntax detection (extension-based)
+        css_class: CSS class for the wrapper div (e.g., 'write-tool-content')
+        linenostart: Starting line number for Pygments (default 1)
+        line_threshold: Number of lines above which content becomes collapsible
+        preview_line_count: Number of lines to show in the preview
+        suffix_html: Optional HTML to append after the code (inside wrapper div)
+
+    Returns:
+        HTML string with highlighted code, collapsible if >line_threshold lines
+    """
+    # Highlight code with Pygments (single call)
+    highlighted_html = _highlight_code_with_pygments(
+        code_content, file_path, linenostart=linenostart
+    )
+
+    html_parts = [f"<div class='{css_class}'>"]
+
+    lines = code_content.split("\n")
+    if len(lines) > line_threshold:
+        # Extract preview from already-highlighted HTML (avoids double highlighting)
+        preview_html = _truncate_highlighted_preview(
+            highlighted_html, preview_line_count
+        )
+        html_parts.append(
+            render_collapsible_code(preview_html, highlighted_html, len(lines))
+        )
+    else:
+        # Show directly without collapsible
+        html_parts.append(highlighted_html)
+
+    if suffix_html:
+        html_parts.append(suffix_html)
+
+    html_parts.append("</div>")
+    return "".join(html_parts)
 
 
 def extract_command_info(text_content: str) -> tuple[str, str, str]:
@@ -527,38 +617,7 @@ def format_write_tool_content(tool_use: ToolUseContent) -> str:
     file_path = tool_use.input.get("file_path", "")
     content = tool_use.input.get("content", "")
 
-    html_parts = ["<div class='write-tool-content'>"]
-
-    # File path is now shown in header, so we skip it here
-
-    # Highlight code with Pygments
-    highlighted_html = _highlight_code_with_pygments(content, file_path)
-
-    # Make collapsible if content has more than 12 lines
-    lines = content.split("\n")
-    if len(lines) > 12:
-        # Get preview (first ~5 lines)
-        preview_lines = lines[:5]
-        preview_html = _highlight_code_with_pygments(
-            "\n".join(preview_lines), file_path
-        )
-
-        html_parts.append(f"""
-        <details class='collapsible-code'>
-            <summary>
-                <span class='line-count'>{len(lines)} lines</span>
-                <div class='preview-content'>{preview_html}</div>
-            </summary>
-            <div class='code-full'>{highlighted_html}</div>
-        </details>
-        """)
-    else:
-        # Show directly without collapsible
-        html_parts.append(f"<div class='code-full'>{highlighted_html}</div>")
-
-    html_parts.append("</div>")
-
-    return "".join(html_parts)
+    return render_file_content_collapsible(content, file_path, "write-tool-content")
 
 
 def format_bash_tool_content(tool_use: ToolUseContent) -> str:
@@ -839,6 +898,9 @@ def format_task_tool_content(tool_use: ToolUseContent) -> str:
 
     Task tool spawns sub-agents. We render the prompt as the main content.
     The sidechain user message (which would duplicate this prompt) is skipped.
+
+    For long prompts (>20 lines), the content is made collapsible with a
+    preview of the first few lines to keep the transcript vertically compact.
     """
     prompt = tool_use.input.get("prompt", "")
 
@@ -846,10 +908,7 @@ def format_task_tool_content(tool_use: ToolUseContent) -> str:
         # No prompt, show parameters table as fallback
         return render_params_table(tool_use.input)
 
-    # Render prompt as markdown with Pygments syntax highlighting
-    rendered_html = render_markdown(prompt)
-
-    return f'<div class="task-prompt markdown">{rendered_html}</div>'
+    return render_markdown_collapsible(prompt, "task-prompt")
 
 
 def get_tool_summary(tool_use: ToolUseContent) -> Optional[str]:
@@ -1099,91 +1158,38 @@ def format_tool_result_content(
         if parsed_result:
             code_content, system_reminder, line_offset = parsed_result
 
-            # Highlight code with Pygments using correct line offset (single call)
-            highlighted_html = _highlight_code_with_pygments(
-                code_content, file_path, linenostart=line_offset
-            )
-
-            # Build result HTML
-            result_parts = ["<div class='read-tool-result'>"]
-
-            # Make collapsible if content has more than 12 lines
-            lines = code_content.split("\n")
-            if len(lines) > 12:
-                # Extract preview from already-highlighted HTML to avoid double-highlighting
-                # HtmlFormatter(linenos="table") produces a single <tr> with two <td>s:
-                #   <td class="linenos">...<pre>LINE_NUMS</pre>...</td>
-                #   <td class="code">...<pre>CODE</pre>...</td>
-                # We truncate content within each <pre> to first 5 lines
-                preview_html = _truncate_highlighted_preview(highlighted_html, 5)
-
-                result_parts.append(f"""
-                <details class='collapsible-code'>
-                    <summary>
-                        <span class='line-count'>{len(lines)} lines</span>
-                        <div class='preview-content'>{preview_html}</div>
-                    </summary>
-                    <div class='code-full'>{highlighted_html}</div>
-                </details>
-                """)
-            else:
-                # Show directly without collapsible
-                result_parts.append(highlighted_html)
-
-            # Add system reminder if present (after code, always visible)
+            # Build system reminder suffix if present
+            suffix_html = ""
             if system_reminder:
                 escaped_reminder = escape_html(system_reminder)
-                result_parts.append(
+                suffix_html = (
                     f"<div class='system-reminder'>🤖 <em>{escaped_reminder}</em></div>"
                 )
 
-            result_parts.append("</div>")
-            return "".join(result_parts)
+            return render_file_content_collapsible(
+                code_content,
+                file_path,
+                "read-tool-result",
+                linenostart=line_offset,
+                suffix_html=suffix_html,
+            )
 
     # Try to parse as Edit tool result if file_path is provided
     if file_path and tool_name == "Edit" and not has_images:
         parsed_result = _parse_edit_tool_result(raw_content)
         if parsed_result:
             parsed_code, line_offset = parsed_result
-
-            # Highlight code with Pygments using correct line offset
-            highlighted_html = _highlight_code_with_pygments(
-                parsed_code, file_path, linenostart=line_offset
+            return render_file_content_collapsible(
+                parsed_code,
+                file_path,
+                "edit-tool-result",
+                linenostart=line_offset,
             )
-
-            # Build result HTML
-            result_parts = ["<div class='edit-tool-result'>"]
-
-            # Make collapsible if content has more than 12 lines
-            lines = parsed_code.split("\n")
-            if len(lines) > 12:
-                # Get preview (first ~5 lines)
-                preview_lines = lines[:5]
-                preview_html = _highlight_code_with_pygments(
-                    "\n".join(preview_lines), file_path, linenostart=line_offset
-                )
-
-                result_parts.append(f"""
-                <details class='collapsible-code'>
-                    <summary>
-                        <span class='line-count'>{len(lines)} lines</span>
-                        <div class='preview-content'>{preview_html}</div>
-                    </summary>
-                    <div class='code-full'>{highlighted_html}</div>
-                </details>
-                """)
-            else:
-                # Show directly without collapsible
-                result_parts.append(highlighted_html)
-
-            result_parts.append("</div>")
-            return "".join(result_parts)
 
     # Special handling for Task tool: render result as markdown with Pygments (agent's final message)
     # Deduplication is now handled retroactively by replacing the sub-assistant content
     if tool_name == "Task" and not has_images:
-        rendered_html = render_markdown(raw_content)
-        return f'<div class="task-result markdown">{rendered_html}</div>'
+        return render_markdown_collapsible(raw_content, "task-result")
 
     # Check if this looks like Bash tool output and process ANSI codes
     # Bash tool results often contain ANSI escape sequences and terminal output
@@ -1270,26 +1276,10 @@ def format_thinking_content(thinking: ThinkingContent) -> str:
     """Format thinking content as HTML with markdown rendering."""
     thinking_text = thinking.thinking.strip()
 
-    # Render markdown to HTML
-    rendered_html = render_markdown(thinking_text)
-
-    # For simple content, show directly without collapsible wrapper
-    if len(thinking_text) <= 200:
-        return f'<div class="thinking-text">{rendered_html}</div>'
-
-    # For longer content, use collapsible details but no extra wrapper
-    # Use plain text for preview (first 200 chars)
-    preview_text = escape_html(thinking_text[:200]) + "..."
-    return f"""
-    <details class="collapsible-details">
-        <summary>
-            <div class="preview-content"><div class="thinking-text">{preview_text}</div></div>
-        </summary>
-        <div class="details-content">
-            <div class="thinking-text">{rendered_html}</div>
-        </div>
-    </details>
-    """
+    # Use line-based collapsible rendering (10 lines threshold, 5 preview)
+    return render_markdown_collapsible(
+        thinking_text, "thinking-text", line_threshold=10
+    )
 
 
 def format_image_content(image: ImageContent) -> str:
@@ -1423,9 +1413,14 @@ def render_user_message_content(
 
         # Check for compacted session summary first
         if _is_compacted_session_summary(first_text):
-            # Render entire content as markdown for compacted summaries
-            # Use "assistant" to trigger markdown rendering instead of pre-formatted text
-            content_html = render_message_content(content_list, "assistant")
+            # Combine all text content for compacted summaries
+            all_text = "\n\n".join(
+                item.text for item in content_list if isinstance(item, TextContent)
+            )
+            # Render as collapsible markdown (threshold=30, preview=10 for large summaries)
+            content_html = render_markdown_collapsible(
+                all_text, "compacted-summary", line_threshold=30, preview_line_count=10
+            )
             return content_html, True, False
 
         # Check for user memory input
@@ -1479,8 +1474,13 @@ def render_message_content(content: List[ContentItem], message_type: str) -> str
             escaped_text = escape_html(content[0].text)
             return "<pre>" + escaped_text + "</pre>"
         else:
-            # Assistant messages get markdown rendering
-            return render_markdown(content[0].text)
+            # Assistant messages get markdown rendering with collapsible for long content
+            return render_markdown_collapsible(
+                content[0].text,
+                "assistant-text",
+                line_threshold=30,
+                preview_line_count=10,
+            )
 
     # content is a list of ContentItem objects
     rendered_parts: List[str] = []
@@ -1499,8 +1499,15 @@ def render_message_content(content: List[ContentItem], message_type: str) -> str
                 escaped_text = escape_html(text_value)
                 rendered_parts.append("<pre>" + escaped_text + "</pre>")
             else:
-                # Assistant messages get markdown rendering
-                rendered_parts.append(render_markdown(text_value))
+                # Assistant messages get markdown rendering with collapsible for long content
+                rendered_parts.append(
+                    render_markdown_collapsible(
+                        text_value,
+                        "assistant-text",
+                        line_threshold=30,
+                        preview_line_count=10,
+                    )
+                )
         elif type(item) is ToolUseContent or (
             hasattr(item, "type") and item_type == "tool_use"
         ):
@@ -2105,7 +2112,22 @@ def _process_command_message(text_content: str) -> tuple[str, str, str, str]:
     if command_args:
         content_parts.append(f"<strong>Args:</strong> {escaped_command_args}")
     if command_contents:
-        details_html = create_collapsible_details("Content", escaped_command_contents)
+        lines = escaped_command_contents.splitlines()
+        line_count = len(lines)
+        if line_count <= 12:
+            # Short content, show inline
+            details_html = (
+                f"<strong>Content:</strong><pre>{escaped_command_contents}</pre>"
+            )
+        else:
+            # Long content, make collapsible
+            preview = "\n".join(lines[:5])
+            collapsible = render_collapsible_code(
+                f"<pre>{preview}</pre>",
+                f"<pre>{escaped_command_contents}</pre>",
+                line_count,
+            )
+            details_html = f"<strong>Content:</strong>{collapsible}"
         content_parts.append(details_html)
 
     content_html = "<br>".join(content_parts)
@@ -2229,11 +2251,15 @@ def _process_regular_message(
     text_only_content: List[ContentItem],
     message_type: str,
     is_sidechain: bool,
+    is_meta: bool = False,
 ) -> tuple[str, str, str, str]:
     """Process regular message and return (css_class, content_html, message_type, message_title).
 
     Note: Sidechain user messages (Sub-assistant prompts) are now skipped entirely
     in the main processing loop since they duplicate the Task tool input prompt.
+
+    Args:
+        is_meta: True for slash command expanded prompts (isMeta=True in JSONL)
     """
     css_class = f"{message_type}"
     message_title = message_type.title()  # Default title
@@ -2248,6 +2274,10 @@ def _process_regular_message(
         if is_compacted:
             css_class = f"{message_type} compacted"
             message_title = "User (compacted conversation)"
+        elif is_meta:
+            # Slash command expanded prompts - LLM-generated content
+            css_class = f"{message_type} slash-command"
+            message_title = "User (slash command)"
         elif is_memory_input:
             message_title = "Memory"
     else:
@@ -2626,8 +2656,8 @@ def generate_html(
     with log_timing(
         lambda: f"Deduplication ({len(deduplicated_messages)} messages)", t_start
     ):
-        # Track seen (message_type, timestamp) pairs
-        seen: set[tuple[str, str]] = set()
+        # Track seen (message_type, timestamp, is_meta, session_id) tuples
+        seen: set[tuple[str, str, bool, str]] = set()
         deduplicated_messages: List[TranscriptEntry] = []
 
         for message in messages:
@@ -2642,8 +2672,14 @@ def generate_html(
             # Get timestamp
             timestamp = getattr(message, "timestamp", "")
 
-            # Create deduplication key
-            dedup_key = (message_type, timestamp)
+            # Get isMeta flag (slash command prompts have isMeta=True with same timestamp as parent)
+            is_meta = getattr(message, "isMeta", False)
+
+            # Get sessionId for multi-session report deduplication
+            session_id = getattr(message, "sessionId", "")
+
+            # Create deduplication key - include isMeta and sessionId for proper deduplication
+            dedup_key = (message_type, timestamp, is_meta, session_id)
 
             # Keep only first occurrence
             if dedup_key not in seen:
@@ -3211,6 +3247,7 @@ def _process_messages_loop(
                     text_only_content,
                     effective_type,
                     getattr(message, "isSidechain", False),
+                    getattr(message, "isMeta", False),
                 )
             )
             message_type = message_type_result  # Update message_type with result

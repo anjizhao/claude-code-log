@@ -93,6 +93,11 @@
     border-bottom-color: var(--user-color);
 }
 
+.fold-bar[data-border-color="user slash-command"] .fold-bar-section,
+.fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section {
+    border-bottom-color: var(--user-dimmed);
+}
+
 .fold-bar[data-border-color="assistant"] .fold-bar-section,
 .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section {
     border-bottom-color: var(--assistant-color);
@@ -301,6 +306,12 @@
     opacity: 0.7;
 }
 
+/* Slash command prompts (isMeta=true, LLM-generated content) */
+.user.slash-command {
+    border-left-color: var(--user-dimmed);
+    opacity: 0.85;
+}
+
 .assistant {
     border-left-color: #9c27b0;
 }
@@ -349,6 +360,15 @@
     word-wrap: break-word;
     color: #333;
     overflow-x: auto;
+}
+
+.command-output-content td {
+    border-left: 1px dotted #bbb;
+    padding: 0 1em;
+}
+.command-output-content th {
+    text-align: left;
+    padding: 0 1em;
 }
 
 /* Bash command styling */
@@ -726,11 +746,18 @@ details summary {
     margin-top: 4px;
 }
 
-/* Tool result preview content with gradient fade */
+/* Tool use/result preview content with gradient fade */
+.tool_use .preview-content,
 .tool_result .preview-content {
     opacity: 0.7;
     mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+}
+
+/* Fix list rendering in preview-content inside summary */
+/* Mistune wraps list content in <p> tags which causes line breaks */
+.preview-content li > p:first-child {
+    display: inline;
 }
 
 /* Hide preview content when details/collapsible is open */
