@@ -115,17 +115,15 @@ def test_queue_operation_type_support():
         assert len(messages) == 3, f"Expected 3 messages, got {len(messages)}"
 
         # Check that queue-operation messages were parsed correctly
-        assert messages[0].type == "queue-operation", (
+        assert isinstance(messages[0], QueueOperationTranscriptEntry), (
             "First message should be queue-operation"
         )
-        assert isinstance(messages[0], QueueOperationTranscriptEntry)
         assert messages[0].operation == "enqueue", "First message should be enqueue"
         assert messages[0].content is not None, "Enqueue should have content"
 
-        assert messages[1].type == "queue-operation", (
+        assert isinstance(messages[1], QueueOperationTranscriptEntry), (
             "Second message should be queue-operation"
         )
-        assert isinstance(messages[1], QueueOperationTranscriptEntry)
         assert messages[1].operation == "dequeue", "Second message should be dequeue"
         assert messages[1].content is None, "Dequeue should not have content"
 
