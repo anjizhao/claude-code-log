@@ -42,13 +42,13 @@
 .vis-labelset .vis-label {
     font-size: 12px !important;
     font-weight: 500 !important;
-    color: #495057 !important;
+    color: var(--text-secondary) !important;
 }
 
 /* Timeline items styling */
 .vis-item {
     border-radius: 4px !important;
-    border: 1px solid #ddd !important;
+    border: 1px solid var(--border-light) !important;
     font-size: 11px !important;
     /* Stuck item workaround, see: https://github.com/visjs/vis-timeline/issues/494#issuecomment-1638974075 */
     transform: scale(0);
@@ -66,7 +66,7 @@
 /* Message type specific styling */
 .vis-item.timeline-item-user {
     background-color: #e3f2fd !important;
-    border-color: #2196f3 !important;
+    border-color: var(--system-warning-color) !important;
 }
 
 .vis-item.timeline-item-assistant {
@@ -111,12 +111,12 @@
 
 /* Timeline axis styling */
 .vis-time-axis {
-    border-top: 1px solid #ddd !important;
+    border-top: 1px solid var(--border-light) !important;
 }
 
 .vis-time-axis .vis-text {
     font-size: 11px !important;
-    color: #666 !important;
+    color: var(--text-muted) !important;
 }
 
 /* Timeline navigation controls */
