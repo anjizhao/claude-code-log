@@ -151,11 +151,11 @@
 }
 
 .fold-bar[data-border-color="bash-input"] .fold-bar-section {
-    border-bottom-color: var(--tool-use-color);
+    border-bottom-color: var(--user-color);
 }
 
 .fold-bar[data-border-color="bash-output"] .fold-bar-section {
-    border-bottom-color: var(--success-dimmed);
+    border-bottom-color: var(--user-dimmed);
 }
 
 .fold-bar[data-border-color="session-header"] .fold-bar-section {
@@ -179,7 +179,9 @@
 
 /* Right-aligned messages (user-initiated, right margin 0, left margin 33%) */
 .user:not(.compacted),
-.system {
+.system,
+.bash-input,
+.bash-output {
     margin-left: 33%;
     margin-right: 0;
 }
@@ -341,6 +343,59 @@
     font-size: 80%;
 }
 
+/* Hook summary styling */
+.system-hook {
+    border-left-color: var(--warning-dimmed);
+    background-color: var(--highlight-dimmed);
+    font-size: 90%;
+}
+
+.hook-summary {
+    cursor: pointer;
+}
+
+.hook-summary summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.hook-details {
+    margin-top: 0.5em;
+    padding: 0.5em;
+    background-color: var(--code-bg);
+    border-radius: 4px;
+}
+
+.hook-commands {
+    margin-bottom: 0.5em;
+}
+
+.hook-commands code {
+    display: block;
+    padding: 0.25em 0.5em;
+    font-size: 0.85em;
+    word-break: break-all;
+    white-space: pre-wrap;
+}
+
+.hook-errors {
+    margin-top: 0.5em;
+}
+
+.hook-error {
+    margin: 0.25em 0;
+    padding: 0.5em;
+    background-color: var(--error-semi);
+    border-left: 3px solid var(--system-error-color);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-x: auto;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
 /* Command output styling */
 .command-output {
     background-color: #1e1e1e11;
@@ -371,14 +426,14 @@
     padding: 0 1em;
 }
 
-/* Bash command styling */
+/* Bash command styling (user-initiated, right-aligned) */
 .bash-input {
-    background-color: #1e1e1e08;
-    border-left-color: var(--tool-use-color);
+    background-color: var(--highlight-light);
+    border-left-color: var(--user-color);
 }
 
 .bash-prompt {
-    color: var(--tool-use-color);
+    color: var(--user-color);
     font-weight: bold;
     font-size: 1.1em;
     margin-right: 8px;
@@ -393,40 +448,36 @@
     border-radius: 3px;
 }
 
-/* Bash output styling */
+/* Bash output styling (user-initiated, right-aligned) */
 .bash-output {
-    background-color: var(--neutral-dimmed);
-    border-left-color: #607d8b;
+    background-color: var(--highlight-light);
+    border-left-color: var(--user-dimmed);
 }
 
-.bash-stdout {
+.bash-output pre.bash-stdout,
+.bash-output pre.bash-stderr {
+    padding: 8px;
+    border-radius: 4px;
+    margin: 4px 0;
+    font-family: var(--font-monospace);
+    font-size: 80%;
+    line-height: 1.3;
+    white-space: pre;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 300px;
+}
+
+.bash-output pre.bash-stdout {
     background-color: #1e1e1e05;
-    padding: 12px;
-    border-radius: 4px;
     border: 1px solid #00000011;
-    margin: 8px 0;
-    font-family: var(--font-monospace);
-    font-size: 0.9em;
-    line-height: 1.4;
-    white-space: pre-wrap;
-    word-wrap: break-word;
     color: var(--text-primary);
-    overflow-x: auto;
 }
 
-.bash-stderr {
+.bash-output pre.bash-stderr {
     background-color: #ffebee;
-    padding: 12px;
-    border-radius: 4px;
     border: 1px solid #ffcdd2;
-    margin: 8px 0;
-    font-family: var(--font-monospace);
-    font-size: 0.9em;
-    line-height: 1.4;
-    white-space: pre-wrap;
-    word-wrap: break-word;
     color: #c62828;
-    overflow-x: auto;
 }
 
 .bash-empty {
@@ -756,9 +807,10 @@ details summary {
     margin-top: 4px;
 }
 
-/* Tool use/result preview content with gradient fade */
+/* Tool use/result/bash-output preview content with gradient fade */
 .tool_use .preview-content,
-.tool_result .preview-content {
+.tool_result .preview-content,
+.bash-output .preview-content {
     opacity: 0.7;
     mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);

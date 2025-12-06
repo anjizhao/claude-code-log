@@ -12,6 +12,7 @@ from .utils import (
     should_use_as_session_starter,
     create_session_preview,
     extract_working_directories,
+    get_warmup_session_ids,
 )
 from .cache import CacheManager, SessionCacheData, get_library_version
 from .parser import (
@@ -303,10 +304,19 @@ def _update_cache_with_session_data(
                             usage.cache_read_input_tokens
                         )
 
-    # Update cache with session data
+    # Filter out warmup-only and empty sessions before caching
+    warmup_session_ids = get_warmup_session_ids(messages)
+    sessions_cache_data = {
+        sid: data
+        for sid, data in sessions_cache_data.items()
+        if sid not in warmup_session_ids
+        and data.first_user_message  # Filter empty sessions (agent-only)
+    }
+
+    # Update cache with filtered session data
     cache_manager.update_session_cache(sessions_cache_data)
 
-    # Update cache with working directories
+    # Update cache with working directories (from filtered sessions)
     cache_manager.update_working_directories(
         extract_working_directories(list(sessions_cache_data.values()))
     )
@@ -342,6 +352,9 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
     """Collect session data for project index navigation."""
     from .parser import extract_text_content
 
+    # Pre-compute warmup session IDs to filter them out
+    warmup_session_ids = get_warmup_session_ids(messages)
+
     # Pre-process to find and attach session summaries
     # This matches the logic from renderer.py generate_html() exactly
     session_summaries: Dict[str, str] = {}
@@ -375,14 +388,14 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
             ):
                 session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
 
-    # Group messages by session
+    # Group messages by session (excluding warmup-only sessions)
     sessions: Dict[str, Dict[str, Any]] = {}
     for message in messages:
         if hasattr(message, "sessionId") and not isinstance(
             message, SummaryTranscriptEntry
         ):
             session_id = getattr(message, "sessionId", "")
-            if not session_id:
+            if not session_id or session_id in warmup_session_ids:
                 continue
 
             if session_id not in sessions:
@@ -439,6 +452,9 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
             if session_data["first_user_message"] != ""
             else "[No user message found in session.]",
         }
+        # Skip sessions with no user messages (empty sessions / agent-only)
+        if session_data["first_user_message"] == "":
+            continue
         session_list.append(session_dict)
 
     # Sort by first timestamp (ascending order, oldest first like transcript page)
@@ -456,12 +472,15 @@ def _generate_individual_session_files(
     cache_was_updated: bool = False,
 ) -> None:
     """Generate individual HTML files for each session."""
-    # Find all unique session IDs
+    # Pre-compute warmup sessions to exclude them
+    warmup_session_ids = get_warmup_session_ids(messages)
+
+    # Find all unique session IDs (excluding warmup sessions)
     session_ids: set[str] = set()
     for message in messages:
         if hasattr(message, "sessionId"):
             session_id: str = getattr(message, "sessionId")
-            if session_id:
+            if session_id and session_id not in warmup_session_ids:
                 session_ids.add(session_id)
 
     # Get session data from cache for better titles
@@ -630,6 +649,9 @@ def process_projects_hierarchy(
                                     or "[No user message found in session.]",
                                 }
                                 for session_data in cached_project_data.sessions.values()
+                                # Filter out warmup-only and empty sessions (agent-only)
+                                if session_data.first_user_message
+                                and session_data.first_user_message != "Warmup"
                             ],
                         }
                     )
