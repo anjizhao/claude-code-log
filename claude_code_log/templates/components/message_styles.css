@@ -179,9 +179,9 @@
 
 /* Right-aligned messages (user-initiated, right margin 0, left margin 33%) */
 .user:not(.compacted),
-.system,
 .bash-input,
-.bash-output {
+.bash-output,
+.system:not(.system-info):not(.system-warning):not(.system-error) {
     margin-left: 33%;
     margin-right: 0;
 }
@@ -207,17 +207,11 @@
     margin-right: 6em;
 }
 
-/* System warnings/info (assistant-initiated) */
+/* System warnings/info at tool level (e.g., hook notifications) */
 .system-warning,
 .system-info {
-    margin-left: 0;
-    margin-right: 10em;
-}
-
-/* Exception: paired system-info messages align right (like user commands) */
-.system.system-info.paired-message {
-    margin-left: 33%;
-    margin-right: 0;
+    margin-left: 2em;
+    margin-right: 6em;
 }
 
 /* Sidechain messages (sub-assistant hierarchy) */
@@ -340,6 +334,10 @@
 .system-info {
     border-left-color: var(--info-dimmed);
     background-color: var(--highlight-dimmed);
+}
+
+.system-info .header,
+.system-info .content {
     font-size: 80%;
 }
 

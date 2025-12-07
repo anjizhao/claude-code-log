@@ -567,7 +567,7 @@ def format_exitplanmode_result(content: str) -> str:
 
 
 def format_todowrite_content(tool_use: ToolUseContent) -> str:
-    """Format TodoWrite tool use content as an actual todo list with checkboxes."""
+    """Format TodoWrite tool use content as a todo list."""
     # Parse todos from input
     todos_data = tool_use.input.get("todos", [])
     if not todos_data:
@@ -586,31 +586,26 @@ def format_todowrite_content(tool_use: ToolUseContent) -> str:
         try:
             todo_id = escape_html(str(todo.get("id", "")))
             content = escape_html(str(todo.get("content", "")))
-            status = todo.get("status", "pending")
-            priority = todo.get("priority", "medium")
+            status = str(todo.get("status", "pending")).lower()
+            priority = str(todo.get("priority", "medium")).lower()
             status_emoji = status_emojis.get(status, "⏳")
-
-            # Determine checkbox state
-            checked = "checked" if status == "completed" else ""
-            disabled = "disabled" if status == "completed" else ""
 
             # CSS class for styling
             item_class = f"todo-item {status} {priority}"
 
             todo_items.append(f"""
                 <div class="{item_class}">
-                    <input type="checkbox" {checked} {disabled} readonly>
                     <span class="todo-status">{status_emoji}</span>
                     <span class="todo-content">{content}</span>
                     <span class="todo-id">#{todo_id}</span>
                 </div>
             """)
         except AttributeError:
+            escaped_fallback = escape_html(str(todo))
             todo_items.append(f"""
                 <div class="todo-item pending medium">
-                    <input type="checkbox" readonly>
                     <span class="todo-status">⏳</span>
-                    <span class="todo-content">{str(todo)}</span>
+                    <span class="todo-content">{escaped_fallback}</span>
                 </div>
             """)
 
@@ -2532,18 +2527,32 @@ def _process_regular_message(
     # Handle user-specific preprocessing
     if message_type == "user":
         # Note: sidechain user messages are skipped before reaching this function
-        content_html, is_compacted, is_memory_input = render_user_message_content(
-            text_only_content
-        )
-        if is_compacted:
-            css_class = f"{message_type} compacted"
-            message_title = "User (compacted conversation)"
-        elif is_meta:
-            # Slash command expanded prompts - LLM-generated content
+        if is_meta:
+            # Slash command expanded prompts - render as collapsible markdown
+            # These contain LLM-generated instruction text (markdown formatted)
             css_class = f"{message_type} slash-command"
             message_title = "User (slash command)"
-        elif is_memory_input:
-            message_title = "Memory"
+            # Combine all text content (items may be TextContent, dicts, or SDK objects)
+            all_text = "\n\n".join(
+                getattr(item, "text", "")
+                for item in text_only_content
+                if hasattr(item, "text")
+            )
+            content_html = render_markdown_collapsible(
+                all_text,
+                "slash-command-content",
+                line_threshold=20,
+                preview_line_count=5,
+            )
+        else:
+            content_html, is_compacted, is_memory_input = render_user_message_content(
+                text_only_content
+            )
+            if is_compacted:
+                css_class = f"{message_type} compacted"
+                message_title = "User (compacted conversation)"
+            elif is_memory_input:
+                message_title = "Memory"
     else:
         # Non-user messages: render directly
         content_html = render_message_content(text_only_content, message_type)
@@ -2578,6 +2587,7 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
                    and tool_result. Session ID is included to prevent cross-session pairing
                    when sessions are resumed (same tool_use_id can appear in multiple sessions).
                    Build index of uuid -> message index for parent-child system messages
+                   Build index of parent_uuid -> message index for slash-command messages
     2. Second pass: Sequential scan for adjacent pairs (system+output, bash, thinking+assistant)
                    and match tool_use/tool_result and uuid-based pairs using the index
     """
@@ -2590,6 +2600,8 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
         tuple[str, str], int
     ] = {}  # (session_id, tool_use_id) -> index
     uuid_index: Dict[str, int] = {}  # uuid -> message index for parent-child pairing
+    # Index slash-command messages by their parent_uuid for pairing with system commands
+    slash_command_by_parent: Dict[str, int] = {}  # parent_uuid -> message index
 
     for i, msg in enumerate(messages):
         if msg.tool_use_id and msg.session_id:
@@ -2601,6 +2613,9 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
         # Build UUID index for system messages (both parent and child)
         if msg.uuid and "system" in msg.css_class:
             uuid_index[msg.uuid] = i
+        # Index slash-command user messages by parent_uuid
+        if msg.parent_uuid and "slash-command" in msg.css_class:
+            slash_command_by_parent[msg.parent_uuid] = i
 
     # Pass 2: Sequential scan to identify pairs
     i = 0
@@ -2649,6 +2664,17 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
                 current.is_paired = True
                 current.pair_role = "pair_last"
 
+        # Check for system command + user slash-command pair (via parent_uuid)
+        # The slash-command message's parent_uuid points to the system command's uuid
+        if "system" in current.css_class and current.uuid:
+            if current.uuid in slash_command_by_parent:
+                slash_idx = slash_command_by_parent[current.uuid]
+                slash_msg = messages[slash_idx]
+                current.is_paired = True
+                current.pair_role = "pair_first"
+                slash_msg.is_paired = True
+                slash_msg.pair_role = "pair_last"
+
         # Check for bash-input + bash-output pair (adjacent only)
         if current.css_class == "bash-input" and i + 1 < len(messages):
             next_msg = messages[i + 1]
@@ -2683,7 +2709,8 @@ def _reorder_paired_messages(messages: List[TemplateMessage]) -> List[TemplateMe
 
     Uses dictionary-based approach to find pairs efficiently:
     1. Build index of all pair_last messages by tool_use_id
-    2. Single pass through messages, inserting pair_last immediately after pair_first
+    2. Build index of slash-command pair_last messages by parent_uuid
+    3. Single pass through messages, inserting pair_last immediately after pair_first
     """
     from datetime import datetime
 
@@ -2692,6 +2719,8 @@ def _reorder_paired_messages(messages: List[TemplateMessage]) -> List[TemplateMe
     pair_last_index: Dict[
         tuple[str, str], int
     ] = {}  # (session_id, tool_use_id) -> message index
+    # Index slash-command pair_last messages by parent_uuid
+    slash_command_pair_index: Dict[str, int] = {}  # parent_uuid -> message index
 
     for i, msg in enumerate(messages):
         if (
@@ -2702,6 +2731,14 @@ def _reorder_paired_messages(messages: List[TemplateMessage]) -> List[TemplateMe
         ):
             key = (msg.session_id, msg.tool_use_id)
             pair_last_index[key] = i
+        # Index slash-command messages by parent_uuid
+        if (
+            msg.is_paired
+            and msg.pair_role == "pair_last"
+            and msg.parent_uuid
+            and "slash-command" in msg.css_class
+        ):
+            slash_command_pair_index[msg.parent_uuid] = i
 
     # Create reordered list
     reordered: List[TemplateMessage] = []
@@ -2715,16 +2752,23 @@ def _reorder_paired_messages(messages: List[TemplateMessage]) -> List[TemplateMe
 
         # If this is the first message in a pair, immediately add its pair_last
         # Key includes session_id to prevent cross-session pairing on resume
-        if (
-            msg.is_paired
-            and msg.pair_role == "pair_first"
-            and msg.tool_use_id
-            and msg.session_id
-        ):
-            key = (msg.session_id, msg.tool_use_id)
-            if key in pair_last_index:
-                last_idx = pair_last_index[key]
+        if msg.is_paired and msg.pair_role == "pair_first":
+            pair_last = None
+            last_idx = None
+
+            # Check for tool_use_id based pairs
+            if msg.tool_use_id and msg.session_id:
+                key = (msg.session_id, msg.tool_use_id)
+                if key in pair_last_index:
+                    last_idx = pair_last_index[key]
+                    pair_last = messages[last_idx]
+
+            # Check for system + slash-command pairs (via uuid -> parent_uuid)
+            if pair_last is None and msg.uuid and msg.uuid in slash_command_pair_index:
+                last_idx = slash_command_pair_index[msg.uuid]
                 pair_last = messages[last_idx]
+
+            if pair_last is not None and last_idx is not None:
                 reordered.append(pair_last)
                 skip_indices.add(last_idx)
 
@@ -2799,8 +2843,8 @@ def _get_message_hierarchy_level(css_class: str, is_sidechain: bool) -> int:
     Correct hierarchy based on logical nesting:
     - Level 0: Session headers
     - Level 1: User messages
-    - Level 2: System messages, Assistant, Thinking
-    - Level 3: Tool use/result (nested under assistant)
+    - Level 2: System commands/errors, Assistant, Thinking
+    - Level 3: Tool use/result, System info/warning (nested under assistant)
     - Level 4: Sidechain assistant/thinking (nested under Task tool result)
     - Level 5: Sidechain tools (nested under sidechain assistant)
 
@@ -2815,7 +2859,13 @@ def _get_message_hierarchy_level(css_class: str, is_sidechain: bool) -> int:
     if "user" in css_class and not is_sidechain:
         return 1
 
-    # System messages at level 2 (siblings to assistant, under user)
+    # System info/warning at level 3 (tool-related, e.g., hook notifications)
+    if (
+        "system-info" in css_class or "system-warning" in css_class
+    ) and not is_sidechain:
+        return 3
+
+    # System commands/errors at level 2 (siblings to assistant)
     if "system" in css_class and not is_sidechain:
         return 2
 
@@ -2848,27 +2898,16 @@ def _build_message_hierarchy(messages: List[TemplateMessage]) -> None:
     The hierarchy is determined by message type using _get_message_hierarchy_level(),
     and a stack-based approach builds proper parent-child relationships.
 
-    For system messages with parent_uuid, the hierarchy level is derived from the
-    parent's level instead of the default, ensuring proper nesting.
-
     Args:
         messages: List of template messages in their final order (modified in place)
     """
     hierarchy_stack: List[tuple[int, str]] = []
     message_id_counter = 0
 
-    # Build UUID -> (message_id, level) mapping for parent_uuid resolution
-    # We do this in a single pass by updating the map as we assign IDs
-    uuid_to_info: Dict[str, tuple[str, int]] = {}
-
     for message in messages:
         # Session headers are level 0
         if message.is_session_header:
             current_level = 0
-        elif message.parent_uuid and message.parent_uuid in uuid_to_info:
-            # System message with known parent - nest under parent
-            _, parent_level = uuid_to_info[message.parent_uuid]
-            current_level = parent_level + 1
         else:
             # Determine level from css_class
             is_sidechain = "sidechain" in message.css_class
@@ -2893,10 +2932,6 @@ def _build_message_hierarchy(messages: List[TemplateMessage]) -> None:
 
         # Push current message onto stack
         hierarchy_stack.append((current_level, message_id))
-
-        # Track UUID -> (message_id, level) for parent_uuid resolution
-        if message.uuid:
-            uuid_to_info[message.uuid] = (message_id, current_level)
 
         # Update the message
         message.message_id = message_id
@@ -3799,6 +3834,7 @@ def _process_messages_loop(
                 ancestry=[],  # Will be assigned by _build_message_hierarchy
                 agent_id=getattr(message, "agentId", None),
                 uuid=getattr(message, "uuid", None),
+                parent_uuid=getattr(message, "parentUuid", None),
             )
 
             # Store raw text content for potential future use (e.g., deduplication,
