@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.0] - 2025-12-08
+
+### Changed
+
+- **Polish User Messages (#60)**
+- **Extract user preferences from project's .vscode/settings.json. (#61)**
+- **Filter out warmup messages + parse IDE tags for concise display in summaries (#57)**
+- **Fix cross-session tool pairing on session resume (#56)**
+- **Fix Parallel Sidechain Rendering (#54)**
+- **CSS Styles Cleanup (#53)**
+- **Fix test + lint issues (#55)**
+- **Review and polish (0.8dev) (#51)**
+- **Integration tests (#52)**
+- **More Collapsible Content & Slash Command Support (#50)**
+- **Support for Steering Messages and Sidechain Cleanup (#49)**
+- **Fix Pygments Lexer Performance Bottleneck (#48)**
+- **Foldable messages (#42)**
+- **Add more Python versions to testing matrix + fixes for 3.14 (#40)**
+- **Handle (but don't render) "queue-operation" + remove GH Pages workflow**
+- **Update README link + faster rsync**
+
+
 ## [0.8.0] - 2025-11-08
 
 ### Changed
