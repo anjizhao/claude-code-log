@@ -7,12 +7,13 @@ unintended changes to the rendered HTML structure.
 import shutil
 from pathlib import Path
 
-from claude_code_log.converter import (
-    convert_jsonl_to_html,
-    load_transcript,
-    generate_html,
+from claude_code_log.converter import convert_jsonl_to_html
+from claude_code_log.html.renderer import (
+    generate_projects_index_html,
+    generate_session_html,
 )
-from claude_code_log.renderer import generate_session_html, generate_projects_index_html
+from claude_code_log.converter import load_transcript
+from claude_code_log.html.renderer import generate_html
 
 
 class TestTranscriptHTMLSnapshots:

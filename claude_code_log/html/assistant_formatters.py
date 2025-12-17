@@ -1,0 +1,109 @@
+"""HTML formatters for assistant message content.
+
+This module formats assistant message content types to HTML.
+Part of the thematic formatter organization:
+- system_formatters.py: SystemContent, HookSummaryContent
+- user_formatters.py: SlashCommandContent, CommandOutputContent, BashInputContent
+- assistant_formatters.py: AssistantTextContent, ThinkingContentModel, ImageContent
+- tool_formatters.py: tool use/result content
+
+Content models are defined in models.py, this module only handles formatting.
+"""
+
+from ..models import (
+    AssistantTextContent,
+    ImageContent,
+    ThinkingContentModel,
+    UnknownContent,
+)
+from .utils import escape_html, render_markdown_collapsible
+
+
+# =============================================================================
+# Formatting Functions
+# =============================================================================
+
+
+def format_assistant_text_content(
+    content: AssistantTextContent,
+    line_threshold: int = 30,
+    preview_line_count: int = 10,
+) -> str:
+    """Format assistant text content as HTML.
+
+    Args:
+        content: AssistantTextContent with the text to render
+        line_threshold: Number of lines before content becomes collapsible
+        preview_line_count: Number of preview lines to show when collapsed
+
+    Returns:
+        HTML string with markdown-rendered, optionally collapsible content
+    """
+    return render_markdown_collapsible(
+        content.text,
+        "assistant-text",
+        line_threshold=line_threshold,
+        preview_line_count=preview_line_count,
+    )
+
+
+def format_thinking_content(
+    content: ThinkingContentModel,
+    line_threshold: int = 20,
+    preview_line_count: int = 5,
+) -> str:
+    """Format thinking content as HTML.
+
+    Args:
+        content: ThinkingContentModel with the thinking text
+        line_threshold: Number of lines before content becomes collapsible
+        preview_line_count: Number of preview lines to show when collapsed
+
+    Returns:
+        HTML string with markdown-rendered, optionally collapsible thinking content
+    """
+    return render_markdown_collapsible(
+        content.thinking,
+        "thinking-content",
+        line_threshold=line_threshold,
+        preview_line_count=preview_line_count,
+    )
+
+
+def format_image_content(image: ImageContent) -> str:
+    """Format image content as HTML.
+
+    Args:
+        image: ImageContent with base64 image data
+
+    Returns:
+        HTML img tag with data URL
+    """
+    data_url = f"data:{image.source.media_type};base64,{image.source.data}"
+    return f'<img src="{data_url}" alt="Uploaded image" class="uploaded-image" />'
+
+
+def format_unknown_content(content: UnknownContent) -> str:
+    """Format unknown content type as HTML.
+
+    Args:
+        content: UnknownContent with the type name
+
+    Returns:
+        HTML paragraph with escaped type name
+    """
+    escaped_type = escape_html(content.type_name)
+    return f"<p>Unknown content type: {escaped_type}</p>"
+
+
+# =============================================================================
+# Public Exports
+# =============================================================================
+
+__all__ = [
+    # Formatting functions
+    "format_assistant_text_content",
+    "format_thinking_content",
+    "format_image_content",
+    "format_unknown_content",
+]

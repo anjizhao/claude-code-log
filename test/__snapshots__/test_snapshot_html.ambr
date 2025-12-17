@@ -2131,14 +2131,14 @@
       font-weight: 500;
       padding: 0.4em;
       transition: all 0.2s ease;
-      border-bottom: 2px solid;
+      border-bottom: 2px solid transparent;
       background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
   }
   
-  /* Double-line effect when folded */
+  /* Show border only when folded (content is hidden) */
   .fold-bar-section.folded {
-      border-bottom-style: double;
-      border-bottom-width: 4px;
+      border-bottom-style: solid;
+      border-bottom-width: 2px;
   }
   
   .fold-bar-section:hover {
@@ -2177,92 +2177,86 @@
       font-size: 0.9em;
   }
   
-  /* Border colors matching message types */
-  .fold-bar[data-border-color="user"] .fold-bar-section,
-  .fold-bar[data-border-color="user compacted"] .fold-bar-section,
-  .fold-bar[data-border-color="user sidechain"] .fold-bar-section,
-  .fold-bar[data-border-color="user compacted sidechain"] .fold-bar-section {
+  /* Border colors matching message types - only shown when folded */
+  .fold-bar[data-border-color="user"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user compacted"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user sidechain"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user compacted sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--user-color);
   }
   
-  .fold-bar[data-border-color="user slash-command"] .fold-bar-section,
-  .fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="user slash-command"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user command-output"] .fold-bar-section.folded {
       border-bottom-color: var(--user-dimmed);
   }
   
-  .fold-bar[data-border-color="assistant"] .fold-bar-section,
-  .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="assistant"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--assistant-color);
   }
   
-  .fold-bar[data-border-color="system"] .fold-bar-section,
-  .fold-bar[data-border-color="system command-output"] .fold-bar-section {
+  .fold-bar[data-border-color="system"] .fold-bar-section.folded {
       border-bottom-color: var(--system-color);
   }
   
-  .fold-bar[data-border-color="system-warning"] .fold-bar-section {
+  .fold-bar[data-border-color="system-warning"] .fold-bar-section.folded {
       border-bottom-color: var(--system-warning-color);
   }
   
-  .fold-bar[data-border-color="system-error"] .fold-bar-section {
+  .fold-bar[data-border-color="system-error"] .fold-bar-section.folded {
       border-bottom-color: var(--system-error-color);
   }
   
-  .fold-bar[data-border-color="system-info"] .fold-bar-section {
+  .fold-bar[data-border-color="system-info"] .fold-bar-section.folded {
       border-bottom-color: var(--info-dimmed);
   }
   
-  .fold-bar[data-border-color="tool_use"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_use sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_use"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_use sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--tool-use-color);
   }
   
-  .fold-bar[data-border-color="tool_result"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_result sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_result"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_result sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--success-dimmed);
   }
   
-  .fold-bar[data-border-color="tool_result error"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_result error sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_result error"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_result error sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--error-dimmed);
   }
   
-  .fold-bar[data-border-color="thinking"] .fold-bar-section,
-  .fold-bar[data-border-color="thinking sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="thinking"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="thinking sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--assistant-dimmed);
   }
   
-  .fold-bar[data-border-color="image"] .fold-bar-section,
-  .fold-bar[data-border-color="image sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="image"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="image sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--info-dimmed);
   }
   
-  .fold-bar[data-border-color="unknown"] .fold-bar-section,
-  .fold-bar[data-border-color="unknown sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="unknown"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="unknown sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--neutral-dimmed);
   }
   
-  .fold-bar[data-border-color="bash-input"] .fold-bar-section {
+  .fold-bar[data-border-color="bash-input"] .fold-bar-section.folded {
       border-bottom-color: var(--user-color);
   }
   
-  .fold-bar[data-border-color="bash-output"] .fold-bar-section {
+  .fold-bar[data-border-color="bash-output"] .fold-bar-section.folded {
       border-bottom-color: var(--user-dimmed);
   }
   
-  .fold-bar[data-border-color="session-header"] .fold-bar-section {
+  .fold-bar[data-border-color="session-header"] .fold-bar-section.folded {
       border-bottom-color: var(--system-warning-color);
   }
   
-  /* Sidechain (sub-assistant) fold-bar styling */
-  .sidechain .fold-bar-section {
-      border-bottom-style: dashed;
-      border-bottom-width: 2px;
-  }
-  
+  /* Sidechain (sub-assistant) fold-bar styling - dashed border when folded */
   .sidechain .fold-bar-section.folded {
       border-bottom-style: dashed;
-      border-bottom-width: 4px;
   }
   
   /* ========================================
@@ -2353,17 +2347,14 @@
   }
   
   /* Paired message styling */
-  .message.paired-message {
+  .message.pair_first {
       margin-bottom: 0;
-  }
-  
-  .message.paired-message.pair_first {
       border-bottom-left-radius: 0;
       border-bottom-right-radius: 0;
       border-bottom: none;
   }
   
-  .message.paired-message.pair_last {
+  .message.pair_last {
       margin-top: 0;
       margin-bottom: 1em;
       border-top-left-radius: 0;
@@ -2371,8 +2362,9 @@
       border-top: 1px solid #00000011;
   }
   
-  .message.paired-message.pair_middle {
+  .message.pair_middle {
       margin-top: 0;
+      margin-bottom: 0;
       border-radius: 0;
       border-top: 1px solid #00000011;
       border-bottom: none;
@@ -2405,7 +2397,7 @@
   }
   
   /* Dimmed assistant when paired with thinking */
-  .assistant.paired-message {
+  .assistant.pair_last {
       border-left-color: var(--assistant-dimmed);
   }
   
@@ -2639,7 +2631,7 @@
   }
   
   /* Full purple when thinking is paired (as pair_first) */
-  .thinking.paired-message.pair_first {
+  .thinking.pair_first {
       border-left-color: var(--assistant-color);
   }
   
@@ -2732,6 +2724,20 @@
   .user.compacted .content,
   .markdown {
       font-family: var(--font-ui);
+  }
+  
+  .markdown table {
+      border-collapse: collapse;
+  }
+  
+  .markdown td {
+      padding: .5em;
+      border-top: 1px solid #bbb;
+  }
+  
+  .markdown th {
+      padding: .5em;
+      border-bottom: 1px solid #888;
   }
   
   /* Code block styling */
@@ -4938,7 +4944,7 @@
       
       
       
-      <div class='message tool_use paired-message pair_first session-test_session d-2' data-message-id='d-3' id='msg-d-3-first'>
+      <div class='message tool_use pair_first session-test_session d-2' data-message-id='d-3' id='msg-d-3-first'>
           <div class='header'>
               <span title="ID: tool_001">📝 Edit <span class='tool-summary'>/tmp/decorator_example.py</span></span>
               <div class='header-info'>
@@ -4955,7 +4961,7 @@
       
       
       
-      <div class='message tool_result paired-message pair_last session-test_session d-2' data-message-id='d-4' id='msg-d-4-last'>
+      <div class='message tool_result pair_last session-test_session d-2' data-message-id='d-4' id='msg-d-4-last'>
           <div class='header'>
               <span title="ID: tool_001"></span>
               <div class='header-info'>
@@ -5031,7 +5037,7 @@
       
       
       
-      <div class='message tool_use paired-message pair_first session-test_session d-6' data-message-id='d-7' id='msg-d-7-first'>
+      <div class='message tool_use pair_first session-test_session d-6' data-message-id='d-7' id='msg-d-7-first'>
           <div class='header'>
               <span title="ID: tool_002">🛠️ Bash <span class='tool-summary'>Run the decorator example to show output</span></span>
               <div class='header-info'>
@@ -5048,7 +5054,7 @@
       
       
       
-      <div class='message tool_result paired-message pair_last session-test_session d-6' data-message-id='d-8' id='msg-d-8-last'>
+      <div class='message tool_result pair_last session-test_session d-6' data-message-id='d-8' id='msg-d-8-last'>
           <div class='header'>
               <span title="ID: tool_002"></span>
               <div class='header-info'>
@@ -6861,14 +6867,14 @@
       font-weight: 500;
       padding: 0.4em;
       transition: all 0.2s ease;
-      border-bottom: 2px solid;
+      border-bottom: 2px solid transparent;
       background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
   }
   
-  /* Double-line effect when folded */
+  /* Show border only when folded (content is hidden) */
   .fold-bar-section.folded {
-      border-bottom-style: double;
-      border-bottom-width: 4px;
+      border-bottom-style: solid;
+      border-bottom-width: 2px;
   }
   
   .fold-bar-section:hover {
@@ -6907,92 +6913,86 @@
       font-size: 0.9em;
   }
   
-  /* Border colors matching message types */
-  .fold-bar[data-border-color="user"] .fold-bar-section,
-  .fold-bar[data-border-color="user compacted"] .fold-bar-section,
-  .fold-bar[data-border-color="user sidechain"] .fold-bar-section,
-  .fold-bar[data-border-color="user compacted sidechain"] .fold-bar-section {
+  /* Border colors matching message types - only shown when folded */
+  .fold-bar[data-border-color="user"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user compacted"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user sidechain"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user compacted sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--user-color);
   }
   
-  .fold-bar[data-border-color="user slash-command"] .fold-bar-section,
-  .fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="user slash-command"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user command-output"] .fold-bar-section.folded {
       border-bottom-color: var(--user-dimmed);
   }
   
-  .fold-bar[data-border-color="assistant"] .fold-bar-section,
-  .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="assistant"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--assistant-color);
   }
   
-  .fold-bar[data-border-color="system"] .fold-bar-section,
-  .fold-bar[data-border-color="system command-output"] .fold-bar-section {
+  .fold-bar[data-border-color="system"] .fold-bar-section.folded {
       border-bottom-color: var(--system-color);
   }
   
-  .fold-bar[data-border-color="system-warning"] .fold-bar-section {
+  .fold-bar[data-border-color="system-warning"] .fold-bar-section.folded {
       border-bottom-color: var(--system-warning-color);
   }
   
-  .fold-bar[data-border-color="system-error"] .fold-bar-section {
+  .fold-bar[data-border-color="system-error"] .fold-bar-section.folded {
       border-bottom-color: var(--system-error-color);
   }
   
-  .fold-bar[data-border-color="system-info"] .fold-bar-section {
+  .fold-bar[data-border-color="system-info"] .fold-bar-section.folded {
       border-bottom-color: var(--info-dimmed);
   }
   
-  .fold-bar[data-border-color="tool_use"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_use sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_use"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_use sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--tool-use-color);
   }
   
-  .fold-bar[data-border-color="tool_result"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_result sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_result"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_result sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--success-dimmed);
   }
   
-  .fold-bar[data-border-color="tool_result error"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_result error sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_result error"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_result error sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--error-dimmed);
   }
   
-  .fold-bar[data-border-color="thinking"] .fold-bar-section,
-  .fold-bar[data-border-color="thinking sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="thinking"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="thinking sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--assistant-dimmed);
   }
   
-  .fold-bar[data-border-color="image"] .fold-bar-section,
-  .fold-bar[data-border-color="image sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="image"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="image sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--info-dimmed);
   }
   
-  .fold-bar[data-border-color="unknown"] .fold-bar-section,
-  .fold-bar[data-border-color="unknown sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="unknown"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="unknown sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--neutral-dimmed);
   }
   
-  .fold-bar[data-border-color="bash-input"] .fold-bar-section {
+  .fold-bar[data-border-color="bash-input"] .fold-bar-section.folded {
       border-bottom-color: var(--user-color);
   }
   
-  .fold-bar[data-border-color="bash-output"] .fold-bar-section {
+  .fold-bar[data-border-color="bash-output"] .fold-bar-section.folded {
       border-bottom-color: var(--user-dimmed);
   }
   
-  .fold-bar[data-border-color="session-header"] .fold-bar-section {
+  .fold-bar[data-border-color="session-header"] .fold-bar-section.folded {
       border-bottom-color: var(--system-warning-color);
   }
   
-  /* Sidechain (sub-assistant) fold-bar styling */
-  .sidechain .fold-bar-section {
-      border-bottom-style: dashed;
-      border-bottom-width: 2px;
-  }
-  
+  /* Sidechain (sub-assistant) fold-bar styling - dashed border when folded */
   .sidechain .fold-bar-section.folded {
       border-bottom-style: dashed;
-      border-bottom-width: 4px;
   }
   
   /* ========================================
@@ -7083,17 +7083,14 @@
   }
   
   /* Paired message styling */
-  .message.paired-message {
+  .message.pair_first {
       margin-bottom: 0;
-  }
-  
-  .message.paired-message.pair_first {
       border-bottom-left-radius: 0;
       border-bottom-right-radius: 0;
       border-bottom: none;
   }
   
-  .message.paired-message.pair_last {
+  .message.pair_last {
       margin-top: 0;
       margin-bottom: 1em;
       border-top-left-radius: 0;
@@ -7101,8 +7098,9 @@
       border-top: 1px solid #00000011;
   }
   
-  .message.paired-message.pair_middle {
+  .message.pair_middle {
       margin-top: 0;
+      margin-bottom: 0;
       border-radius: 0;
       border-top: 1px solid #00000011;
       border-bottom: none;
@@ -7135,7 +7133,7 @@
   }
   
   /* Dimmed assistant when paired with thinking */
-  .assistant.paired-message {
+  .assistant.pair_last {
       border-left-color: var(--assistant-dimmed);
   }
   
@@ -7369,7 +7367,7 @@
   }
   
   /* Full purple when thinking is paired (as pair_first) */
-  .thinking.paired-message.pair_first {
+  .thinking.pair_first {
       border-left-color: var(--assistant-color);
   }
   
@@ -7462,6 +7460,20 @@
   .user.compacted .content,
   .markdown {
       font-family: var(--font-ui);
+  }
+  
+  .markdown table {
+      border-collapse: collapse;
+  }
+  
+  .markdown td {
+      padding: .5em;
+      border-top: 1px solid #bbb;
+  }
+  
+  .markdown th {
+      padding: .5em;
+      border-bottom: 1px solid #888;
   }
   
   /* Code block styling */
@@ -9559,13 +9571,13 @@
           <div class='fold-bar' data-message-id='session-edge_cases' data-border-color='session-header'>
               
               
-              <div class='fold-bar-section fold-one-level' data-action='fold-one' data-target='session-edge_cases' data-title-unfolded='Fold (all levels) all 9 descendants' data-title-folded='Unfold (1st level) 4 users' title='Fold (all levels) all 9 descendants'>
+              <div class='fold-bar-section fold-one-level' data-action='fold-one' data-target='session-edge_cases' data-title-unfolded='Fold (all levels) all 9 descendants' data-title-folded='Unfold (1st level) 5 users' title='Fold (all levels) all 9 descendants'>
                   <span class='fold-icon'>▼</span>
-                  <span class='fold-label'>4 users</span>
+                  <span class='fold-label'>5 users</span>
               </div>
-              <div class='fold-bar-section fold-all-levels' data-action='fold-all' data-target='session-edge_cases' data-title-unfolded='Fold (to 1st level) 4 users' data-title-folded='Unfold (all levels) all 9 descendants' title='Fold (to 1st level) 4 users'>
+              <div class='fold-bar-section fold-all-levels' data-action='fold-all' data-target='session-edge_cases' data-title-unfolded='Fold (to 1st level) 5 users' data-title-folded='Unfold (all levels) all 9 descendants' title='Fold (to 1st level) 5 users'>
                   <span class='fold-icon'>▼▼</span>
-                  <span class='fold-label'>4 users, 2 assistants, 3 more total</span>
+                  <span class='fold-label'>5 users, 2 assistants, 2 more total</span>
               </div>
               
           </div>
@@ -9675,13 +9687,9 @@
           <div class='fold-bar' data-message-id='d-2' data-border-color='user'>
               
               
-              <div class='fold-bar-section fold-one-level' data-action='fold-one' data-target='d-2' data-title-unfolded='Fold (all levels) all 4 descendants' data-title-folded='Unfold (1st level) 1 tool, 1 system, 1 more' title='Fold (all levels) all 4 descendants'>
+              <div class='fold-bar-section fold-one-level full-width' data-action='fold-one' data-target='d-2' data-title-unfolded='Fold 1 tool' data-title-folded='Unfold (1st level) 1 tool' title='Fold 1 tool'>
                   <span class='fold-icon'>▼</span>
-                  <span class='fold-label'>1 tool, 1 system, 1 more</span>
-              </div>
-              <div class='fold-bar-section fold-all-levels' data-action='fold-all' data-target='d-2' data-title-unfolded='Fold (to 1st level) 1 tool, 1 system, 1 more' data-title-folded='Unfold (all levels) all 4 descendants' title='Fold (to 1st level) 1 tool, 1 system, 1 more'>
-                  <span class='fold-icon'>▼▼</span>
-                  <span class='fold-label'>2 tools, 1 system, 1 more total</span>
+                  <span class='fold-label'>1 tool</span>
               </div>
               
           </div>
@@ -9691,7 +9699,7 @@
       
       
       
-      <div class='message tool_use paired-message pair_first session-edge_cases d-2' data-message-id='d-3' id='msg-d-3-first'>
+      <div class='message tool_use pair_first session-edge_cases d-2' data-message-id='d-3' id='msg-d-3-first'>
           <div class='header'>
               <span title="ID: tool_edge_001">🛠️ FailingTool</span>
               <div class='header-info'>
@@ -9713,7 +9721,7 @@
       
       
       
-      <div class='message tool_result error paired-message pair_last session-edge_cases d-2' data-message-id='d-4' id='msg-d-4-last'>
+      <div class='message tool_result error pair_last session-edge_cases d-2' data-message-id='d-4' id='msg-d-4-last'>
           <div class='header'>
               <span title="ID: tool_edge_001">🚨 Error</span>
               <div class='header-info'>
@@ -9730,9 +9738,9 @@
       
       
       
-      <div class='message system paired-message pair_first session-edge_cases d-2' data-message-id='d-5' id='msg-d-5-first'>
+      <div class='message user slash-command pair_first session-edge_cases' data-message-id='d-5' id='msg-d-5-first'>
           <div class='header'>
-              <span>⚙️ System</span>
+              <span>🤷 Slash Command</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
                       <span class='timestamp' data-timestamp='2025-06-14T11:02:10Z'>2025-06-14 11:02:10</span>
@@ -9740,7 +9748,7 @@
                   
               </div>
           </div>
-          <div class='content'><strong>Command:</strong> test-command<br><strong>Args:</strong> --verbose --output /tmp/test.log<br><strong>Content:</strong><pre>This is the actual command content with some JSON structure and escaped characters: &quot;quotes&quot; and 
+          <div class='content'><code>test-command</code><br><strong>Args:</strong> --verbose --output /tmp/test.log<br><strong>Content:</strong><pre>This is the actual command content with some JSON structure and escaped characters: &quot;quotes&quot; and 
   line breaks
   </pre></div>
           
@@ -9749,9 +9757,9 @@
       
       
       
-      <div class='message system command-output paired-message pair_last session-edge_cases d-2' data-message-id='d-6' id='msg-d-6-last'>
+      <div class='message user command-output pair_last session-edge_cases' data-message-id='d-6' id='msg-d-6-last'>
           <div class='header'>
-              <span>System</span>
+              <span>🤷 Command Output</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
                       <span class='timestamp' data-timestamp='2025-06-14T11:02:20Z'>2025-06-14 11:02:20</span>
@@ -9759,19 +9767,33 @@
                   
               </div>
           </div>
-          <div class='content'><strong>Command Output:</strong><br><pre class='command-output-content'>Command output here:
+          <div class='content'><pre class='command-output-content'>Command output here:
   Line 1 of output
   Line 2 of output
   Some data: 12345
   Status: SUCCESS
   Timestamp: 2025-06-14T11:02:20Z</pre></div>
           
+          <div class='fold-bar' data-message-id='d-6' data-border-color='user command-output'>
+              
+              
+              <div class='fold-bar-section fold-one-level' data-action='fold-one' data-target='d-6' data-title-unfolded='Fold (all levels) all 2 descendants' data-title-folded='Unfold (1st level) 1 assistant' title='Fold (all levels) all 2 descendants'>
+                  <span class='fold-icon'>▼</span>
+                  <span class='fold-label'>1 assistant</span>
+              </div>
+              <div class='fold-bar-section fold-all-levels' data-action='fold-all' data-target='d-6' data-title-unfolded='Fold (to 1st level) 1 assistant' data-title-folded='Unfold (all levels) all 2 descendants' title='Fold (to 1st level) 1 assistant'>
+                  <span class='fold-icon'>▼▼</span>
+                  <span class='fold-label'>1 assistant, 1 tool total</span>
+              </div>
+              
+          </div>
+          
       </div>
       
       
       
       
-      <div class='message assistant session-edge_cases d-2' data-message-id='d-7' id='msg-d-7'>
+      <div class='message assistant session-edge_cases d-6' data-message-id='d-7' id='msg-d-7'>
           <div class='header'>
               <span>🤖 Assistant</span>
               <div class='header-info'>
@@ -9801,7 +9823,7 @@
       
       
       
-      <div class='message tool_use session-edge_cases d-2 d-7' data-message-id='d-8' id='msg-d-8'>
+      <div class='message tool_use session-edge_cases d-6 d-7' data-message-id='d-8' id='msg-d-8'>
           <div class='header'>
               <span title="ID: tool_edge_002">🛠️ MultiEdit</span>
               <div class='header-info'>
@@ -9811,30 +9833,7 @@
                   
               </div>
           </div>
-          <div class='content'><table class='tool-params-table'>
-              <tr>
-                  <td class='tool-param-key'>file_path</td>
-                  <td class='tool-param-value'>/tmp/complex_example.py</td>
-              </tr>
-          
-              <tr>
-                  <td class='tool-param-key'>edits</td>
-                  <td class='tool-param-value'>
-                          <details class='tool-param-collapsible'>
-                              <summary>[
-    {
-      &quot;old_string&quot;: &quot;&quot;,
-      &quot;new_string&quot;: &quot;#!/usr/bin/env python3\n\&quot;\&quot;\&quot;\nComplex example with ...</summary>
-                              <pre class='tool-param-structured'>[
-    {
-      &quot;old_string&quot;: &quot;&quot;,
-      &quot;new_string&quot;: &quot;#!/usr/bin/env python3\n\&quot;\&quot;\&quot;\nComplex example with multiple operations.\n\&quot;\&quot;\&quot;\n\nimport json\nimport sys\nfrom typing import List, Dict, Any\n\ndef process_data(items: List[Dict[str, Any]]) -&gt; None:\n    \&quot;\&quot;\&quot;\n    Process a list of data items.\n    \&quot;\&quot;\&quot;\n    for item in items:\n        print(f\&quot;Processing: {item[&#x27;name&#x27;]}\&quot;)\n        if item.get(&#x27;active&#x27;, False):\n            print(f\&quot;  Status: Active\&quot;)\n        else:\n            print(f\&quot;  Status: Inactive\&quot;)\n\nif __name__ == \&quot;__main__\&quot;:\n    sample_data = [\n        {\&quot;name\&quot;: \&quot;Item 1\&quot;, \&quot;active\&quot;: True},\n        {\&quot;name\&quot;: \&quot;Item 2\&quot;, \&quot;active\&quot;: False},\n        {\&quot;name\&quot;: \&quot;Item 3\&quot;, \&quot;active\&quot;: True}\n    ]\n    process_data(sample_data)&quot;
-    }
-  ]</pre>
-                          </details>
-                      </td>
-              </tr>
-          </table></div>
+          <div class='content'><div class='multiedit-tool-content'><div class='multiedit-file-path'>📝 /tmp/complex_example.py</div><div class='multiedit-count'>Applying 1 edits</div><div class='multiedit-item'><div class='multiedit-item-header'>Edit #1</div><div class='edit-diff'><div class='diff-line diff-added'><span class='diff-marker'>+</span>#!/usr/bin/env python3</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>&quot;&quot;&quot;</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>Complex example with multiple operations.</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>&quot;&quot;&quot;</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>import json</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>import sys</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>from typing import List, Dict, Any</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>def process_data(items: List[Dict[str, Any]]) -&gt; None:</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    &quot;&quot;&quot;</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    Process a list of data items.</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    &quot;&quot;&quot;</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    for item in items:</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        print(f&quot;Processing: {item[&#x27;name&#x27;]}&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        if item.get(&#x27;active&#x27;, False):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            print(f&quot;  Status: Active&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        else:</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            print(f&quot;  Status: Inactive&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>if __name__ == &quot;__main__&quot;:</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    sample_data = [</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        {&quot;name&quot;: &quot;Item 1&quot;, &quot;active&quot;: True},</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        {&quot;name&quot;: &quot;Item 2&quot;, &quot;active&quot;: False},</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        {&quot;name&quot;: &quot;Item 3&quot;, &quot;active&quot;: True}</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    ]</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    process_data(sample_data)</div></div></div></div></div>
           
       </div>
       
@@ -9907,35 +9906,36 @@
           <div class='content'>
       <div class="todo-list">
           
-                  <div class="todo-item pending medium">
-                      <span class="todo-status">⏳</span>
-                      <span class="todo-content">broken_todo</span>
-                  </div>
-              
-                  <div class="todo-item in_progress high">
-                      <span class="todo-status">🔄</span>
-                      <span class="todo-content">Implement core functionality</span>
-                      <span class="todo-id">#2</span>
-                  </div>
-              
-                  <div class="todo-item pending medium">
-                      <span class="todo-status">⏳</span>
-                      <span class="todo-content">Add comprehensive tests</span>
-                      <span class="todo-id">#3</span>
-                  </div>
-              
-                  <div class="todo-item pending low">
-                      <span class="todo-status">⏳</span>
-                      <span class="todo-content">Write user documentation</span>
-                      <span class="todo-id">#4</span>
-                  </div>
-              
-                  <div class="todo-item pending medium">
-                      <span class="todo-status">⏳</span>
-                      <span class="todo-content">Perform code review</span>
-                      <span class="todo-id">#5</span>
-                  </div>
-              
+              <div class="todo-item pending medium">
+                  <span class="todo-status">⏳</span>
+                  <span class="todo-content">broken_todo</span>
+                  
+              </div>
+          
+              <div class="todo-item in_progress high">
+                  <span class="todo-status">🔄</span>
+                  <span class="todo-content">Implement core functionality</span>
+                  <span class="todo-id">#2</span>
+              </div>
+          
+              <div class="todo-item pending medium">
+                  <span class="todo-status">⏳</span>
+                  <span class="todo-content">Add comprehensive tests</span>
+                  <span class="todo-id">#3</span>
+              </div>
+          
+              <div class="todo-item pending low">
+                  <span class="todo-status">⏳</span>
+                  <span class="todo-content">Write user documentation</span>
+                  <span class="todo-id">#4</span>
+              </div>
+          
+              <div class="todo-item pending medium">
+                  <span class="todo-status">⏳</span>
+                  <span class="todo-content">Perform code review</span>
+                  <span class="todo-id">#5</span>
+              </div>
+          
       </div>
       </div>
           
@@ -11693,14 +11693,14 @@
       font-weight: 500;
       padding: 0.4em;
       transition: all 0.2s ease;
-      border-bottom: 2px solid;
+      border-bottom: 2px solid transparent;
       background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
   }
   
-  /* Double-line effect when folded */
+  /* Show border only when folded (content is hidden) */
   .fold-bar-section.folded {
-      border-bottom-style: double;
-      border-bottom-width: 4px;
+      border-bottom-style: solid;
+      border-bottom-width: 2px;
   }
   
   .fold-bar-section:hover {
@@ -11739,92 +11739,86 @@
       font-size: 0.9em;
   }
   
-  /* Border colors matching message types */
-  .fold-bar[data-border-color="user"] .fold-bar-section,
-  .fold-bar[data-border-color="user compacted"] .fold-bar-section,
-  .fold-bar[data-border-color="user sidechain"] .fold-bar-section,
-  .fold-bar[data-border-color="user compacted sidechain"] .fold-bar-section {
+  /* Border colors matching message types - only shown when folded */
+  .fold-bar[data-border-color="user"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user compacted"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user sidechain"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user compacted sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--user-color);
   }
   
-  .fold-bar[data-border-color="user slash-command"] .fold-bar-section,
-  .fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="user slash-command"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user command-output"] .fold-bar-section.folded {
       border-bottom-color: var(--user-dimmed);
   }
   
-  .fold-bar[data-border-color="assistant"] .fold-bar-section,
-  .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="assistant"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--assistant-color);
   }
   
-  .fold-bar[data-border-color="system"] .fold-bar-section,
-  .fold-bar[data-border-color="system command-output"] .fold-bar-section {
+  .fold-bar[data-border-color="system"] .fold-bar-section.folded {
       border-bottom-color: var(--system-color);
   }
   
-  .fold-bar[data-border-color="system-warning"] .fold-bar-section {
+  .fold-bar[data-border-color="system-warning"] .fold-bar-section.folded {
       border-bottom-color: var(--system-warning-color);
   }
   
-  .fold-bar[data-border-color="system-error"] .fold-bar-section {
+  .fold-bar[data-border-color="system-error"] .fold-bar-section.folded {
       border-bottom-color: var(--system-error-color);
   }
   
-  .fold-bar[data-border-color="system-info"] .fold-bar-section {
+  .fold-bar[data-border-color="system-info"] .fold-bar-section.folded {
       border-bottom-color: var(--info-dimmed);
   }
   
-  .fold-bar[data-border-color="tool_use"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_use sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_use"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_use sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--tool-use-color);
   }
   
-  .fold-bar[data-border-color="tool_result"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_result sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_result"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_result sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--success-dimmed);
   }
   
-  .fold-bar[data-border-color="tool_result error"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_result error sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_result error"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_result error sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--error-dimmed);
   }
   
-  .fold-bar[data-border-color="thinking"] .fold-bar-section,
-  .fold-bar[data-border-color="thinking sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="thinking"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="thinking sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--assistant-dimmed);
   }
   
-  .fold-bar[data-border-color="image"] .fold-bar-section,
-  .fold-bar[data-border-color="image sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="image"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="image sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--info-dimmed);
   }
   
-  .fold-bar[data-border-color="unknown"] .fold-bar-section,
-  .fold-bar[data-border-color="unknown sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="unknown"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="unknown sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--neutral-dimmed);
   }
   
-  .fold-bar[data-border-color="bash-input"] .fold-bar-section {
+  .fold-bar[data-border-color="bash-input"] .fold-bar-section.folded {
       border-bottom-color: var(--user-color);
   }
   
-  .fold-bar[data-border-color="bash-output"] .fold-bar-section {
+  .fold-bar[data-border-color="bash-output"] .fold-bar-section.folded {
       border-bottom-color: var(--user-dimmed);
   }
   
-  .fold-bar[data-border-color="session-header"] .fold-bar-section {
+  .fold-bar[data-border-color="session-header"] .fold-bar-section.folded {
       border-bottom-color: var(--system-warning-color);
   }
   
-  /* Sidechain (sub-assistant) fold-bar styling */
-  .sidechain .fold-bar-section {
-      border-bottom-style: dashed;
-      border-bottom-width: 2px;
-  }
-  
+  /* Sidechain (sub-assistant) fold-bar styling - dashed border when folded */
   .sidechain .fold-bar-section.folded {
       border-bottom-style: dashed;
-      border-bottom-width: 4px;
   }
   
   /* ========================================
@@ -11915,17 +11909,14 @@
   }
   
   /* Paired message styling */
-  .message.paired-message {
+  .message.pair_first {
       margin-bottom: 0;
-  }
-  
-  .message.paired-message.pair_first {
       border-bottom-left-radius: 0;
       border-bottom-right-radius: 0;
       border-bottom: none;
   }
   
-  .message.paired-message.pair_last {
+  .message.pair_last {
       margin-top: 0;
       margin-bottom: 1em;
       border-top-left-radius: 0;
@@ -11933,8 +11924,9 @@
       border-top: 1px solid #00000011;
   }
   
-  .message.paired-message.pair_middle {
+  .message.pair_middle {
       margin-top: 0;
+      margin-bottom: 0;
       border-radius: 0;
       border-top: 1px solid #00000011;
       border-bottom: none;
@@ -11967,7 +11959,7 @@
   }
   
   /* Dimmed assistant when paired with thinking */
-  .assistant.paired-message {
+  .assistant.pair_last {
       border-left-color: var(--assistant-dimmed);
   }
   
@@ -12201,7 +12193,7 @@
   }
   
   /* Full purple when thinking is paired (as pair_first) */
-  .thinking.paired-message.pair_first {
+  .thinking.pair_first {
       border-left-color: var(--assistant-color);
   }
   
@@ -12294,6 +12286,20 @@
   .user.compacted .content,
   .markdown {
       font-family: var(--font-ui);
+  }
+  
+  .markdown table {
+      border-collapse: collapse;
+  }
+  
+  .markdown td {
+      padding: .5em;
+      border-top: 1px solid #bbb;
+  }
+  
+  .markdown th {
+      padding: .5em;
+      border-bottom: 1px solid #888;
   }
   
   /* Code block styling */
@@ -14638,7 +14644,7 @@
       
       
       
-      <div class='message tool_use paired-message pair_first session-test_session d-5' data-message-id='d-6' id='msg-d-6-first'>
+      <div class='message tool_use pair_first session-test_session d-5' data-message-id='d-6' id='msg-d-6-first'>
           <div class='header'>
               <span title="ID: tool_001">📝 Edit <span class='tool-summary'>/tmp/decorator_example.py</span></span>
               <div class='header-info'>
@@ -14655,7 +14661,7 @@
       
       
       
-      <div class='message tool_result paired-message pair_last session-test_session d-5' data-message-id='d-7' id='msg-d-7-last'>
+      <div class='message tool_result pair_last session-test_session d-5' data-message-id='d-7' id='msg-d-7-last'>
           <div class='header'>
               <span title="ID: tool_001"></span>
               <div class='header-info'>
@@ -14731,7 +14737,7 @@
       
       
       
-      <div class='message tool_use paired-message pair_first session-test_session d-9' data-message-id='d-10' id='msg-d-10-first'>
+      <div class='message tool_use pair_first session-test_session d-9' data-message-id='d-10' id='msg-d-10-first'>
           <div class='header'>
               <span title="ID: tool_002">🛠️ Bash <span class='tool-summary'>Run the decorator example to show output</span></span>
               <div class='header-info'>
@@ -14748,7 +14754,7 @@
       
       
       
-      <div class='message tool_result paired-message pair_last session-test_session d-9' data-message-id='d-11' id='msg-d-11-last'>
+      <div class='message tool_result pair_last session-test_session d-9' data-message-id='d-11' id='msg-d-11-last'>
           <div class='header'>
               <span title="ID: tool_002"></span>
               <div class='header-info'>
@@ -16561,14 +16567,14 @@
       font-weight: 500;
       padding: 0.4em;
       transition: all 0.2s ease;
-      border-bottom: 2px solid;
+      border-bottom: 2px solid transparent;
       background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
   }
   
-  /* Double-line effect when folded */
+  /* Show border only when folded (content is hidden) */
   .fold-bar-section.folded {
-      border-bottom-style: double;
-      border-bottom-width: 4px;
+      border-bottom-style: solid;
+      border-bottom-width: 2px;
   }
   
   .fold-bar-section:hover {
@@ -16607,92 +16613,86 @@
       font-size: 0.9em;
   }
   
-  /* Border colors matching message types */
-  .fold-bar[data-border-color="user"] .fold-bar-section,
-  .fold-bar[data-border-color="user compacted"] .fold-bar-section,
-  .fold-bar[data-border-color="user sidechain"] .fold-bar-section,
-  .fold-bar[data-border-color="user compacted sidechain"] .fold-bar-section {
+  /* Border colors matching message types - only shown when folded */
+  .fold-bar[data-border-color="user"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user compacted"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user sidechain"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user compacted sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--user-color);
   }
   
-  .fold-bar[data-border-color="user slash-command"] .fold-bar-section,
-  .fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="user slash-command"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user slash-command sidechain"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="user command-output"] .fold-bar-section.folded {
       border-bottom-color: var(--user-dimmed);
   }
   
-  .fold-bar[data-border-color="assistant"] .fold-bar-section,
-  .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="assistant"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="assistant sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--assistant-color);
   }
   
-  .fold-bar[data-border-color="system"] .fold-bar-section,
-  .fold-bar[data-border-color="system command-output"] .fold-bar-section {
+  .fold-bar[data-border-color="system"] .fold-bar-section.folded {
       border-bottom-color: var(--system-color);
   }
   
-  .fold-bar[data-border-color="system-warning"] .fold-bar-section {
+  .fold-bar[data-border-color="system-warning"] .fold-bar-section.folded {
       border-bottom-color: var(--system-warning-color);
   }
   
-  .fold-bar[data-border-color="system-error"] .fold-bar-section {
+  .fold-bar[data-border-color="system-error"] .fold-bar-section.folded {
       border-bottom-color: var(--system-error-color);
   }
   
-  .fold-bar[data-border-color="system-info"] .fold-bar-section {
+  .fold-bar[data-border-color="system-info"] .fold-bar-section.folded {
       border-bottom-color: var(--info-dimmed);
   }
   
-  .fold-bar[data-border-color="tool_use"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_use sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_use"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_use sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--tool-use-color);
   }
   
-  .fold-bar[data-border-color="tool_result"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_result sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_result"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_result sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--success-dimmed);
   }
   
-  .fold-bar[data-border-color="tool_result error"] .fold-bar-section,
-  .fold-bar[data-border-color="tool_result error sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="tool_result error"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="tool_result error sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--error-dimmed);
   }
   
-  .fold-bar[data-border-color="thinking"] .fold-bar-section,
-  .fold-bar[data-border-color="thinking sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="thinking"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="thinking sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--assistant-dimmed);
   }
   
-  .fold-bar[data-border-color="image"] .fold-bar-section,
-  .fold-bar[data-border-color="image sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="image"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="image sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--info-dimmed);
   }
   
-  .fold-bar[data-border-color="unknown"] .fold-bar-section,
-  .fold-bar[data-border-color="unknown sidechain"] .fold-bar-section {
+  .fold-bar[data-border-color="unknown"] .fold-bar-section.folded,
+  .fold-bar[data-border-color="unknown sidechain"] .fold-bar-section.folded {
       border-bottom-color: var(--neutral-dimmed);
   }
   
-  .fold-bar[data-border-color="bash-input"] .fold-bar-section {
+  .fold-bar[data-border-color="bash-input"] .fold-bar-section.folded {
       border-bottom-color: var(--user-color);
   }
   
-  .fold-bar[data-border-color="bash-output"] .fold-bar-section {
+  .fold-bar[data-border-color="bash-output"] .fold-bar-section.folded {
       border-bottom-color: var(--user-dimmed);
   }
   
-  .fold-bar[data-border-color="session-header"] .fold-bar-section {
+  .fold-bar[data-border-color="session-header"] .fold-bar-section.folded {
       border-bottom-color: var(--system-warning-color);
   }
   
-  /* Sidechain (sub-assistant) fold-bar styling */
-  .sidechain .fold-bar-section {
-      border-bottom-style: dashed;
-      border-bottom-width: 2px;
-  }
-  
+  /* Sidechain (sub-assistant) fold-bar styling - dashed border when folded */
   .sidechain .fold-bar-section.folded {
       border-bottom-style: dashed;
-      border-bottom-width: 4px;
   }
   
   /* ========================================
@@ -16783,17 +16783,14 @@
   }
   
   /* Paired message styling */
-  .message.paired-message {
+  .message.pair_first {
       margin-bottom: 0;
-  }
-  
-  .message.paired-message.pair_first {
       border-bottom-left-radius: 0;
       border-bottom-right-radius: 0;
       border-bottom: none;
   }
   
-  .message.paired-message.pair_last {
+  .message.pair_last {
       margin-top: 0;
       margin-bottom: 1em;
       border-top-left-radius: 0;
@@ -16801,8 +16798,9 @@
       border-top: 1px solid #00000011;
   }
   
-  .message.paired-message.pair_middle {
+  .message.pair_middle {
       margin-top: 0;
+      margin-bottom: 0;
       border-radius: 0;
       border-top: 1px solid #00000011;
       border-bottom: none;
@@ -16835,7 +16833,7 @@
   }
   
   /* Dimmed assistant when paired with thinking */
-  .assistant.paired-message {
+  .assistant.pair_last {
       border-left-color: var(--assistant-dimmed);
   }
   
@@ -17069,7 +17067,7 @@
   }
   
   /* Full purple when thinking is paired (as pair_first) */
-  .thinking.paired-message.pair_first {
+  .thinking.pair_first {
       border-left-color: var(--assistant-color);
   }
   
@@ -17162,6 +17160,20 @@
   .user.compacted .content,
   .markdown {
       font-family: var(--font-ui);
+  }
+  
+  .markdown table {
+      border-collapse: collapse;
+  }
+  
+  .markdown td {
+      padding: .5em;
+      border-top: 1px solid #bbb;
+  }
+  
+  .markdown th {
+      padding: .5em;
+      border-bottom: 1px solid #888;
   }
   
   /* Code block styling */
@@ -19368,7 +19380,7 @@
       
       
       
-      <div class='message tool_use paired-message pair_first session-test_session d-2' data-message-id='d-3' id='msg-d-3-first'>
+      <div class='message tool_use pair_first session-test_session d-2' data-message-id='d-3' id='msg-d-3-first'>
           <div class='header'>
               <span title="ID: tool_001">📝 Edit <span class='tool-summary'>/tmp/decorator_example.py</span></span>
               <div class='header-info'>
@@ -19385,7 +19397,7 @@
       
       
       
-      <div class='message tool_result paired-message pair_last session-test_session d-2' data-message-id='d-4' id='msg-d-4-last'>
+      <div class='message tool_result pair_last session-test_session d-2' data-message-id='d-4' id='msg-d-4-last'>
           <div class='header'>
               <span title="ID: tool_001"></span>
               <div class='header-info'>
@@ -19461,7 +19473,7 @@
       
       
       
-      <div class='message tool_use paired-message pair_first session-test_session d-6' data-message-id='d-7' id='msg-d-7-first'>
+      <div class='message tool_use pair_first session-test_session d-6' data-message-id='d-7' id='msg-d-7-first'>
           <div class='header'>
               <span title="ID: tool_002">🛠️ Bash <span class='tool-summary'>Run the decorator example to show output</span></span>
               <div class='header-info'>
@@ -19478,7 +19490,7 @@
       
       
       
-      <div class='message tool_result paired-message pair_last session-test_session d-6' data-message-id='d-8' id='msg-d-8-last'>
+      <div class='message tool_result pair_last session-test_session d-6' data-message-id='d-8' id='msg-d-8-last'>
           <div class='header'>
               <span title="ID: tool_002"></span>
               <div class='header-info'>

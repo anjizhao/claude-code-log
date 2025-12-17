@@ -5,8 +5,8 @@ import json
 import tempfile
 from pathlib import Path
 
-from claude_code_log.parser import load_transcript
-from claude_code_log.renderer import generate_html
+from claude_code_log.converter import load_transcript
+from claude_code_log.html.renderer import generate_html
 
 
 def test_bash_input_rendering():
@@ -337,7 +337,7 @@ def test_bash_ansi_color_rendering():
 
 def test_bash_tool_result_ansi_processing():
     """Test that Bash tool results have ANSI codes processed."""
-    from claude_code_log.renderer import (
+    from claude_code_log.html.tool_formatters import (
         format_tool_result_content,
         _looks_like_bash_output,
     )
@@ -367,7 +367,7 @@ def test_bash_tool_result_ansi_processing():
 
 def test_bash_tool_result_cursor_stripping():
     """Test that cursor movement codes are stripped from Bash tool results."""
-    from claude_code_log.renderer import format_tool_result_content
+    from claude_code_log.html import format_tool_result_content
     from claude_code_log.models import ToolResultContent
 
     # Content with cursor movement codes

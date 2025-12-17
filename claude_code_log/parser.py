@@ -2,48 +2,81 @@
 """Parse and extract data from Claude transcript JSONL files."""
 
 import json
-from pathlib import Path
 import re
-from typing import Any, List, Optional, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Union, cast, TypeGuard
 from datetime import datetime
-import dateparser
+
+from anthropic.types import Message as AnthropicMessage
+from anthropic.types import Usage as AnthropicUsage
+from anthropic.types.text_block import TextBlock
+from anthropic.types.thinking_block import ThinkingBlock
+from pydantic import BaseModel
 
 from .models import (
-    TranscriptEntry,
-    UserTranscriptEntry,
-    SummaryTranscriptEntry,
-    parse_transcript_entry,
+    # Content types
     ContentItem,
     TextContent,
     ThinkingContent,
+    ToolUseContent,
+    ToolResultContent,
+    ImageContent,
+    # User message content models
+    SlashCommandContent,
+    CommandOutputContent,
+    BashInputContent,
+    BashOutputContent,
+    CompactedSummaryContent,
+    UserMemoryContent,
+    UserTextContent,
+    IdeNotificationContent,
+    IdeOpenedFile,
+    IdeSelection,
+    IdeDiagnostic,
+    # Assistant message content models
+    BashInput,
+    ReadInput,
+    WriteInput,
+    EditInput,
+    EditItem,
+    MultiEditInput,
+    GlobInput,
+    GrepInput,
+    TaskInput,
+    TodoWriteInput,
+    TodoWriteItem,
+    AskUserQuestionInput,
+    AskUserQuestionItem,
+    AskUserQuestionOption,
+    ExitPlanModeInput,
+    ToolInput,
+    # Usage and transcript entry types
+    UsageInfo,
+    MessageType,
+    TranscriptEntry,
+    UserTranscriptEntry,
+    AssistantTranscriptEntry,
+    SummaryTranscriptEntry,
+    SystemTranscriptEntry,
+    QueueOperationTranscriptEntry,
 )
-
-if TYPE_CHECKING:
-    from .cache import CacheManager
 
 
 def extract_text_content(content: Union[str, List[ContentItem], None]) -> str:
-    """Extract text content from Claude message content structure (supports both custom and Anthropic types)."""
+    """Extract text content from Claude message content structure.
+
+    Supports both custom models (TextContent, ThinkingContent) and official
+    Anthropic SDK types (TextBlock, ThinkingBlock).
+    """
     if content is None:
         return ""
     if isinstance(content, list):
         text_parts: List[str] = []
         for item in content:
-            # Handle both custom TextContent and official Anthropic TextBlock
-            if isinstance(item, TextContent):
+            # Handle text content (custom TextContent or Anthropic TextBlock)
+            if isinstance(item, (TextContent, TextBlock)):
                 text_parts.append(item.text)
-            elif (
-                hasattr(item, "type")
-                and hasattr(item, "text")
-                and getattr(item, "type") == "text"
-            ):
-                # Official Anthropic TextBlock
-                text_parts.append(getattr(item, "text"))
-            elif isinstance(item, ThinkingContent):
-                # Skip thinking content in main text extraction
-                continue
-            elif hasattr(item, "type") and getattr(item, "type") == "thinking":
-                # Skip official Anthropic thinking content too
+            # Skip thinking content (custom ThinkingContent or Anthropic ThinkingBlock)
+            elif isinstance(item, (ThinkingContent, ThinkingBlock)):
                 continue
         return "\n".join(text_parts)
     else:
@@ -58,258 +91,866 @@ def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
         return None
 
 
-def filter_messages_by_date(
-    messages: List[TranscriptEntry], from_date: Optional[str], to_date: Optional[str]
-) -> List[TranscriptEntry]:
-    """Filter messages based on date range."""
-    if not from_date and not to_date:
-        return messages
-
-    # Parse the date strings using dateparser
-    from_dt = None
-    to_dt = None
-
-    if from_date:
-        from_dt = dateparser.parse(from_date)
-        if not from_dt:
-            raise ValueError(f"Could not parse from-date: {from_date}")
-        # If parsing relative dates like "today", start from beginning of day
-        if from_date in ["today", "yesterday"] or "days ago" in from_date:
-            from_dt = from_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    if to_date:
-        to_dt = dateparser.parse(to_date)
-        if not to_dt:
-            raise ValueError(f"Could not parse to-date: {to_date}")
-        # If parsing relative dates like "today", end at end of day
-        if to_date in ["today", "yesterday"] or "days ago" in to_date:
-            to_dt = to_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
-
-    filtered_messages: List[TranscriptEntry] = []
-    for message in messages:
-        # Handle SummaryTranscriptEntry which doesn't have timestamp
-        if isinstance(message, SummaryTranscriptEntry):
-            filtered_messages.append(message)
-            continue
-
-        timestamp_str = message.timestamp
-        if not timestamp_str:
-            continue
-
-        message_dt = parse_timestamp(timestamp_str)
-        if not message_dt:
-            continue
-
-        # Convert to naive datetime for comparison (dateparser returns naive datetimes)
-        if message_dt.tzinfo:
-            message_dt = message_dt.replace(tzinfo=None)
-
-        # Check if message falls within date range
-        if from_dt and message_dt < from_dt:
-            continue
-        if to_dt and message_dt > to_dt:
-            continue
-
-        filtered_messages.append(message)
-
-    return filtered_messages
+# =============================================================================
+# User Message Content Parsing
+# =============================================================================
 
 
-def load_transcript(
-    jsonl_path: Path,
-    cache_manager: Optional["CacheManager"] = None,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-    silent: bool = False,
-    _loaded_files: Optional[set[Path]] = None,
-) -> List[TranscriptEntry]:
-    """Load and parse JSONL transcript file, using cache if available.
+def parse_slash_command(text: str) -> Optional[SlashCommandContent]:
+    """Parse slash command tags from text.
 
     Args:
-        _loaded_files: Internal parameter to track loaded files and prevent infinite recursion.
+        text: Raw text that may contain command-name, command-args, command-contents tags
+
+    Returns:
+        SlashCommandContent if tags found, None otherwise
     """
-    # Initialize loaded files set on first call
-    if _loaded_files is None:
-        _loaded_files = set()
+    command_name_match = re.search(r"<command-name>([^<]+)</command-name>", text)
+    if not command_name_match:
+        return None
 
-    # Prevent infinite recursion by checking if this file is already being loaded
-    if jsonl_path in _loaded_files:
-        return []
+    command_name = command_name_match.group(1).strip()
 
-    _loaded_files.add(jsonl_path)
-    # Try to load from cache first
-    if cache_manager is not None:
-        # Use filtered loading if date parameters are provided
-        if from_date or to_date:
-            cached_entries = cache_manager.load_cached_entries_filtered(
-                jsonl_path, from_date, to_date
-            )
-        else:
-            cached_entries = cache_manager.load_cached_entries(jsonl_path)
+    command_args_match = re.search(r"<command-args>([^<]*)</command-args>", text)
+    command_args = command_args_match.group(1).strip() if command_args_match else ""
 
-        if cached_entries is not None:
-            if not silent:
-                print(f"Loading {jsonl_path} from cache...")
-            return cached_entries
+    # Parse command contents, handling JSON format
+    command_contents_match = re.search(
+        r"<command-contents>(.+?)</command-contents>", text, re.DOTALL
+    )
+    command_contents = ""
+    if command_contents_match:
+        contents_text = command_contents_match.group(1).strip()
+        # Try to parse as JSON and extract the text field
+        try:
+            contents_json: Any = json.loads(contents_text)
+            if isinstance(contents_json, dict) and "text" in contents_json:
+                text_dict = cast(Dict[str, Any], contents_json)
+                text_value = text_dict["text"]
+                command_contents = str(text_value)
+            else:
+                command_contents = contents_text
+        except json.JSONDecodeError:
+            command_contents = contents_text
 
-    # Parse from source file
-    messages: List[TranscriptEntry] = []
-    agent_ids: set[str] = set()  # Collect agentId references while parsing
+    return SlashCommandContent(
+        command_name=command_name,
+        command_args=command_args,
+        command_contents=command_contents,
+    )
 
-    with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
-        if not silent:
-            print(f"Processing {jsonl_path}...")
-        for line_no, line in enumerate(f, 1):  # Start counting from 1
-            line = line.strip()
-            if line:
-                try:
-                    entry_dict: dict[str, Any] | str = json.loads(line)
-                    if not isinstance(entry_dict, dict):
-                        print(
-                            f"Line {line_no} of {jsonl_path} is not a JSON object: {line}"
-                        )
-                        continue
 
-                    # Check for agentId BEFORE Pydantic parsing
-                    # agentId can be at top level OR nested in toolUseResult
-                    # For UserTranscriptEntry, we need to copy it to top level so Pydantic preserves it
-                    if "agentId" in entry_dict:
-                        agent_id = entry_dict.get("agentId")
-                        if agent_id:
-                            agent_ids.add(agent_id)
-                    elif "toolUseResult" in entry_dict:
-                        tool_use_result = entry_dict.get("toolUseResult")
-                        if (
-                            isinstance(tool_use_result, dict)
-                            and "agentId" in tool_use_result
-                        ):
-                            agent_id_value = tool_use_result.get("agentId")  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-                            if isinstance(agent_id_value, str):
-                                agent_ids.add(agent_id_value)
-                                # Copy agentId to top level for Pydantic to preserve
-                                entry_dict["agentId"] = agent_id_value
+def parse_command_output(text: str) -> Optional[CommandOutputContent]:
+    """Parse command output tags from text.
 
-                    entry_type: str | None = entry_dict.get("type")
+    Args:
+        text: Raw text that may contain local-command-stdout tags
 
-                    if entry_type in [
-                        "user",
-                        "assistant",
-                        "summary",
-                        "system",
-                        "queue-operation",
-                    ]:
-                        # Parse using Pydantic models
-                        entry = parse_transcript_entry(entry_dict)
-                        messages.append(entry)
-                    elif (
-                        entry_type
-                        in [
-                            "file-history-snapshot",  # Internal Claude Code file backup metadata
-                        ]
-                    ):
-                        # Silently skip internal message types we don't render
-                        pass
-                    else:
-                        print(
-                            f"Line {line_no} of {jsonl_path} is not a recognised message type: {line}"
-                        )
-                except json.JSONDecodeError as e:
-                    print(
-                        f"Line {line_no} of {jsonl_path} | JSON decode error: {str(e)}"
+    Returns:
+        CommandOutputContent if tags found, None otherwise
+    """
+    stdout_match = re.search(
+        r"<local-command-stdout>(.*?)</local-command-stdout>",
+        text,
+        re.DOTALL,
+    )
+    if not stdout_match:
+        return None
+
+    stdout_content = stdout_match.group(1).strip()
+    # Check if content looks like markdown (starts with markdown headers)
+    is_markdown = bool(re.match(r"^#+\s+", stdout_content, re.MULTILINE))
+
+    return CommandOutputContent(stdout=stdout_content, is_markdown=is_markdown)
+
+
+def parse_bash_input(text: str) -> Optional[BashInputContent]:
+    """Parse bash input tags from text.
+
+    Args:
+        text: Raw text that may contain bash-input tags
+
+    Returns:
+        BashInputContent if tags found, None otherwise
+    """
+    bash_match = re.search(r"<bash-input>(.*?)</bash-input>", text, re.DOTALL)
+    if not bash_match:
+        return None
+
+    return BashInputContent(command=bash_match.group(1).strip())
+
+
+def parse_bash_output(text: str) -> Optional[BashOutputContent]:
+    """Parse bash output tags from text.
+
+    Args:
+        text: Raw text that may contain bash-stdout/bash-stderr tags
+
+    Returns:
+        BashOutputContent if tags found, None otherwise
+    """
+    stdout_match = re.search(r"<bash-stdout>(.*?)</bash-stdout>", text, re.DOTALL)
+    stderr_match = re.search(r"<bash-stderr>(.*?)</bash-stderr>", text, re.DOTALL)
+
+    if not stdout_match and not stderr_match:
+        return None
+
+    stdout = stdout_match.group(1).strip() if stdout_match else None
+    stderr = stderr_match.group(1).strip() if stderr_match else None
+
+    # Convert empty strings to None for cleaner representation
+    if stdout == "":
+        stdout = None
+    if stderr == "":
+        stderr = None
+
+    return BashOutputContent(stdout=stdout, stderr=stderr)
+
+
+# Shared regex patterns for IDE notification tags
+IDE_OPENED_FILE_PATTERN = re.compile(
+    r"<ide_opened_file>(.*?)</ide_opened_file>", re.DOTALL
+)
+IDE_SELECTION_PATTERN = re.compile(r"<ide_selection>(.*?)</ide_selection>", re.DOTALL)
+IDE_DIAGNOSTICS_PATTERN = re.compile(
+    r"<post-tool-use-hook>\s*<ide_diagnostics>(.*?)</ide_diagnostics>\s*</post-tool-use-hook>",
+    re.DOTALL,
+)
+
+
+def parse_ide_notifications(text: str) -> Optional[IdeNotificationContent]:
+    """Parse IDE notification tags from text.
+
+    Handles:
+    - <ide_opened_file>: Simple file open notifications
+    - <ide_selection>: Code selection notifications
+    - <post-tool-use-hook><ide_diagnostics>: JSON diagnostic arrays
+
+    Args:
+        text: Raw text that may contain IDE notification tags
+
+    Returns:
+        IdeNotificationContent if any tags found, None otherwise
+    """
+    opened_files: List[IdeOpenedFile] = []
+    selections: List[IdeSelection] = []
+    diagnostics: List[IdeDiagnostic] = []
+    remaining_text = text
+
+    # Pattern 1: <ide_opened_file>content</ide_opened_file>
+    for match in IDE_OPENED_FILE_PATTERN.finditer(remaining_text):
+        content = match.group(1).strip()
+        opened_files.append(IdeOpenedFile(content=content))
+
+    remaining_text = IDE_OPENED_FILE_PATTERN.sub("", remaining_text)
+
+    # Pattern 2: <ide_selection>content</ide_selection>
+    for match in IDE_SELECTION_PATTERN.finditer(remaining_text):
+        content = match.group(1).strip()
+        selections.append(IdeSelection(content=content))
+
+    remaining_text = IDE_SELECTION_PATTERN.sub("", remaining_text)
+
+    # Pattern 3: <post-tool-use-hook><ide_diagnostics>JSON</ide_diagnostics></post-tool-use-hook>
+    for match in IDE_DIAGNOSTICS_PATTERN.finditer(remaining_text):
+        json_content = match.group(1).strip()
+        try:
+            parsed_diagnostics: Any = json.loads(json_content)
+            if isinstance(parsed_diagnostics, list):
+                diagnostics.append(
+                    IdeDiagnostic(
+                        diagnostics=cast(List[Dict[str, Any]], parsed_diagnostics)
                     )
-                except ValueError as e:
-                    # Extract a more descriptive error message
-                    error_msg = str(e)
-                    if "validation error" in error_msg.lower():
-                        err_no_url = re.sub(
-                            r"    For further information visit https://errors.pydantic(.*)\n?",
-                            "",
-                            error_msg,
-                        )
-                        print(f"Line {line_no} of {jsonl_path} | {err_no_url}")
-                    else:
-                        print(
-                            f"Line {line_no} of {jsonl_path} | ValueError: {error_msg}"
-                            "\n{traceback.format_exc()}"
-                        )
-                except Exception as e:
-                    print(
-                        f"Line {line_no} of {jsonl_path} | Unexpected error: {str(e)}"
-                        "\n{traceback.format_exc()}"
-                    )
-
-    # Load agent files if any were referenced
-    # Build a map of agentId -> agent messages
-    agent_messages_map: dict[str, List[TranscriptEntry]] = {}
-    if agent_ids:
-        parent_dir = jsonl_path.parent
-        for agent_id in agent_ids:
-            agent_file = parent_dir / f"agent-{agent_id}.jsonl"
-            # Skip if the agent file is the same as the current file (self-reference)
-            if agent_file == jsonl_path:
-                continue
-            if agent_file.exists():
-                if not silent:
-                    print(f"Loading agent file {agent_file}...")
-                # Recursively load the agent file (it might reference other agents)
-                agent_messages = load_transcript(
-                    agent_file,
-                    cache_manager,
-                    from_date,
-                    to_date,
-                    silent=True,
-                    _loaded_files=_loaded_files,
                 )
-                agent_messages_map[agent_id] = agent_messages
+            else:
+                # Not a list, store as raw content
+                diagnostics.append(IdeDiagnostic(raw_content=json_content))
+        except (json.JSONDecodeError, ValueError):
+            # JSON parsing failed, store raw content
+            diagnostics.append(IdeDiagnostic(raw_content=json_content))
 
-    # Insert agent messages at their point of use
-    if agent_messages_map:
-        # Iterate through messages and insert agent messages after the message
-        # that references them (via UserTranscriptEntry.agentId)
-        result_messages: List[TranscriptEntry] = []
-        for message in messages:
-            result_messages.append(message)
+    remaining_text = IDE_DIAGNOSTICS_PATTERN.sub("", remaining_text)
 
-            # Check if this is a UserTranscriptEntry with agentId
-            if isinstance(message, UserTranscriptEntry) and message.agentId:
-                agent_id = message.agentId
-                if agent_id in agent_messages_map:
-                    # Insert agent messages right after this message
-                    result_messages.extend(agent_messages_map[agent_id])
+    # Only return if we found any IDE tags
+    if not opened_files and not selections and not diagnostics:
+        return None
 
-        messages = result_messages
-
-    # Save to cache if cache manager is available
-    if cache_manager is not None:
-        cache_manager.save_cached_entries(jsonl_path, messages)
-
-    return messages
+    return IdeNotificationContent(
+        opened_files=opened_files,
+        selections=selections,
+        diagnostics=diagnostics,
+        remaining_text=remaining_text.strip(),
+    )
 
 
-def load_directory_transcripts(
-    directory_path: Path,
-    cache_manager: Optional["CacheManager"] = None,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-    silent: bool = False,
-) -> List[TranscriptEntry]:
-    """Load all JSONL transcript files from a directory and combine them."""
-    all_messages: List[TranscriptEntry] = []
+# Pattern for compacted session summary detection
+COMPACTED_SUMMARY_PREFIX = "This session is being continued from a previous conversation that ran out of context"
 
-    # Find all .jsonl files
-    jsonl_files = list(directory_path.glob("*.jsonl"))
 
-    for jsonl_file in jsonl_files:
-        messages = load_transcript(
-            jsonl_file, cache_manager, from_date, to_date, silent
-        )
-        all_messages.extend(messages)
+def parse_compacted_summary(
+    content_list: List[ContentItem],
+) -> Optional[CompactedSummaryContent]:
+    """Parse compacted session summary from content list.
 
-    # Sort all messages chronologically
-    def get_timestamp(entry: TranscriptEntry) -> str:
-        if hasattr(entry, "timestamp"):
-            return entry.timestamp  # type: ignore
-        return ""
+    Compacted summaries are generated when a session runs out of context and
+    needs to be continued. They contain a summary of the previous conversation.
 
-    all_messages.sort(key=get_timestamp)
-    return all_messages
+    If the first text item starts with the compacted summary prefix, all text
+    items are combined into a single CompactedSummaryContent.
+
+    Args:
+        content_list: List of ContentItem from user message
+
+    Returns:
+        CompactedSummaryContent if first text is a compacted summary, None otherwise
+    """
+    if not content_list or not hasattr(content_list[0], "text"):
+        return None
+
+    first_text = getattr(content_list[0], "text", "")
+    if not first_text.startswith(COMPACTED_SUMMARY_PREFIX):
+        return None
+
+    # Combine all text content for compacted summaries
+    # Use hasattr check to handle both TextContent models and SDK TextBlock objects
+    texts = cast(
+        list[str],
+        [item.text for item in content_list if hasattr(item, "text")],  # type: ignore[union-attr]
+    )
+    all_text = "\n\n".join(texts)
+    return CompactedSummaryContent(summary_text=all_text)
+
+
+# Pattern for user memory input tag
+USER_MEMORY_PATTERN = re.compile(
+    r"<user-memory-input>(.*?)</user-memory-input>", re.DOTALL
+)
+
+
+def parse_user_memory(text: str) -> Optional[UserMemoryContent]:
+    """Parse user memory input tag from text.
+
+    User memory input contains context that the user has provided from
+    their CLAUDE.md or other memory sources.
+
+    Args:
+        text: Raw text that may contain user memory input tag
+
+    Returns:
+        UserMemoryContent if tag found, None otherwise
+    """
+    match = USER_MEMORY_PATTERN.search(text)
+    if match:
+        memory_content = match.group(1).strip()
+        return UserMemoryContent(memory_text=memory_content)
+    return None
+
+
+# Type alias for content models returned by parse_user_message_content
+UserMessageContent = Union[CompactedSummaryContent, UserMemoryContent, UserTextContent]
+
+
+def parse_user_message_content(
+    content_list: List[ContentItem],
+) -> Optional[UserMessageContent]:
+    """Parse user message content into a structured content model.
+
+    Returns a content model for HtmlRenderer to format. The caller can use
+    isinstance() checks to determine the content type:
+    - CompactedSummaryContent: Session continuation summaries
+    - UserMemoryContent: User memory input from CLAUDE.md
+    - UserTextContent: Normal user text with optional IDE notifications
+
+    Args:
+        content_list: List of ContentItem from user message
+
+    Returns:
+        A content model, or None if content_list is empty or has no text.
+    """
+    # Check first text item
+    if not content_list or not hasattr(content_list[0], "text"):
+        return None
+
+    # Check for compacted session summary first (handles text combining internally)
+    compacted = parse_compacted_summary(content_list)
+    if compacted:
+        return compacted
+
+    first_text = getattr(content_list[0], "text", "")
+
+    # Check for user memory input
+    user_memory = parse_user_memory(first_text)
+    if user_memory:
+        return user_memory
+
+    # Parse IDE notifications from first text item
+    ide_content = parse_ide_notifications(first_text)
+
+    # Get remaining text after IDE notifications extracted
+    if ide_content:
+        remaining_text = ide_content.remaining_text
+    else:
+        remaining_text = first_text
+
+    # Combine remaining text with any other text items
+    # Use hasattr check to handle both TextContent models and SDK TextBlock objects
+    other_text: list[str] = [
+        item.text  # type: ignore[union-attr]
+        for item in content_list[1:]
+        if hasattr(item, "text")
+    ]
+    all_text = remaining_text
+    if other_text:
+        all_text = "\n\n".join([remaining_text] + other_text)
+
+    # Return UserTextContent with optional IDE notifications
+    return UserTextContent(text=all_text, ide_notifications=ide_content)
+
+
+# =============================================================================
+# Message Type Detection
+# =============================================================================
+
+
+def is_system_message(text_content: str) -> bool:
+    """Check if a message is a system message that should be filtered out."""
+    system_message_patterns = [
+        "Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.",
+        "[Request interrupted by user for tool use]",
+        "<local-command-stdout>",
+    ]
+
+    return any(text_content.startswith(pattern) for pattern in system_message_patterns)
+
+
+def is_command_message(text_content: str) -> bool:
+    """Check if a message contains command information that should be displayed."""
+    return "<command-name>" in text_content and "<command-message>" in text_content
+
+
+def is_local_command_output(text_content: str) -> bool:
+    """Check if a message contains local command output."""
+    return "<local-command-stdout>" in text_content
+
+
+def is_bash_input(text_content: str) -> bool:
+    """Check if a message contains bash input command."""
+    return "<bash-input>" in text_content and "</bash-input>" in text_content
+
+
+def is_bash_output(text_content: str) -> bool:
+    """Check if a message contains bash command output."""
+    return "<bash-stdout>" in text_content or "<bash-stderr>" in text_content
+
+
+def is_warmup_only_session(messages: List[TranscriptEntry], session_id: str) -> bool:
+    """Check if a session contains only warmup user messages.
+
+    A warmup session is one where ALL user messages are literally just "Warmup".
+    Sessions with no user messages return False (not considered warmup).
+
+    Args:
+        messages: List of all transcript entries
+        session_id: The session ID to check
+
+    Returns:
+        True if ALL user messages in the session are "Warmup", False otherwise
+    """
+    user_messages_in_session: List[str] = []
+
+    for message in messages:
+        if (
+            isinstance(message, UserTranscriptEntry)
+            and getattr(message, "sessionId", "") == session_id
+            and hasattr(message, "message")
+        ):
+            text_content = extract_text_content(message.message.content).strip()
+            user_messages_in_session.append(text_content)
+
+    # No user messages = not a warmup session
+    if not user_messages_in_session:
+        return False
+
+    # All user messages must be exactly "Warmup"
+    return all(msg == "Warmup" for msg in user_messages_in_session)
+
+
+# =============================================================================
+# Type Guards for TranscriptEntry
+# =============================================================================
+
+
+def is_user_entry(entry: TranscriptEntry) -> TypeGuard[UserTranscriptEntry]:
+    """Check if entry is a user transcript entry."""
+    return entry.type == MessageType.USER
+
+
+def is_assistant_entry(entry: TranscriptEntry) -> TypeGuard[AssistantTranscriptEntry]:
+    """Check if entry is an assistant transcript entry."""
+    return entry.type == MessageType.ASSISTANT
+
+
+# =============================================================================
+# Tool Input Parsing
+# =============================================================================
+
+TOOL_INPUT_MODELS: Dict[str, type[BaseModel]] = {
+    "Bash": BashInput,
+    "Read": ReadInput,
+    "Write": WriteInput,
+    "Edit": EditInput,
+    "MultiEdit": MultiEditInput,
+    "Glob": GlobInput,
+    "Grep": GrepInput,
+    "Task": TaskInput,
+    "TodoWrite": TodoWriteInput,
+    "AskUserQuestion": AskUserQuestionInput,
+    "ask_user_question": AskUserQuestionInput,  # Legacy tool name
+    "ExitPlanMode": ExitPlanModeInput,
+}
+
+
+# -- Lenient Parsing Helpers --------------------------------------------------
+# These functions create typed models even when strict validation fails.
+# They use defaults for missing fields and skip invalid nested items.
+
+
+def _parse_todowrite_lenient(data: Dict[str, Any]) -> TodoWriteInput:
+    """Parse TodoWrite input leniently, handling malformed data."""
+    todos_raw = data.get("todos", [])
+    valid_todos: List[TodoWriteItem] = []
+    for item in todos_raw:
+        if isinstance(item, dict):
+            try:
+                valid_todos.append(TodoWriteItem.model_validate(item))
+            except Exception:
+                pass
+        elif isinstance(item, str):
+            valid_todos.append(TodoWriteItem(content=item))
+    return TodoWriteInput(todos=valid_todos)
+
+
+def _parse_bash_lenient(data: Dict[str, Any]) -> BashInput:
+    """Parse Bash input leniently."""
+    return BashInput(
+        command=data.get("command", ""),
+        description=data.get("description"),
+        timeout=data.get("timeout"),
+        run_in_background=data.get("run_in_background"),
+    )
+
+
+def _parse_write_lenient(data: Dict[str, Any]) -> WriteInput:
+    """Parse Write input leniently."""
+    return WriteInput(
+        file_path=data.get("file_path", ""),
+        content=data.get("content", ""),
+    )
+
+
+def _parse_edit_lenient(data: Dict[str, Any]) -> EditInput:
+    """Parse Edit input leniently."""
+    return EditInput(
+        file_path=data.get("file_path", ""),
+        old_string=data.get("old_string", ""),
+        new_string=data.get("new_string", ""),
+        replace_all=data.get("replace_all"),
+    )
+
+
+def _parse_multiedit_lenient(data: Dict[str, Any]) -> MultiEditInput:
+    """Parse Multiedit input leniently."""
+    edits_raw = data.get("edits", [])
+    valid_edits: List[EditItem] = []
+    for edit in edits_raw:
+        if isinstance(edit, dict):
+            try:
+                valid_edits.append(EditItem.model_validate(edit))
+            except Exception:
+                pass
+    return MultiEditInput(file_path=data.get("file_path", ""), edits=valid_edits)
+
+
+def _parse_task_lenient(data: Dict[str, Any]) -> TaskInput:
+    """Parse Task input leniently."""
+    return TaskInput(
+        prompt=data.get("prompt", ""),
+        subagent_type=data.get("subagent_type", ""),
+        description=data.get("description", ""),
+        model=data.get("model"),
+        run_in_background=data.get("run_in_background"),
+        resume=data.get("resume"),
+    )
+
+
+def _parse_read_lenient(data: Dict[str, Any]) -> ReadInput:
+    """Parse Read input leniently."""
+    return ReadInput(
+        file_path=data.get("file_path", ""),
+        offset=data.get("offset"),
+        limit=data.get("limit"),
+    )
+
+
+def _parse_askuserquestion_lenient(data: Dict[str, Any]) -> AskUserQuestionInput:
+    """Parse AskUserQuestion input leniently, handling malformed data."""
+    questions_raw = data.get("questions", [])
+    valid_questions: List[AskUserQuestionItem] = []
+    for q in questions_raw:
+        if isinstance(q, dict):
+            q_dict = cast(Dict[str, Any], q)
+            try:
+                # Parse options leniently
+                options_raw = q_dict.get("options", [])
+                valid_options: List[AskUserQuestionOption] = []
+                for opt in options_raw:
+                    if isinstance(opt, dict):
+                        try:
+                            valid_options.append(
+                                AskUserQuestionOption.model_validate(opt)
+                            )
+                        except Exception:
+                            pass
+                valid_questions.append(
+                    AskUserQuestionItem(
+                        question=str(q_dict.get("question", "")),
+                        header=q_dict.get("header"),
+                        options=valid_options,
+                        multiSelect=bool(q_dict.get("multiSelect", False)),
+                    )
+                )
+            except Exception:
+                pass
+    return AskUserQuestionInput(
+        questions=valid_questions,
+        question=data.get("question"),
+    )
+
+
+def _parse_exitplanmode_lenient(data: Dict[str, Any]) -> ExitPlanModeInput:
+    """Parse ExitPlanMode input leniently."""
+    return ExitPlanModeInput(
+        plan=data.get("plan", ""),
+        launchSwarm=data.get("launchSwarm"),
+        teammateCount=data.get("teammateCount"),
+    )
+
+
+# Mapping of tool names to their lenient parsers
+TOOL_LENIENT_PARSERS: Dict[str, Any] = {
+    "Bash": _parse_bash_lenient,
+    "Write": _parse_write_lenient,
+    "Edit": _parse_edit_lenient,
+    "MultiEdit": _parse_multiedit_lenient,
+    "Task": _parse_task_lenient,
+    "TodoWrite": _parse_todowrite_lenient,
+    "Read": _parse_read_lenient,
+    "AskUserQuestion": _parse_askuserquestion_lenient,
+    "ask_user_question": _parse_askuserquestion_lenient,  # Legacy tool name
+    "ExitPlanMode": _parse_exitplanmode_lenient,
+}
+
+
+def parse_tool_input(tool_name: str, input_data: Dict[str, Any]) -> ToolInput:
+    """Parse tool input dictionary into a typed model.
+
+    Uses strict validation first, then lenient parsing if available.
+
+    Args:
+        tool_name: The name of the tool (e.g., "Bash", "Read")
+        input_data: The raw input dictionary from the tool_use content
+
+    Returns:
+        A typed input model if available, otherwise the original dictionary
+    """
+    model_class = TOOL_INPUT_MODELS.get(tool_name)
+    if model_class is not None:
+        try:
+            return cast(ToolInput, model_class.model_validate(input_data))
+        except Exception:
+            # Try lenient parsing if available
+            lenient_parser = TOOL_LENIENT_PARSERS.get(tool_name)
+            if lenient_parser is not None:
+                return cast(ToolInput, lenient_parser(input_data))
+            return input_data
+    return input_data
+
+
+# =============================================================================
+# Usage Info Normalization
+# =============================================================================
+
+
+def normalize_usage_info(usage_data: Any) -> Optional[UsageInfo]:
+    """Normalize usage data to be compatible with both custom and Anthropic formats."""
+    if usage_data is None:
+        return None
+
+    # If it's already a UsageInfo instance, return as-is
+    if isinstance(usage_data, UsageInfo):
+        return usage_data
+
+    # If it's an Anthropic Usage instance, convert using our method
+    if isinstance(usage_data, AnthropicUsage):
+        return UsageInfo.from_anthropic_usage(usage_data)
+
+    # If it has the shape of an Anthropic Usage, try to construct it first
+    if hasattr(usage_data, "input_tokens") and hasattr(usage_data, "output_tokens"):
+        try:
+            # Try to create an Anthropic Usage first
+            anthropic_usage = AnthropicUsage.model_validate(usage_data)
+            return UsageInfo.from_anthropic_usage(anthropic_usage)
+        except Exception:
+            # Fall back to direct conversion
+            return UsageInfo(
+                input_tokens=getattr(usage_data, "input_tokens", None),
+                cache_creation_input_tokens=getattr(
+                    usage_data, "cache_creation_input_tokens", None
+                ),
+                cache_read_input_tokens=getattr(
+                    usage_data, "cache_read_input_tokens", None
+                ),
+                output_tokens=getattr(usage_data, "output_tokens", None),
+                service_tier=getattr(usage_data, "service_tier", None),
+                server_tool_use=getattr(usage_data, "server_tool_use", None),
+            )
+
+    # If it's a dict, validate and convert to our format
+    if isinstance(usage_data, dict):
+        return UsageInfo.model_validate(usage_data)
+
+    return None
+
+
+# =============================================================================
+# Content Item Parsing
+# =============================================================================
+# Functions to parse content items from JSONL data. Organized by entry type
+# to clarify which content types can appear in which context.
+
+
+def _parse_text_content(item_data: Dict[str, Any]) -> ContentItem:
+    """Parse text content, trying Anthropic types first.
+
+    Common to both user and assistant messages.
+    """
+    try:
+        return TextBlock.model_validate(item_data)
+    except Exception:
+        return TextContent.model_validate(item_data)
+
+
+def parse_user_content_item(item_data: Dict[str, Any]) -> ContentItem:
+    """Parse a content item from a UserTranscriptEntry.
+
+    User messages can contain:
+    - text: User-typed text
+    - tool_result: Results from tool execution
+    - image: User-attached images
+    """
+    try:
+        content_type = item_data.get("type", "")
+
+        if content_type == "text":
+            return _parse_text_content(item_data)
+        elif content_type == "tool_result":
+            return ToolResultContent.model_validate(item_data)
+        elif content_type == "image":
+            return ImageContent.model_validate(item_data)
+        else:
+            # Fallback to text content for unknown types
+            return TextContent(type="text", text=str(item_data))
+    except Exception:
+        return TextContent(type="text", text=str(item_data))
+
+
+def parse_assistant_content_item(item_data: Dict[str, Any]) -> ContentItem:
+    """Parse a content item from an AssistantTranscriptEntry.
+
+    Assistant messages can contain:
+    - text: Assistant's response text
+    - tool_use: Tool invocations
+    - thinking: Extended thinking blocks
+    """
+    try:
+        content_type = item_data.get("type", "")
+
+        if content_type == "text":
+            return _parse_text_content(item_data)
+        elif content_type == "tool_use":
+            try:
+                from anthropic.types.tool_use_block import ToolUseBlock
+
+                return ToolUseBlock.model_validate(item_data)
+            except Exception:
+                return ToolUseContent.model_validate(item_data)
+        elif content_type == "thinking":
+            try:
+                from anthropic.types.thinking_block import ThinkingBlock
+
+                return ThinkingBlock.model_validate(item_data)
+            except Exception:
+                return ThinkingContent.model_validate(item_data)
+        else:
+            # Fallback to text content for unknown types
+            return TextContent(type="text", text=str(item_data))
+    except Exception:
+        return TextContent(type="text", text=str(item_data))
+
+
+def parse_content_item(item_data: Dict[str, Any]) -> ContentItem:
+    """Parse a content item (generic fallback).
+
+    For cases where the entry type is unknown. Handles all content types.
+    Prefer parse_user_content_item or parse_assistant_content_item when
+    the entry type is known.
+    """
+    try:
+        content_type = item_data.get("type", "")
+
+        # User-specific content types
+        if content_type == "tool_result":
+            return ToolResultContent.model_validate(item_data)
+        elif content_type == "image":
+            return ImageContent.model_validate(item_data)
+
+        # Assistant-specific content types
+        elif content_type == "tool_use":
+            try:
+                from anthropic.types.tool_use_block import ToolUseBlock
+
+                return ToolUseBlock.model_validate(item_data)
+            except Exception:
+                return ToolUseContent.model_validate(item_data)
+        elif content_type == "thinking":
+            try:
+                from anthropic.types.thinking_block import ThinkingBlock
+
+                return ThinkingBlock.model_validate(item_data)
+            except Exception:
+                return ThinkingContent.model_validate(item_data)
+
+        # Common content types
+        elif content_type == "text":
+            return _parse_text_content(item_data)
+        else:
+            # Fallback to text content for unknown types
+            return TextContent(type="text", text=str(item_data))
+    except Exception:
+        return TextContent(type="text", text=str(item_data))
+
+
+def parse_message_content(
+    content_data: Any,
+    item_parser: Callable[[Dict[str, Any]], ContentItem] = parse_content_item,
+) -> Union[str, List[ContentItem]]:
+    """Parse message content, handling both string and list formats.
+
+    Args:
+        content_data: Raw content data (string or list of items)
+        item_parser: Function to parse individual content items. Defaults to
+            generic parse_content_item, but can be parse_user_content_item or
+            parse_assistant_content_item for type-specific parsing.
+    """
+    if isinstance(content_data, str):
+        return content_data
+    elif isinstance(content_data, list):
+        content_list = cast(List[Dict[str, Any]], content_data)
+        return [item_parser(item) for item in content_list]
+    else:
+        return str(content_data)
+
+
+# =============================================================================
+# Transcript Entry Parsing
+# =============================================================================
+
+
+def parse_transcript_entry(data: Dict[str, Any]) -> TranscriptEntry:
+    """
+    Parse a JSON dictionary into the appropriate TranscriptEntry type.
+
+    Enhanced to optionally use official Anthropic types for assistant messages.
+
+    Args:
+        data: Dictionary parsed from JSON
+
+    Returns:
+        The appropriate TranscriptEntry subclass
+
+    Raises:
+        ValueError: If the data doesn't match any known transcript entry type
+    """
+    entry_type = data.get("type")
+
+    if entry_type == "user":
+        # Parse message content if present, using user-specific parser
+        data_copy = data.copy()
+        if "message" in data_copy and "content" in data_copy["message"]:
+            data_copy["message"] = data_copy["message"].copy()
+            data_copy["message"]["content"] = parse_message_content(
+                data_copy["message"]["content"],
+                item_parser=parse_user_content_item,
+            )
+        # Parse toolUseResult if present and it's a list of content items
+        if "toolUseResult" in data_copy and isinstance(
+            data_copy["toolUseResult"], list
+        ):
+            # Check if it's a list of content items (MCP tool results)
+            tool_use_result = cast(List[Any], data_copy["toolUseResult"])
+            if (
+                tool_use_result
+                and isinstance(tool_use_result[0], dict)
+                and "type" in tool_use_result[0]
+            ):
+                data_copy["toolUseResult"] = [
+                    parse_content_item(cast(Dict[str, Any], item))
+                    for item in tool_use_result
+                    if isinstance(item, dict)
+                ]
+        return UserTranscriptEntry.model_validate(data_copy)
+
+    elif entry_type == "assistant":
+        # Enhanced assistant message parsing with optional Anthropic types
+        data_copy = data.copy()
+
+        # Validate compatibility with official Anthropic Message type
+        if "message" in data_copy:
+            try:
+                message_data = data_copy["message"]
+                AnthropicMessage.model_validate(message_data)
+                # Successfully validated - our data is compatible with official Anthropic types
+            except Exception:
+                # Validation failed - continue with standard parsing
+                pass
+
+        # Standard parsing path using assistant-specific parser
+        if "message" in data_copy and "content" in data_copy["message"]:
+            message_copy = data_copy["message"].copy()
+            message_copy["content"] = parse_message_content(
+                message_copy["content"],
+                item_parser=parse_assistant_content_item,
+            )
+
+            # Normalize usage data to support both Anthropic and custom formats
+            if "usage" in message_copy:
+                message_copy["usage"] = normalize_usage_info(message_copy["usage"])
+
+            data_copy["message"] = message_copy
+        return AssistantTranscriptEntry.model_validate(data_copy)
+
+    elif entry_type == "summary":
+        return SummaryTranscriptEntry.model_validate(data)
+
+    elif entry_type == "system":
+        return SystemTranscriptEntry.model_validate(data)
+
+    elif entry_type == "queue-operation":
+        # Parse content if present (in enqueue and remove operations)
+        data_copy = data.copy()
+        if "content" in data_copy and isinstance(data_copy["content"], list):
+            data_copy["content"] = parse_message_content(data_copy["content"])
+        return QueueOperationTranscriptEntry.model_validate(data_copy)
+
+    else:
+        raise ValueError(f"Unknown transcript entry type: {entry_type}")

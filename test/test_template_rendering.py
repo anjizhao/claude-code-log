@@ -5,12 +5,10 @@ import json
 import tempfile
 from pathlib import Path
 import pytest
-from claude_code_log.converter import (
-    convert_jsonl_to_html,
-    load_transcript,
-    generate_html,
-    generate_projects_index_html,
-)
+from claude_code_log.converter import convert_jsonl_to_html
+from claude_code_log.html.renderer import generate_projects_index_html
+from claude_code_log.converter import load_transcript
+from claude_code_log.html.renderer import generate_html
 
 
 class TestTemplateRendering:
@@ -90,11 +88,11 @@ class TestTemplateRendering:
         assert "Caveat: The messages below were generated" not in html_content
 
         # Check command message handling
-        assert "Command:" in html_content
+        assert "Slash Command" in html_content
         assert "test-command" in html_content
 
         # Check local command output is present (output from /context can be interesting)
-        assert "message system command-output" in html_content
+        assert "message user command-output" in html_content
         assert "Line 1 of output" in html_content
 
         # Check special characters
@@ -254,7 +252,7 @@ class TestTemplateRendering:
         # Summary messages are now integrated into session headers
         assert "session-summary" in html_content or "Summary:" in html_content
 
-        # Check tool message classes (tools are now top-level messages, may include paired-message class)
+        # Check tool message classes (tools are now top-level messages, may include pair_first/pair_last classes)
         assert "tool_use" in html_content and "class='message" in html_content
         assert "tool_result" in html_content and "class='message" in html_content
 

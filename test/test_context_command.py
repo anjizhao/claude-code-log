@@ -1,6 +1,6 @@
 """Tests for /context command output rendering."""
 
-from claude_code_log.renderer import generate_html
+from claude_code_log.html.renderer import generate_html
 from claude_code_log.parser import parse_transcript_entry
 
 
@@ -57,8 +57,7 @@ def test_context_command_rendering():
     assert "⛀" in html
     assert "⛶" in html
 
-    # Check that command output container is present
-    assert "Command Output:" in html
+    # Check that command output container is present (title is in header, not content)
     assert "command-output-content" in html
 
     # Ensure ANSI codes are not present in raw form

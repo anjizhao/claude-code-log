@@ -1,44 +1,57 @@
 #!/usr/bin/env python3
 """Render Claude transcript data to HTML format."""
 
-import json
-import os
-import re
 import time
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import List, Optional, Dict, Any, cast, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .cache import CacheManager
+    from .models import MessageContent
 from datetime import datetime
-import html
-import mistune
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-from pygments import highlight  # type: ignore[reportUnknownVariableType]
-from pygments.lexers import TextLexer  # type: ignore[reportUnknownVariableType]
-from pygments.formatters import HtmlFormatter  # type: ignore[reportUnknownVariableType]
-from pygments.util import ClassNotFound  # type: ignore[reportUnknownVariableType]
 
 from .models import (
+    MessageModifiers,
+    MessageType,
     TranscriptEntry,
     AssistantTranscriptEntry,
-    UserTranscriptEntry,
     SystemTranscriptEntry,
     SummaryTranscriptEntry,
     QueueOperationTranscriptEntry,
     ContentItem,
     TextContent,
     ToolResultContent,
+    ToolResultContentModel,
     ToolUseContent,
     ThinkingContent,
+    ThinkingContentModel,
     ImageContent,
+    # Structured content types
+    AssistantTextContent,
+    CompactedSummaryContent,
+    DedupNoticeContent,
+    HookInfo,
+    HookSummaryContent,
+    SessionHeaderContent,
+    SystemContent,
+    UnknownContent,
+    UserMemoryContent,
+    UserTextContent,
 )
-from .parser import extract_text_content
-from .utils import (
-    is_command_message,
-    is_local_command_output,
+from .parser import (
+    extract_text_content,
+    is_assistant_entry,
     is_bash_input,
     is_bash_output,
+    is_command_message,
+    is_local_command_output,
+    is_user_entry,
+)
+from .utils import (
+    format_timestamp,
+    format_timestamp_range,
+    get_project_display_name,
     should_skip_message,
     should_use_as_session_starter,
     create_session_preview,
@@ -46,1684 +59,30 @@ from .utils import (
 from .renderer_timings import (
     DEBUG_TIMING,
     report_timing_statistics,
-    timing_stat,
     set_timing_var,
     log_timing,
 )
-from .cache import get_library_version
 
-
-def starts_with_emoji(text: str) -> bool:
-    """Check if a string starts with an emoji character.
-
-    Checks common emoji Unicode ranges:
-    - Emoticons: U+1F600 - U+1F64F
-    - Misc Symbols and Pictographs: U+1F300 - U+1F5FF
-    - Transport and Map Symbols: U+1F680 - U+1F6FF
-    - Supplemental Symbols: U+1F900 - U+1F9FF
-    - Misc Symbols: U+2600 - U+26FF
-    - Dingbats: U+2700 - U+27BF
-    """
-    if not text:
-        return False
-
-    first_char = text[0]
-    code_point = ord(first_char)
-
-    return (
-        0x1F600 <= code_point <= 0x1F64F  # Emoticons
-        or 0x1F300 <= code_point <= 0x1F5FF  # Misc Symbols and Pictographs
-        or 0x1F680 <= code_point <= 0x1F6FF  # Transport and Map Symbols
-        or 0x1F900 <= code_point <= 0x1F9FF  # Supplemental Symbols
-        or 0x2600 <= code_point <= 0x26FF  # Misc Symbols
-        or 0x2700 <= code_point <= 0x27BF  # Dingbats
-    )
-
-
-def get_project_display_name(
-    project_dir_name: str, working_directories: Optional[List[str]] = None
-) -> str:
-    """Get the display name for a project based on working directories.
-
-    Args:
-        project_dir_name: The Claude project directory name (e.g., "-Users-dain-workspace-claude-code-log")
-        working_directories: List of working directories from cache data
-
-    Returns:
-        The project display name (e.g., "claude-code-log")
-    """
-    if working_directories:
-        # Convert to Path objects with their original indices for tracking recency
-        paths_with_indices = [(Path(wd), i) for i, wd in enumerate(working_directories)]
-
-        # Sort by: 1) path depth (fewer parts = less nested), 2) recency (lower index = more recent)
-        # This gives us the least nested path, with ties broken by recency
-        best_path, _ = min(paths_with_indices, key=lambda p: (len(p[0].parts), p[1]))
-        return best_path.name
-    else:
-        # Fall back to converting project directory name
-        display_name = project_dir_name
-        if display_name.startswith("-"):
-            display_name = display_name[1:].replace("-", "/")
-        return display_name
-
-
-def check_html_version(html_file_path: Path) -> Optional[str]:
-    """Check the version of an existing HTML file from its comment.
-
-    Returns:
-        The version string if found, None if no version comment or file doesn't exist.
-    """
-    if not html_file_path.exists():
-        return None
-
-    try:
-        with open(html_file_path, "r", encoding="utf-8") as f:
-            # Read only the first few lines to find the version comment
-            for _ in range(5):  # Check first 5 lines
-                line = f.readline()
-                if not line:
-                    break
-                # Look for comment like: <!-- Generated by claude-code-log v0.3.4 -->
-                if "<!-- Generated by claude-code-log v" in line:
-                    # Extract version between 'v' and ' -->'
-                    start = line.find("v") + 1
-                    end = line.find(" -->")
-                    if start > 0 and end > start:
-                        return line[start:end]
-    except (IOError, UnicodeDecodeError):
-        pass
-
-    return None
-
-
-def is_html_outdated(html_file_path: Path) -> bool:
-    """Check if an HTML file is outdated based on its version comment.
-
-    Returns:
-        True if the file should be regenerated (missing version, different version, or file doesn't exist).
-        False if the file is current.
-    """
-    html_version = check_html_version(html_file_path)
-    current_version = get_library_version()
-
-    # If no version found or different version, it's outdated
-    return html_version != current_version
-
-
-def format_timestamp(timestamp_str: str | None) -> str:
-    """Format ISO timestamp for display, converting to UTC."""
-    if timestamp_str is None:
-        return ""
-    try:
-        dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        # Convert to UTC if timezone-aware
-        if dt.tzinfo is not None:
-            utc_timetuple = dt.utctimetuple()
-            dt = datetime(
-                utc_timetuple.tm_year,
-                utc_timetuple.tm_mon,
-                utc_timetuple.tm_mday,
-                utc_timetuple.tm_hour,
-                utc_timetuple.tm_min,
-                utc_timetuple.tm_sec,
-            )
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except (ValueError, AttributeError):
-        return timestamp_str
-
-
-def escape_html(text: str) -> str:
-    """Escape HTML special characters in text.
-
-    Also normalizes line endings (CRLF -> LF) to prevent double spacing in <pre> blocks.
-    """
-    # Normalize CRLF to LF to prevent double line breaks in HTML
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    return html.escape(normalized)
-
-
-def _create_pygments_plugin() -> Any:
-    """Create a mistune plugin that uses Pygments for code block syntax highlighting."""
-    from pygments import highlight  # type: ignore[reportUnknownVariableType]
-    from pygments.lexers import get_lexer_by_name, TextLexer  # type: ignore[reportUnknownVariableType]
-    from pygments.formatters import HtmlFormatter  # type: ignore[reportUnknownVariableType]
-    from pygments.util import ClassNotFound  # type: ignore[reportUnknownVariableType]
-
-    def plugin_pygments(md: Any) -> None:
-        """Plugin to add Pygments syntax highlighting to code blocks."""
-        original_render = md.renderer.block_code
-
-        def block_code(code: str, info: Optional[str] = None) -> str:
-            """Render code block with Pygments syntax highlighting if language is specified."""
-            if info:
-                # Language hint provided, use Pygments
-                lang = info.split()[0] if info else ""
-                try:
-                    lexer = get_lexer_by_name(lang, stripall=True)  # type: ignore[reportUnknownVariableType]
-                except ClassNotFound:
-                    lexer = TextLexer()  # type: ignore[reportUnknownVariableType]
-
-                formatter = HtmlFormatter(  # type: ignore[reportUnknownVariableType]
-                    linenos=False,  # No line numbers in markdown code blocks
-                    cssclass="highlight",
-                    wrapcode=True,
-                )
-                # Track Pygments timing if enabled
-                with timing_stat("_pygments_timings"):
-                    return str(highlight(code, lexer, formatter))  # type: ignore[reportUnknownArgumentType]
-            else:
-                # No language hint, use default rendering
-                return original_render(code, info)
-
-        md.renderer.block_code = block_code
-
-    return plugin_pygments
-
-
-def render_markdown(text: str) -> str:
-    """Convert markdown text to HTML using mistune with Pygments syntax highlighting."""
-    # Track markdown rendering time if enabled
-    with timing_stat("_markdown_timings"):
-        # Configure mistune with GitHub-flavored markdown features
-        renderer = mistune.create_markdown(
-            plugins=[
-                "strikethrough",
-                "footnotes",
-                "table",
-                "url",
-                "task_lists",
-                "def_list",
-                _create_pygments_plugin(),
-            ],
-            escape=False,  # Don't escape HTML since we want to render markdown properly
-            hard_wrap=True,  # Line break for newlines (checklists in Assistant messages)
-        )
-        return str(renderer(text))
-
-
-def render_collapsible_code(
-    preview_html: str,
-    full_html: str,
-    line_count: int,
-    is_markdown: bool = False,
-) -> str:
-    """Render a collapsible code/content block with preview.
-
-    Creates a details element with a line count badge and preview content
-    that expands to show the full content.
-
-    Args:
-        preview_html: HTML content to show in the collapsed summary
-        full_html: HTML content to show when expanded
-        line_count: Number of lines (shown in the badge)
-        is_markdown: If True, adds 'markdown' class to preview and full content divs
-
-    Returns:
-        HTML string with collapsible details element
-    """
-    markdown_class = " markdown" if is_markdown else ""
-    return f"""<details class='collapsible-code'>
-        <summary>
-            <span class='line-count'>{line_count} lines</span>
-            <div class='preview-content{markdown_class}'>{preview_html}</div>
-        </summary>
-        <div class='code-full{markdown_class}'>{full_html}</div>
-    </details>"""
-
-
-def render_markdown_collapsible(
-    raw_content: str,
-    css_class: str,
-    line_threshold: int = 20,
-    preview_line_count: int = 5,
-) -> str:
-    """Render markdown content, making it collapsible if it exceeds a line threshold.
-
-    For long content, creates a collapsible details element with a preview.
-    For short content, renders inline with the specified CSS class.
-
-    Args:
-        raw_content: The raw text content to render as markdown
-        css_class: CSS class for the wrapper div (e.g., "task-prompt", "task-result")
-        line_threshold: Number of lines above which content becomes collapsible (default 20)
-        preview_line_count: Number of lines to show in the preview (default 5)
-
-    Returns:
-        HTML string with rendered markdown, optionally wrapped in collapsible details
-    """
-    rendered_html = render_markdown(raw_content)
-
-    lines = raw_content.splitlines()
-    if len(lines) <= line_threshold:
-        # Short content, show inline
-        return f'<div class="{css_class} markdown">{rendered_html}</div>'
-
-    # Long content - make collapsible with rendered preview
-    preview_lines = lines[:preview_line_count]
-    preview_text = "\n".join(preview_lines)
-    if len(lines) > preview_line_count:
-        preview_text += "\n\n..."
-    # Render truncated markdown (produces valid HTML with proper tag closure)
-    preview_html = render_markdown(preview_text)
-
-    collapsible = render_collapsible_code(
-        preview_html, rendered_html, len(lines), is_markdown=True
-    )
-    return f'<div class="{css_class}">{collapsible}</div>'
-
-
-def render_file_content_collapsible(
-    code_content: str,
-    file_path: str,
-    css_class: str,
-    linenostart: int = 1,
-    line_threshold: int = 12,
-    preview_line_count: int = 5,
-    suffix_html: str = "",
-) -> str:
-    """Render file content with syntax highlighting, collapsible if long.
-
-    Highlights code using Pygments and wraps in a collapsible details element
-    if the content exceeds the line threshold. Uses preview truncation from
-    already-highlighted HTML to avoid double Pygments calls.
-
-    Args:
-        code_content: The raw code content to highlight
-        file_path: File path for syntax detection (extension-based)
-        css_class: CSS class for the wrapper div (e.g., 'write-tool-content')
-        linenostart: Starting line number for Pygments (default 1)
-        line_threshold: Number of lines above which content becomes collapsible
-        preview_line_count: Number of lines to show in the preview
-        suffix_html: Optional HTML to append after the code (inside wrapper div)
-
-    Returns:
-        HTML string with highlighted code, collapsible if >line_threshold lines
-    """
-    # Highlight code with Pygments (single call)
-    highlighted_html = _highlight_code_with_pygments(
-        code_content, file_path, linenostart=linenostart
-    )
-
-    html_parts = [f"<div class='{css_class}'>"]
-
-    lines = code_content.split("\n")
-    if len(lines) > line_threshold:
-        # Extract preview from already-highlighted HTML (avoids double highlighting)
-        preview_html = _truncate_highlighted_preview(
-            highlighted_html, preview_line_count
-        )
-        html_parts.append(
-            render_collapsible_code(preview_html, highlighted_html, len(lines))
-        )
-    else:
-        # Show directly without collapsible
-        html_parts.append(highlighted_html)
-
-    if suffix_html:
-        html_parts.append(suffix_html)
-
-    html_parts.append("</div>")
-    return "".join(html_parts)
-
-
-def extract_command_info(text_content: str) -> tuple[str, str, str]:
-    """Extract command info from system message with command tags."""
-    import re
-
-    # Extract command name
-    command_name_match = re.search(
-        r"<command-name>([^<]+)</command-name>", text_content
-    )
-    command_name = (
-        command_name_match.group(1).strip() if command_name_match else "system"
-    )
-
-    # Extract command args
-    command_args_match = re.search(
-        r"<command-args>([^<]*)</command-args>", text_content
-    )
-    command_args = command_args_match.group(1).strip() if command_args_match else ""
-
-    # Extract command contents
-    command_contents_match = re.search(
-        r"<command-contents>(.+?)</command-contents>", text_content, re.DOTALL
-    )
-    command_contents: str = ""
-    if command_contents_match:
-        contents_text = command_contents_match.group(1).strip()
-        # Try to parse as JSON and extract the text field
-        try:
-            contents_json: Any = json.loads(contents_text)
-            if isinstance(contents_json, dict) and "text" in contents_json:
-                text_dict = cast(Dict[str, Any], contents_json)
-                text_value = text_dict["text"]
-                command_contents = str(text_value)
-            else:
-                command_contents = contents_text
-        except json.JSONDecodeError:
-            command_contents = contents_text
-
-    return command_name, command_args, command_contents
-
-
-def format_askuserquestion_content(tool_use: ToolUseContent) -> str:
-    """Format AskUserQuestion tool use content with prominent question display.
-
-    Handles multiple questions in a single tool use, each with optional header,
-    options (with label and description), and multiSelect flag.
-    """
-    questions_data = tool_use.input.get("questions", [])
-    # Also handle single question format for backwards compatibility
-    if not questions_data:
-        single_question = tool_use.input.get("question", "")
-        if single_question:
-            questions_data = [{"question": single_question}]
-
-    if not questions_data:
-        return render_params_table(tool_use.input)
-
-    # Build HTML for all questions
-    html_parts: List[str] = ['<div class="askuserquestion-content">']
-
-    for q_data in questions_data:
-        try:
-            question_text = escape_html(str(q_data.get("question", "")))
-            header = q_data.get("header", "")
-            options = q_data.get("options", [])
-            multi_select = q_data.get("multiSelect", False)
-
-            # Question container
-            html_parts.append('<div class="question-block">')
-
-            # Header (if present)
-            if header:
-                escaped_header = escape_html(str(header))
-                html_parts.append(
-                    f'<div class="question-header">{escaped_header}</div>'
-                )
-
-            # Question text with icon
-            html_parts.append(f'<div class="question-text">❓ {question_text}</div>')
-
-            # Options (if present)
-            if options:
-                select_hint = "(select multiple)" if multi_select else "(select one)"
-                html_parts.append(
-                    f'<div class="question-options-hint">{select_hint}</div>'
-                )
-                html_parts.append('<ul class="question-options">')
-                for opt in options:
-                    label = escape_html(str(opt.get("label", "")))
-                    desc = opt.get("description", "")
-                    if desc:
-                        desc_html = f'<span class="option-desc"> — {escape_html(str(desc))}</span>'
-                    else:
-                        desc_html = ""
-                    html_parts.append(
-                        f'<li class="question-option"><strong>{label}</strong>{desc_html}</li>'
-                    )
-                html_parts.append("</ul>")
-
-            html_parts.append("</div>")  # Close question-block
-        except (AttributeError, TypeError):
-            # Fallback for unexpected format
-            html_parts.append(
-                f'<div class="question-text">❓ {escape_html(str(q_data))}</div>'
-            )
-
-    html_parts.append("</div>")  # Close askuserquestion-content
-    return "".join(html_parts)
-
-
-def format_askuserquestion_result(content: str) -> str:
-    """Format AskUserQuestion tool result with styled question/answer pairs.
-
-    Parses the result format:
-    'User has answered your questions: "Q1"="A1", "Q2"="A2". You can now continue...'
-
-    Returns HTML with styled Q&A blocks matching the input styling.
-    """
-    import re
-
-    # Check if this is a successful answer
-    if not content.startswith("User has answered your question"):
-        # Return as-is for errors or unexpected format
-        return ""
-
-    # Extract the Q&A portion between the colon and the final sentence
-    # Pattern: 'User has answered your questions: "Q"="A", "Q"="A". You can now...'
-    match = re.match(
-        r"User has answered your questions?: (.+)\. You can now continue",
-        content,
-        re.DOTALL,
-    )
-    if not match:
-        return ""
-
-    qa_portion = match.group(1)
-
-    # Parse "Question"="Answer" pairs
-    # Pattern: "question text"="answer text"
-    qa_pattern = re.compile(r'"([^"]+)"="([^"]+)"')
-    pairs = qa_pattern.findall(qa_portion)
-
-    if not pairs:
-        return ""
-
-    # Build styled HTML
-    html_parts: List[str] = [
-        '<div class="askuserquestion-content askuserquestion-result">'
-    ]
-
-    for question, answer in pairs:
-        escaped_q = escape_html(question)
-        escaped_a = escape_html(answer)
-        html_parts.append('<div class="question-block answered">')
-        html_parts.append(f'<div class="question-text">❓ {escaped_q}</div>')
-        html_parts.append(f'<div class="answer-text">✅ {escaped_a}</div>')
-        html_parts.append("</div>")
-
-    html_parts.append("</div>")
-    return "".join(html_parts)
-
-
-def format_exitplanmode_content(tool_use: ToolUseContent) -> str:
-    """Format ExitPlanMode tool use content with collapsible plan markdown.
-
-    Renders the plan markdown in a collapsible section, similar to Task tool results.
-    """
-    plan = tool_use.input.get("plan", "")
-
-    if not plan:
-        # No plan, show parameters table as fallback
-        return render_params_table(tool_use.input)
-
-    return render_markdown_collapsible(plan, "plan-content")
-
-
-def format_exitplanmode_result(content: str) -> str:
-    """Format ExitPlanMode tool result, truncating the redundant plan echo.
-
-    When a plan is approved, the result contains:
-    1. A confirmation message
-    2. Path to saved plan file
-    3. "## Approved Plan:" followed by full plan text (redundant)
-
-    We truncate everything after "## Approved Plan:" to avoid duplication.
-    For error results (plan not approved), we keep the full content.
-    """
-    # Check if this is a successful approval
-    if "User has approved your plan" in content:
-        # Truncate at "## Approved Plan:"
-        marker = "## Approved Plan:"
-        marker_pos = content.find(marker)
-        if marker_pos > 0:
-            # Keep everything before the marker, strip trailing whitespace
-            return content[:marker_pos].rstrip()
-
-    # For errors or other cases, return as-is
-    return content
-
-
-def format_todowrite_content(tool_use: ToolUseContent) -> str:
-    """Format TodoWrite tool use content as a todo list."""
-    # Parse todos from input
-    todos_data = tool_use.input.get("todos", [])
-    if not todos_data:
-        return """
-        <div class="todo-content">
-            <p><em>No todos found</em></p>
-        </div>
-        """
-
-    # Status emojis
-    status_emojis = {"pending": "⏳", "in_progress": "🔄", "completed": "✅"}
-
-    # Build todo list HTML
-    todo_items: List[str] = []
-    for todo in todos_data:
-        try:
-            todo_id = escape_html(str(todo.get("id", "")))
-            content = escape_html(str(todo.get("content", "")))
-            status = str(todo.get("status", "pending")).lower()
-            priority = str(todo.get("priority", "medium")).lower()
-            status_emoji = status_emojis.get(status, "⏳")
-
-            # CSS class for styling
-            item_class = f"todo-item {status} {priority}"
-
-            todo_items.append(f"""
-                <div class="{item_class}">
-                    <span class="todo-status">{status_emoji}</span>
-                    <span class="todo-content">{content}</span>
-                    <span class="todo-id">#{todo_id}</span>
-                </div>
-            """)
-        except AttributeError:
-            escaped_fallback = escape_html(str(todo))
-            todo_items.append(f"""
-                <div class="todo-item pending medium">
-                    <span class="todo-status">⏳</span>
-                    <span class="todo-content">{escaped_fallback}</span>
-                </div>
-            """)
-
-    todos_html = "".join(todo_items)
-
-    return f"""
-    <div class="todo-list">
-        {todos_html}
-    </div>
-    """
-
-
-def _highlight_code_with_pygments(
-    code: str, file_path: str, show_linenos: bool = True, linenostart: int = 1
-) -> str:
-    """Highlight code using Pygments with appropriate lexer based on file path.
-
-    Args:
-        code: The source code to highlight
-        file_path: Path to determine the appropriate lexer
-        show_linenos: Whether to show line numbers (default: True)
-        linenostart: Starting line number for display (default: 1)
-
-    Returns:
-        HTML string with syntax-highlighted code
-    """
-    # PERFORMANCE FIX: Use Pygments' public API to build filename pattern mapping, avoiding filesystem I/O
-    # get_lexer_for_filename performs I/O operations (file existence checks, reading bytes)
-    # which causes severe slowdowns, especially on Windows with antivirus scanning
-    # Solution: Build a reverse mapping from filename patterns to lexer aliases using get_all_lexers() (done once)
-    import fnmatch
-    from pygments.lexers import get_lexer_by_name, get_all_lexers  # type: ignore[reportUnknownVariableType]
-
-    # Build pattern->alias mapping on first call (cached as function attribute)
-    # OPTIMIZATION: Create both direct extension lookup and full pattern cache
-    if not hasattr(_highlight_code_with_pygments, "_pattern_cache"):
-        pattern_cache: dict[str, str] = {}
-        extension_cache: dict[str, str] = {}  # Fast lookup for simple *.ext patterns
-
-        # Use public API: get_all_lexers() returns (name, aliases, patterns, mimetypes) tuples
-        for name, aliases, patterns, mimetypes in get_all_lexers():  # type: ignore[reportUnknownVariableType]
-            if aliases and patterns:
-                # Use first alias as the lexer name
-                lexer_alias = aliases[0]
-                # Map each filename pattern to this lexer alias
-                for pattern in patterns:
-                    pattern_lower = pattern.lower()
-                    pattern_cache[pattern_lower] = lexer_alias
-                    # Extract simple extension patterns (*.ext) for fast lookup
-                    if (
-                        pattern_lower.startswith("*.")
-                        and "*" not in pattern_lower[2:]
-                        and "?" not in pattern_lower[2:]
-                    ):
-                        ext = pattern_lower[2:]  # Remove "*."
-                        # Prefer first match for each extension
-                        if ext not in extension_cache:
-                            extension_cache[ext] = lexer_alias
-
-        _highlight_code_with_pygments._pattern_cache = pattern_cache  # type: ignore[attr-defined]
-        _highlight_code_with_pygments._extension_cache = extension_cache  # type: ignore[attr-defined]
-
-    # Get basename for matching (patterns are like "*.py")
-    basename = os.path.basename(file_path).lower()
-
-    try:
-        # Get caches
-        pattern_cache = _highlight_code_with_pygments._pattern_cache  # type: ignore[attr-defined]
-        extension_cache = _highlight_code_with_pygments._extension_cache  # type: ignore[attr-defined]
-
-        # OPTIMIZATION: Try fast extension lookup first (O(1) dict lookup)
-        lexer_alias = None
-        if "." in basename:
-            ext = basename.split(".")[-1]  # Get last extension (handles .tar.gz, etc.)
-            lexer_alias = extension_cache.get(ext)
-
-        # Fall back to pattern matching only if extension lookup failed
-        if lexer_alias is None:
-            for pattern, lex_alias in pattern_cache.items():
-                if fnmatch.fnmatch(basename, pattern):
-                    lexer_alias = lex_alias
-                    break
-
-        # Get lexer or use TextLexer as fallback
-        # Note: stripall=False preserves leading whitespace (important for code indentation)
-        if lexer_alias:
-            lexer = get_lexer_by_name(lexer_alias, stripall=False)  # type: ignore[reportUnknownVariableType]
-        else:
-            lexer = TextLexer()  # type: ignore[reportUnknownVariableType]
-    except ClassNotFound:
-        # Fall back to plain text lexer
-        lexer = TextLexer()  # type: ignore[reportUnknownVariableType]
-
-    # Create formatter with line numbers in table format
-    formatter = HtmlFormatter(  # type: ignore[reportUnknownVariableType]
-        linenos="table" if show_linenos else False,
-        cssclass="highlight",
-        wrapcode=True,
-        linenostart=linenostart,
-    )
-
-    # Highlight the code with timing if enabled
-    with timing_stat("_pygments_timings"):
-        return str(highlight(code, lexer, formatter))  # type: ignore[reportUnknownArgumentType]
-
-
-def _truncate_highlighted_preview(highlighted_html: str, max_lines: int) -> str:
-    """Truncate Pygments highlighted HTML to first N lines.
-
-    HtmlFormatter(linenos="table") produces a single <tr> with two <td>s:
-      <td class="linenos"><div class="linenodiv"><pre>LINE_NUMS</pre></div></td>
-      <td class="code"><div><pre>CODE</pre></div></td>
-
-    We truncate content within each <pre> tag to the first max_lines lines.
-
-    Args:
-        highlighted_html: Full Pygments-highlighted HTML
-        max_lines: Maximum number of lines to include in preview
-
-    Returns:
-        Truncated HTML with same structure but fewer lines
-    """
-
-    def truncate_pre_content(match: re.Match[str]) -> str:
-        """Truncate content inside a <pre> tag to max_lines."""
-        prefix, content, suffix = match.groups()
-        lines = content.split("\n")
-        truncated = "\n".join(lines[:max_lines])
-        return prefix + truncated + suffix
-
-    # Truncate linenos <pre> content (line numbers separated by newlines)
-    result = re.sub(
-        r'(<div class="linenodiv"><pre>)(.*?)(</pre></div>)',
-        truncate_pre_content,
-        highlighted_html,
-        flags=re.DOTALL,
-    )
-
-    # Truncate code <pre> content
-    result = re.sub(
-        r'(<td class="code"><div><pre[^>]*>)(.*?)(</pre></div></td>)',
-        truncate_pre_content,
-        result,
-        flags=re.DOTALL,
-    )
-
-    return result
-
-
-def format_read_tool_content(tool_use: ToolUseContent) -> str:  # noqa: ARG001
-    """Format Read tool use content showing file path.
-
-    Note: File path is now shown in the header, so we skip content here.
-    """
-    # File path is now shown in header, so no content needed
-    # Don't show offset/limit parameters as they'll be visible in the result
-    return ""
-
-
-def format_write_tool_content(tool_use: ToolUseContent) -> str:
-    """Format Write tool use content with Pygments syntax highlighting.
-
-    Note: File path is now shown in the header, so we skip it here.
-    """
-    file_path = tool_use.input.get("file_path", "")
-    content = tool_use.input.get("content", "")
-
-    return render_file_content_collapsible(content, file_path, "write-tool-content")
-
-
-def format_bash_tool_content(tool_use: ToolUseContent) -> str:
-    """Format Bash tool use content in VS Code extension style.
-
-    Note: Description is now shown in the header, so we skip it here.
-    """
-    command = tool_use.input.get("command", "")
-
-    escaped_command = escape_html(command)
-
-    html_parts = ["<div class='bash-tool-content'>"]
-
-    # Description is now shown in header, so we skip it here
-
-    # Add command in preformatted block
-    html_parts.append(f"<pre class='bash-tool-command'>{escaped_command}</pre>")
-    html_parts.append("</div>")
-
-    return "".join(html_parts)
-
-
-def render_params_table(params: Dict[str, Any]) -> str:
-    """Render a dictionary of parameters as an HTML table.
-
-    Reusable for tool parameters, diagnostic objects, etc.
-    """
-    if not params:
-        return "<div class='tool-params-empty'>No parameters</div>"
-
-    html_parts = ["<table class='tool-params-table'>"]
-
-    for key, value in params.items():
-        escaped_key = escape_html(str(key))
-
-        # If value is structured (dict/list), render as JSON
-        if isinstance(value, (dict, list)):
-            try:
-                formatted_value = json.dumps(value, indent=2, ensure_ascii=False)  # type: ignore[arg-type]
-                escaped_value = escape_html(formatted_value)
-
-                # Make long structured values collapsible
-                if len(formatted_value) > 200:
-                    preview = escape_html(formatted_value[:100]) + "..."
-                    value_html = f"""
-                        <details class='tool-param-collapsible'>
-                            <summary>{preview}</summary>
-                            <pre class='tool-param-structured'>{escaped_value}</pre>
-                        </details>
-                    """
-                else:
-                    value_html = (
-                        f"<pre class='tool-param-structured'>{escaped_value}</pre>"
-                    )
-            except (TypeError, ValueError):
-                escaped_value = escape_html(str(value))  # type: ignore[arg-type]
-                value_html = escaped_value
-        else:
-            # Simple value, render as-is (or collapsible if long)
-            escaped_value = escape_html(str(value))
-
-            # Make long string values collapsible
-            if len(str(value)) > 100:
-                preview = escape_html(str(value)[:80]) + "..."
-                value_html = f"""
-                    <details class='tool-param-collapsible'>
-                        <summary>{preview}</summary>
-                        <div class='tool-param-full'>{escaped_value}</div>
-                    </details>
-                """
-            else:
-                value_html = escaped_value
-
-        html_parts.append(f"""
-            <tr>
-                <td class='tool-param-key'>{escaped_key}</td>
-                <td class='tool-param-value'>{value_html}</td>
-            </tr>
-        """)
-
-    html_parts.append("</table>")
-    return "".join(html_parts)
-
-
-def _render_single_diff(old_string: str, new_string: str) -> str:
-    """Render a single diff between old_string and new_string.
-
-    Returns HTML for the diff view with intra-line highlighting.
-    """
-    import difflib
-
-    # Split into lines for diff
-    old_lines = old_string.splitlines(keepends=True)
-    new_lines = new_string.splitlines(keepends=True)
-
-    # Generate unified diff to identify changed lines
-    differ = difflib.Differ()
-    diff: list[str] = list(differ.compare(old_lines, new_lines))
-
-    html_parts = ["<div class='edit-diff'>"]
-
-    i = 0
-    while i < len(diff):
-        line = diff[i]
-        prefix = line[0:2]
-        content = line[2:]
-
-        if prefix == "- ":
-            # Removed line - look ahead for corresponding addition
-            removed_lines: list[str] = [content]
-            j = i + 1
-
-            # Collect consecutive removed lines
-            while j < len(diff) and diff[j].startswith("- "):
-                removed_lines.append(diff[j][2:])
-                j += 1
-
-            # Skip '? ' hint lines
-            while j < len(diff) and diff[j].startswith("? "):
-                j += 1
-
-            # Collect consecutive added lines
-            added_lines: list[str] = []
-            while j < len(diff) and diff[j].startswith("+ "):
-                added_lines.append(diff[j][2:])
-                j += 1
-
-            # Skip '? ' hint lines
-            while j < len(diff) and diff[j].startswith("? "):
-                j += 1
-
-            # Generate character-level diff for paired lines
-            if added_lines:
-                for old_line, new_line in zip(removed_lines, added_lines):
-                    html_parts.append(_render_line_diff(old_line, new_line))
-
-                # Handle any unpaired lines
-                for old_line in removed_lines[len(added_lines) :]:
-                    escaped = escape_html(old_line.rstrip("\n"))
-                    html_parts.append(
-                        f"<div class='diff-line diff-removed'><span class='diff-marker'>-</span>{escaped}</div>"
-                    )
-
-                for new_line in added_lines[len(removed_lines) :]:
-                    escaped = escape_html(new_line.rstrip("\n"))
-                    html_parts.append(
-                        f"<div class='diff-line diff-added'><span class='diff-marker'>+</span>{escaped}</div>"
-                    )
-            else:
-                # No corresponding addition - just removed
-                for old_line in removed_lines:
-                    escaped = escape_html(old_line.rstrip("\n"))
-                    html_parts.append(
-                        f"<div class='diff-line diff-removed'><span class='diff-marker'>-</span>{escaped}</div>"
-                    )
-
-            i = j
-
-        elif prefix == "+ ":
-            # Added line without corresponding removal
-            escaped = escape_html(content.rstrip("\n"))
-            html_parts.append(
-                f"<div class='diff-line diff-added'><span class='diff-marker'>+</span>{escaped}</div>"
-            )
-            i += 1
-
-        elif prefix == "? ":
-            # Skip hint lines (already processed)
-            i += 1
-
-        else:
-            # Unchanged line - show for context
-            escaped = escape_html(content.rstrip("\n"))
-            html_parts.append(
-                f"<div class='diff-line diff-context'><span class='diff-marker'> </span>{escaped}</div>"
-            )
-            i += 1
-
-    html_parts.append("</div>")
-    return "".join(html_parts)
-
-
-def format_multiedit_tool_content(tool_use: ToolUseContent) -> str:
-    """Format Multiedit tool use content showing multiple diffs."""
-    file_path = tool_use.input.get("file_path", "")
-    edits = tool_use.input.get("edits", [])
-
-    escaped_path = escape_html(file_path)
-
-    html_parts = ["<div class='multiedit-tool-content'>"]
-
-    # File path header
-    html_parts.append(f"<div class='multiedit-file-path'>📝 {escaped_path}</div>")
-    html_parts.append(f"<div class='multiedit-count'>Applying {len(edits)} edits</div>")
-
-    # Render each edit as a diff
-    for idx, edit in enumerate(edits, 1):
-        old_string = edit.get("old_string", "")
-        new_string = edit.get("new_string", "")
-
-        html_parts.append(
-            f"<div class='multiedit-item'><div class='multiedit-item-header'>Edit #{idx}</div>"
-        )
-        html_parts.append(_render_single_diff(old_string, new_string))
-        html_parts.append("</div>")
-
-    html_parts.append("</div>")
-    return "".join(html_parts)
-
-
-def format_edit_tool_content(tool_use: ToolUseContent) -> str:
-    """Format Edit tool use content as a diff view with intra-line highlighting.
-
-    Note: File path is now shown in the header, so we skip it here.
-    """
-    old_string = tool_use.input.get("old_string", "")
-    new_string = tool_use.input.get("new_string", "")
-    replace_all = tool_use.input.get("replace_all", False)
-
-    html_parts = ["<div class='edit-tool-content'>"]
-
-    # File path is now shown in header, so we skip it here
-
-    if replace_all:
-        html_parts.append(
-            "<div class='edit-replace-all'>🔄 Replace all occurrences</div>"
-        )
-
-    # Use shared diff rendering helper
-    html_parts.append(_render_single_diff(old_string, new_string))
-    html_parts.append("</div>")
-
-    return "".join(html_parts)
-
-
-def _render_line_diff(old_line: str, new_line: str) -> str:
-    """Render a pair of changed lines with character-level highlighting."""
-    import difflib
-
-    # Use SequenceMatcher for character-level diff
-    sm = difflib.SequenceMatcher(None, old_line.rstrip("\n"), new_line.rstrip("\n"))
-
-    # Build old line with highlighting
-    old_parts: list[str] = []
-    old_parts.append(
-        "<div class='diff-line diff-removed'><span class='diff-marker'>-</span>"
-    )
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        chunk = old_line[i1:i2]
-        if tag == "equal":
-            old_parts.append(escape_html(chunk))
-        elif tag in ("delete", "replace"):
-            old_parts.append(
-                f"<mark class='diff-char-removed'>{escape_html(chunk)}</mark>"
-            )
-    old_parts.append("</div>")
-
-    # Build new line with highlighting
-    new_parts: list[str] = []
-    new_parts.append(
-        "<div class='diff-line diff-added'><span class='diff-marker'>+</span>"
-    )
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        chunk = new_line[j1:j2]
-        if tag == "equal":
-            new_parts.append(escape_html(chunk))
-        elif tag in ("insert", "replace"):
-            new_parts.append(
-                f"<mark class='diff-char-added'>{escape_html(chunk)}</mark>"
-            )
-    new_parts.append("</div>")
-
-    return "".join(old_parts) + "".join(new_parts)
-
-
-def format_task_tool_content(tool_use: ToolUseContent) -> str:
-    """Format Task tool content with markdown-rendered prompt.
-
-    Task tool spawns sub-agents. We render the prompt as the main content.
-    The sidechain user message (which would duplicate this prompt) is skipped.
-
-    For long prompts (>20 lines), the content is made collapsible with a
-    preview of the first few lines to keep the transcript vertically compact.
-    """
-    prompt = tool_use.input.get("prompt", "")
-
-    if not prompt:
-        # No prompt, show parameters table as fallback
-        return render_params_table(tool_use.input)
-
-    return render_markdown_collapsible(prompt, "task-prompt")
-
-
-def get_tool_summary(tool_use: ToolUseContent) -> Optional[str]:
-    """Extract a one-line summary from tool parameters for display in header.
-
-    Returns a brief description or filename that can be shown in the message header
-    to save vertical space.
-    """
-    tool_name = tool_use.name
-    params = tool_use.input
-
-    if tool_name == "Bash":
-        # Return description if present
-        return params.get("description")
-
-    elif tool_name in ("Read", "Edit", "Write"):
-        # Return file path (without icon - caller adds it)
-        file_path = params.get("file_path")
-        if file_path:
-            return file_path
-
-    elif tool_name == "Task":
-        # Return description if present
-        description = params.get("description")
-        if description:
-            return description
-
-    # No summary for other tools
-    return None
-
-
-def format_tool_use_content(tool_use: ToolUseContent) -> str:
-    """Format tool use content as HTML."""
-    # Special handling for TodoWrite
-    if tool_use.name == "TodoWrite":
-        return format_todowrite_content(tool_use)
-
-    # Special handling for Bash
-    if tool_use.name == "Bash":
-        return format_bash_tool_content(tool_use)
-
-    # Special handling for Edit
-    if tool_use.name == "Edit":
-        return format_edit_tool_content(tool_use)
-
-    # Special handling for Multiedit
-    if tool_use.name == "Multiedit":
-        return format_multiedit_tool_content(tool_use)
-
-    # Special handling for Read
-    if tool_use.name == "Read":
-        return format_read_tool_content(tool_use)
-
-    # Special handling for Write
-    if tool_use.name == "Write":
-        return format_write_tool_content(tool_use)
-
-    # Special handling for Task (agent spawning)
-    if tool_use.name == "Task":
-        return format_task_tool_content(tool_use)
-
-    # Special handling for AskUserQuestion
-    if tool_use.name == "AskUserQuestion":
-        return format_askuserquestion_content(tool_use)
-
-    # Special handling for ExitPlanMode
-    if tool_use.name == "ExitPlanMode":
-        return format_exitplanmode_content(tool_use)
-
-    # Default: render as key/value table using shared renderer
-    return render_params_table(tool_use.input)
-
-
-def _parse_cat_n_snippet(
-    lines: List[str], start_idx: int = 0
-) -> Optional[tuple[str, Optional[str], int]]:
-    """Parse cat-n formatted snippet from lines.
-
-    Args:
-        lines: List of lines to parse
-        start_idx: Index to start parsing from (default: 0)
-
-    Returns:
-        Tuple of (code_content, system_reminder, line_offset) or None if not parseable
-    """
-    import re
-
-    code_lines: List[str] = []
-    system_reminder: Optional[str] = None
-    in_system_reminder = False
-    line_offset = 1  # Default offset
-
-    for line in lines[start_idx:]:
-        # Check for system-reminder start
-        if "<system-reminder>" in line:
-            in_system_reminder = True
-            system_reminder = ""
-            continue
-
-        # Check for system-reminder end
-        if "</system-reminder>" in line:
-            in_system_reminder = False
-            continue
-
-        # If in system reminder, accumulate reminder text
-        if in_system_reminder:
-            if system_reminder is not None:
-                system_reminder += line + "\n"
-            continue
-
-        # Parse regular code line (format: "  123→content")
-        match = re.match(r"\s+(\d+)→(.*)$", line)
-        if match:
-            line_num = int(match.group(1))
-            # Capture the first line number as offset
-            if not code_lines:
-                line_offset = line_num
-            code_lines.append(match.group(2))
-        elif line.strip() == "":  # Allow empty lines between cat-n lines
-            continue
-        else:  # Non-matching non-empty line, stop parsing
-            break
-
-    if not code_lines:
-        return None
-
-    return (
-        "\n".join(code_lines),
-        system_reminder.strip() if system_reminder else None,
-        line_offset,
-    )
-
-
-def _parse_read_tool_result(content: str) -> Optional[tuple[str, Optional[str], int]]:
-    """Parse Read tool result in cat-n format.
-
-    Returns:
-        Tuple of (code_content, system_reminder, line_offset) or None if not parseable
-    """
-    import re
-
-    # Check if content matches the cat-n format pattern (line_number → content)
-    lines = content.split("\n")
-    if not lines or not re.match(r"\s+\d+→", lines[0]):
-        return None
-
-    return _parse_cat_n_snippet(lines)
-
-
-def _parse_edit_tool_result(content: str) -> Optional[tuple[str, int]]:
-    """Parse Edit tool result to extract code snippet.
-
-    Edit tool results typically have format:
-    "The file ... has been updated. Here's the result of running `cat -n` on a snippet..."
-    followed by cat-n formatted lines.
-
-    Returns:
-        Tuple of (code_content, line_offset) or None if not parseable
-    """
-    import re
-
-    # Look for the cat-n snippet after the preamble
-    # Pattern: look for first line that matches the cat-n format
-    lines = content.split("\n")
-    code_start_idx = None
-
-    for i, line in enumerate(lines):
-        if re.match(r"\s+\d+→", line):
-            code_start_idx = i
-            break
-
-    if code_start_idx is None:
-        return None
-
-    result = _parse_cat_n_snippet(lines, code_start_idx)
-    if result is None:
-        return None
-
-    code_content, _system_reminder, line_offset = result
-    # Edit tool doesn't use system_reminder, so we just return code and offset
-    return (code_content, line_offset)
-
-
-def format_tool_result_content(
-    tool_result: ToolResultContent,
-    file_path: Optional[str] = None,
-    tool_name: Optional[str] = None,
-) -> str:
-    """Format tool result content as HTML, including images.
-
-    Args:
-        tool_result: The tool result content
-        file_path: Optional file path for context (used for Read/Edit/Write tool rendering)
-        tool_name: Optional tool name for specialized rendering (e.g., "Write", "Read", "Edit", "Task")
-    """
-    # Handle both string and structured content
-    if isinstance(tool_result.content, str):
-        raw_content = tool_result.content
-        has_images = False
-        image_html_parts: List[str] = []
-    else:
-        # Content is a list of structured items, extract text and images
-        content_parts: List[str] = []
-        image_html_parts: List[str] = []
-        for item in tool_result.content:
-            item_type = item.get("type")
-            if item_type == "text":
-                text_value = item.get("text")
-                if isinstance(text_value, str):
-                    content_parts.append(text_value)
-            elif item_type == "image":
-                # Handle image content within tool results
-                source = cast(Dict[str, Any], item.get("source", {}))
-                if source:
-                    media_type: str = str(source.get("media_type", "image/png"))
-                    data: str = str(source.get("data", ""))
-                    if data:
-                        data_url = f"data:{media_type};base64,{data}"
-                        image_html_parts.append(
-                            f'<img src="{data_url}" alt="Tool result image" '
-                            f'class="tool-result-image" />'
-                        )
-        raw_content = "\n".join(content_parts)
-        has_images = len(image_html_parts) > 0
-
-    # Strip <tool_use_error> XML tags but keep the content inside
-    # Also strip redundant "String: ..." portions that echo the input
-    import re
-
-    if raw_content:
-        # Remove <tool_use_error>...</tool_use_error> tags but keep inner content
-        raw_content = re.sub(
-            r"<tool_use_error>(.*?)</tool_use_error>",
-            r"\1",
-            raw_content,
-            flags=re.DOTALL,
-        )
-        # Remove "String: ..." portions that echo the input (everything after "String:" to end)
-        raw_content = re.sub(r"\nString:.*$", "", raw_content, flags=re.DOTALL)
-
-    # Special handling for Write tool: only show first line (acknowledgment) on success
-    if tool_name == "Write" and not tool_result.is_error and not has_images:
-        lines = raw_content.split("\n")
-        if lines:
-            # Keep only the first acknowledgment line and add ellipsis
-            first_line = lines[0]
-            escaped_html = escape_html(first_line)
-            return f"<pre>{escaped_html} ...</pre>"
-
-    # Try to parse as Read tool result if file_path is provided
-    if file_path and tool_name == "Read" and not has_images:
-        parsed_result = _parse_read_tool_result(raw_content)
-
-        if parsed_result:
-            code_content, system_reminder, line_offset = parsed_result
-
-            # Build system reminder suffix if present
-            suffix_html = ""
-            if system_reminder:
-                escaped_reminder = escape_html(system_reminder)
-                suffix_html = (
-                    f"<div class='system-reminder'>🤖 <em>{escaped_reminder}</em></div>"
-                )
-
-            return render_file_content_collapsible(
-                code_content,
-                file_path,
-                "read-tool-result",
-                linenostart=line_offset,
-                suffix_html=suffix_html,
-            )
-
-    # Try to parse as Edit tool result if file_path is provided
-    if file_path and tool_name == "Edit" and not has_images:
-        parsed_result = _parse_edit_tool_result(raw_content)
-        if parsed_result:
-            parsed_code, line_offset = parsed_result
-            return render_file_content_collapsible(
-                parsed_code,
-                file_path,
-                "edit-tool-result",
-                linenostart=line_offset,
-            )
-
-    # Special handling for Task tool: render result as markdown with Pygments (agent's final message)
-    # Deduplication is now handled retroactively by replacing the sub-assistant content
-    if tool_name == "Task" and not has_images:
-        return render_markdown_collapsible(raw_content, "task-result")
-
-    # Special handling for ExitPlanMode tool: truncate redundant plan echo on success
-    if tool_name == "ExitPlanMode" and not has_images:
-        processed_content = format_exitplanmode_result(raw_content)
-        escaped_content = escape_html(processed_content)
-        return f"<pre>{escaped_content}</pre>"
-
-    # Special handling for AskUserQuestion tool: render Q&A pairs with styling
-    if tool_name == "AskUserQuestion" and not has_images:
-        styled_result = format_askuserquestion_result(raw_content)
-        if styled_result:
-            return styled_result
-        # Fall through to default handling if parsing fails
-
-    # Check if this looks like Bash tool output and process ANSI codes
-    # Bash tool results often contain ANSI escape sequences and terminal output
-    if _looks_like_bash_output(raw_content):
-        escaped_content = _convert_ansi_to_html(raw_content)
-    else:
-        escaped_content = escape_html(raw_content)
-
-    # Build final HTML based on content length and presence of images
-    if has_images:
-        # Combine text and images
-        text_html = f"<pre>{escaped_content}</pre>" if escaped_content else ""
-        images_html = "".join(image_html_parts)
-        combined_content = f"{text_html}{images_html}"
-
-        # Always make collapsible when images are present
-        preview_text = "Text and image content"
-        return f"""
-    <details class="collapsible-details">
-        <summary>
-            <span class='preview-text'>{preview_text}</span>
-        </summary>
-        <div class="details-content">
-            {combined_content}
-        </div>
-    </details>
-    """
-    else:
-        # Text-only content (existing behavior)
-        # For simple content, show directly without collapsible wrapper
-        if len(escaped_content) <= 200:
-            return f"<pre>{escaped_content}</pre>"
-
-        # For longer content, use collapsible details but no extra wrapper
-        preview_text = escaped_content[:200] + "..."
-        return f"""
-    <details class="collapsible-details">
-        <summary>
-            <div class="preview-content"><pre>{preview_text}</pre></div>
-        </summary>
-        <div class="details-content">
-            <pre>{escaped_content}</pre>
-        </div>
-    </details>
-    """
-
-
-def _looks_like_bash_output(content: str) -> bool:
-    """Check if content looks like it's from a Bash tool based on common patterns."""
-    if not content:
-        return False
-
-    # Check for ANSI escape sequences
-    if "\x1b[" in content:
-        return True
-
-    # Check for common bash/terminal patterns
-    bash_indicators = [
-        "$ ",  # Shell prompt
-        "❯ ",  # Modern shell prompt
-        "> ",  # Shell continuation
-        "\n+ ",  # Bash -x output
-        "bash: ",  # Bash error messages
-        "/bin/bash",  # Bash path
-        "command not found",  # Common bash error
-        "Permission denied",  # Common bash error
-        "No such file or directory",  # Common bash error
-    ]
-
-    # Check for file path patterns that suggest command output
-    import re
-
-    if re.search(r"/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*", content):  # Unix-style paths
-        return True
-
-    # Check for common command output patterns
-    if any(indicator in content for indicator in bash_indicators):
-        return True
-
-    return False
-
-
-def format_thinking_content(thinking: ThinkingContent) -> str:
-    """Format thinking content as HTML with markdown rendering."""
-    thinking_text = thinking.thinking.strip()
-
-    # Use line-based collapsible rendering (10 lines threshold, 5 preview)
-    return render_markdown_collapsible(
-        thinking_text, "thinking-text", line_threshold=10
-    )
-
-
-def format_image_content(image: ImageContent) -> str:
-    """Format image content as HTML."""
-    # Create a data URL from the base64 image data
-    data_url = f"data:{image.source.media_type};base64,{image.source.data}"
-
-    return f'<img src="{data_url}" alt="Uploaded image" class="uploaded-image" />'
-
-
-def _is_compacted_session_summary(text: str) -> bool:
-    """Check if text is a compacted session summary (model-generated markdown).
-
-    Compacted summaries are generated when a session runs out of context and
-    needs to be continued. They are well-formed markdown and should be rendered
-    as such rather than in preformatted blocks.
-    """
-    return text.startswith(
-        "This session is being continued from a previous conversation that ran out of context"
-    )
-
-
-def extract_ide_notifications(text: str) -> tuple[List[str], str]:
-    """Extract IDE notification tags from user message text.
-
-    Handles:
-    - <ide_opened_file>: Simple file open notifications
-    - <ide_selection>: Code selection notifications (collapsible for large selections)
-    - <post-tool-use-hook><ide_diagnostics>: JSON diagnostic arrays
-
-    Returns:
-        A tuple of (notifications_html_list, remaining_text)
-        where notifications are pre-rendered HTML divs and remaining_text
-        is the message content with IDE tags removed.
-    """
-    import re
-
-    notifications: List[str] = []
-    remaining_text = text
-
-    # Pattern 1: <ide_opened_file>content</ide_opened_file>
-    ide_file_pattern = r"<ide_opened_file>(.*?)</ide_opened_file>"
-    file_matches = list(re.finditer(ide_file_pattern, remaining_text, flags=re.DOTALL))
-
-    for match in file_matches:
-        content = match.group(1).strip()
-        escaped_content = escape_html(content)
-        notification_html = f"<div class='ide-notification'>🤖 {escaped_content}</div>"
-        notifications.append(notification_html)
-
-    # Remove ide_opened_file tags
-    remaining_text = re.sub(ide_file_pattern, "", remaining_text, flags=re.DOTALL)
-
-    # Pattern 2: <ide_selection>content</ide_selection>
-    selection_pattern = r"<ide_selection>(.*?)</ide_selection>"
-    selection_matches = list(
-        re.finditer(selection_pattern, remaining_text, flags=re.DOTALL)
-    )
-
-    for match in selection_matches:
-        content = match.group(1).strip()
-        escaped_content = escape_html(content)
-
-        # For large selections, make them collapsible
-        if len(content) > 200:
-            preview = escape_html(content[:150]) + "..."
-            notification_html = f"""
-                <div class='ide-notification ide-selection'>
-                    <details class='ide-selection-collapsible'>
-                        <summary>📝 {preview}</summary>
-                        <pre class='ide-selection-content'>{escaped_content}</pre>
-                    </details>
-                </div>
-            """
-        else:
-            notification_html = f"<div class='ide-notification ide-selection'>📝 {escaped_content}</div>"
-
-        notifications.append(notification_html)
-
-    # Remove ide_selection tags
-    remaining_text = re.sub(selection_pattern, "", remaining_text, flags=re.DOTALL)
-
-    # Pattern 3: <post-tool-use-hook><ide_diagnostics>JSON</ide_diagnostics></post-tool-use-hook>
-    hook_pattern = r"<post-tool-use-hook>\s*<ide_diagnostics>(.*?)</ide_diagnostics>\s*</post-tool-use-hook>"
-    hook_matches = list(re.finditer(hook_pattern, remaining_text, flags=re.DOTALL))
-
-    for match in hook_matches:
-        json_content = match.group(1).strip()
-        try:
-            # Parse JSON array of diagnostic objects
-            diagnostics: Any = json.loads(json_content)
-            if isinstance(diagnostics, list):
-                # Render each diagnostic as a table
-                for diagnostic in cast(List[Any], diagnostics):
-                    if isinstance(diagnostic, dict):
-                        # Type assertion: we've confirmed it's a dict
-                        diagnostic_dict = cast(Dict[str, Any], diagnostic)
-                        table_html = render_params_table(diagnostic_dict)
-                        notification_html = (
-                            f"<div class='ide-notification ide-diagnostic'>"
-                            f"⚠️ IDE Diagnostic<br>{table_html}"
-                            f"</div>"
-                        )
-                        notifications.append(notification_html)
-        except (json.JSONDecodeError, ValueError):
-            # If JSON parsing fails, render as plain text
-            escaped_content = escape_html(json_content[:200])
-            notification_html = (
-                f"<div class='ide-notification'>🤖 IDE Diagnostics (parse error)<br>"
-                f"<pre>{escaped_content}...</pre></div>"
-            )
-            notifications.append(notification_html)
-
-    # Remove hook tags
-    remaining_text = re.sub(hook_pattern, "", remaining_text, flags=re.DOTALL)
-
-    return notifications, remaining_text.strip()
-
-
-def render_user_message_content(
-    content_list: List[ContentItem],
-) -> tuple[str, bool, bool]:
-    """Render user message content with IDE tag extraction and compacted summary handling.
-
-    Returns:
-        A tuple of (content_html, is_compacted, is_memory_input)
-    """
-    # Check first text item
-    if content_list and hasattr(content_list[0], "text"):
-        first_text = getattr(content_list[0], "text", "")
-
-        # Check for compacted session summary first
-        if _is_compacted_session_summary(first_text):
-            # Combine all text content for compacted summaries
-            all_text = "\n\n".join(
-                item.text for item in content_list if isinstance(item, TextContent)
-            )
-            # Render as collapsible markdown (threshold=30, preview=10 for large summaries)
-            content_html = render_markdown_collapsible(
-                all_text, "compacted-summary", line_threshold=30, preview_line_count=10
-            )
-            return content_html, True, False
-
-        # Check for user memory input
-        memory_match = re.search(
-            r"<user-memory-input>(.*?)</user-memory-input>",
-            first_text,
-            re.DOTALL,
-        )
-        if memory_match:
-            memory_content = memory_match.group(1).strip()
-            # Render the memory content as user message
-            memory_content_list: List[ContentItem] = [
-                TextContent(type="text", text=memory_content)
-            ]
-            content_html = render_message_content(memory_content_list, "user")
-            return content_html, False, True
-
-        # Extract IDE notifications from first text item
-        ide_notifications_html, remaining_text = extract_ide_notifications(first_text)
-        modified_content = content_list[1:]
-
-        # Build new content list with remaining text
-        if remaining_text:
-            # Replace first item with remaining text
-            modified_content = [
-                TextContent(type="text", text=remaining_text)
-            ] + modified_content
-
-        # Render the content
-        content_html = render_message_content(modified_content, "user")
-
-        # Prepend IDE notifications
-        if ide_notifications_html:
-            content_html = "".join(ide_notifications_html) + content_html
-    else:
-        # No text in first item or empty list, render normally
-        content_html = render_message_content(content_list, "user")
-
-    return content_html, False, False
-
-
-def render_message_content(content: List[ContentItem], message_type: str) -> str:
-    """Render message content with proper tool use and tool result formatting.
-
-    Note: This does NOT handle user-specific preprocessing like IDE tags or
-    compacted session summaries. Those should be handled by render_user_message_content.
-    """
-    if len(content) == 1 and isinstance(content[0], TextContent):
-        if message_type == "user":
-            # User messages are shown as-is in preformatted blocks
-            escaped_text = escape_html(content[0].text)
-            return "<pre>" + escaped_text + "</pre>"
-        else:
-            # Assistant messages get markdown rendering with collapsible for long content
-            return render_markdown_collapsible(
-                content[0].text,
-                "assistant-text",
-                line_threshold=30,
-                preview_line_count=10,
-            )
-
-    # content is a list of ContentItem objects
-    rendered_parts: List[str] = []
-
-    for item in content:
-        # Handle both custom and Anthropic types
-        item_type = getattr(item, "type", None)
-
-        if type(item) is TextContent or (
-            hasattr(item, "type") and hasattr(item, "text") and item_type == "text"
-        ):
-            # Handle both TextContent and Anthropic TextBlock
-            text_value = getattr(item, "text", str(item))
-            if message_type == "user":
-                # User messages are shown as-is in preformatted blocks
-                escaped_text = escape_html(text_value)
-                rendered_parts.append("<pre>" + escaped_text + "</pre>")
-            else:
-                # Assistant messages get markdown rendering with collapsible for long content
-                rendered_parts.append(
-                    render_markdown_collapsible(
-                        text_value,
-                        "assistant-text",
-                        line_threshold=30,
-                        preview_line_count=10,
-                    )
-                )
-        elif type(item) is ToolUseContent or (
-            hasattr(item, "type") and item_type == "tool_use"
-        ):
-            # Tool use items should not appear here - they are filtered out before this function
-            print(
-                "Warning: tool_use content should not be processed in render_message_content",
-                flush=True,
-            )
-        elif type(item) is ToolResultContent or (
-            hasattr(item, "type") and item_type == "tool_result"
-        ):
-            # Tool result items should not appear here - they are filtered out before this function
-            print(
-                "Warning: tool_result content should not be processed in render_message_content",
-                flush=True,
-            )
-        elif type(item) is ThinkingContent or (
-            hasattr(item, "type") and item_type == "thinking"
-        ):
-            # Thinking items should not appear here - they are filtered out before this function
-            print(
-                "Warning: thinking content should not be processed in render_message_content",
-                flush=True,
-            )
-        elif type(item) is ImageContent:
-            rendered_parts.append(format_image_content(item))  # type: ignore
-
-    return "\n".join(rendered_parts)
-
-
-def _get_template_environment() -> Environment:
-    """Get Jinja2 template environment."""
-    templates_dir = Path(__file__).parent / "templates"
-    env = Environment(
-        loader=FileSystemLoader(templates_dir),
-        autoescape=select_autoescape(["html", "xml"]),
-    )
-    # Add custom filters/functions
-    env.globals["starts_with_emoji"] = starts_with_emoji  # type: ignore[index]
-    return env
+from .html import (
+    escape_html,
+    format_tool_use_title,
+    parse_bash_input,
+    parse_bash_output,
+    parse_command_output,
+    parse_slash_command,
+)
+from .parser import parse_user_message_content
+
+
+# -- Content Formatters -------------------------------------------------------
+# NOTE: Content formatters have been moved to html/ submodules:
+#   - format_thinking_content -> html/assistant_formatters.py
+#   - format_assistant_text_content -> html/assistant_formatters.py
+#   - format_tool_result_content -> html/tool_formatters.py
+#   - format_tool_use_content -> html/tool_formatters.py
+#   - format_image_content -> html/assistant_formatters.py
+#   - format_user_text_model_content -> html/user_formatters.py
+#   - parse_user_message_content -> parser.py
 
 
 def _format_type_counts(type_counts: dict[str, int]) -> str:
@@ -1802,15 +161,16 @@ def _format_type_counts(type_counts: dict[str, int]) -> str:
         return f"{parts[0]}, {parts[1]}, {remaining} more"
 
 
+# -- Template Classes ---------------------------------------------------------
+
+
 class TemplateMessage:
     """Structured message data for template rendering."""
 
     def __init__(
         self,
         message_type: str,
-        content_html: str,
         formatted_timestamp: str,
-        css_class: str,
         raw_timestamp: Optional[str] = None,
         session_summary: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -1826,11 +186,14 @@ class TemplateMessage:
         uuid: Optional[str] = None,
         parent_uuid: Optional[str] = None,
         agent_id: Optional[str] = None,
+        modifiers: Optional[MessageModifiers] = None,
+        content: Optional["MessageContent"] = None,
     ):
         self.type = message_type
-        self.content_html = content_html
+        # Structured content for rendering
+        self.content = content
         self.formatted_timestamp = formatted_timestamp
-        self.css_class = css_class
+        self.modifiers = modifiers if modifiers is not None else MessageModifiers()
         self.raw_timestamp = raw_timestamp
         # Display title for message header (capitalized, with decorations)
         self.message_title = (
@@ -1864,6 +227,8 @@ class TemplateMessage:
         self.is_paired = False
         self.pair_role: Optional[str] = None  # "pair_first", "pair_last", "pair_middle"
         self.pair_duration: Optional[str] = None  # Duration for pair_last messages
+        # Children for tree-based rendering (future use)
+        self.children: List["TemplateMessage"] = []
 
     def get_immediate_children_label(self) -> str:
         """Generate human-readable label for immediate children."""
@@ -1872,6 +237,30 @@ class TemplateMessage:
     def get_total_descendants_label(self) -> str:
         """Generate human-readable label for all descendants."""
         return _format_type_counts(self.total_descendants_by_type)
+
+    def flatten(self) -> List["TemplateMessage"]:
+        """Recursively flatten this message and all children into a list.
+
+        Returns a list with this message followed by all descendants in
+        depth-first order. This provides backward compatibility with the
+        flat-list template rendering approach.
+        """
+        result: List["TemplateMessage"] = [self]
+        for child in self.children:
+            result.extend(child.flatten())
+        return result
+
+    @staticmethod
+    def flatten_all(messages: List["TemplateMessage"]) -> List["TemplateMessage"]:
+        """Flatten a list of root messages into a single flat list.
+
+        Useful for converting a tree structure back to a flat list for
+        templates that expect the traditional flat message list.
+        """
+        result: List["TemplateMessage"] = []
+        for message in messages:
+            result.extend(message.flatten())
+        return result
 
 
 class TemplateProject:
@@ -2025,289 +414,216 @@ class TemplateSummary:
             self.token_summary = " | ".join(token_parts)
 
 
-def _render_hook_summary(message: "SystemTranscriptEntry") -> str:
-    """Render a hook summary as collapsible details.
+# -- Template Generation ------------------------------------------------------
 
-    Shows a compact summary with expandable hook commands and error output.
+
+def generate_template_messages(
+    messages: List[TranscriptEntry],
+) -> Tuple[List[TemplateMessage], List[Dict[str, Any]]]:
+    """Generate template messages and session navigation from transcript messages.
+
+    This is the format-neutral rendering step that produces data structures
+    ready for template rendering by any format-specific renderer.
+
+    Args:
+        messages: List of transcript entries to process.
+
+    Returns:
+        A tuple of (template_messages, session_nav) where:
+        - template_messages: Processed messages ready for template rendering
+        - session_nav: Session navigation data with summaries and metadata
     """
-    # Extract command names from hookInfos
-    commands = [info.get("command", "unknown") for info in (message.hookInfos or [])]
+    from .utils import get_warmup_session_ids
 
-    # Determine if this is a failure or just output
-    has_errors = bool(message.hookErrors)
-    summary_icon = "🪝"
-    summary_text = "Hook failed" if has_errors else "Hook output"
+    # Performance timing
+    t_start = time.time()
 
-    # Build the command section
-    command_html = ""
-    if commands:
-        command_html = '<div class="hook-commands">'
-        for cmd in commands:
-            # Truncate very long commands
-            display_cmd = cmd if len(cmd) <= 100 else cmd[:97] + "..."
-            command_html += f"<code>{html.escape(display_cmd)}</code>"
-        command_html += "</div>"
+    # Filter out warmup-only sessions
+    with log_timing("Filter warmup sessions", t_start):
+        warmup_session_ids = get_warmup_session_ids(messages)
+        if warmup_session_ids:
+            messages = [
+                msg
+                for msg in messages
+                if getattr(msg, "sessionId", None) not in warmup_session_ids
+            ]
 
-    # Build the error output section
-    error_html = ""
-    if message.hookErrors:
-        error_html = '<div class="hook-errors">'
-        for err in message.hookErrors:
-            # Convert ANSI codes in error output
-            formatted_err = _convert_ansi_to_html(err)
-            error_html += f'<pre class="hook-error">{formatted_err}</pre>'
-        error_html += "</div>"
+    # Pre-process to find and attach session summaries
+    with log_timing("Session summary processing", t_start):
+        prepare_session_summaries(messages)
 
-    return f"""<details class="hook-summary">
-<summary><strong>{summary_icon}</strong> {summary_text}</summary>
-<div class="hook-details">
-{command_html}
-{error_html}
-</div>
-</details>"""
+    # Filter messages (removes summaries, warmup, empty, etc.)
+    with log_timing("Filter messages", t_start):
+        filtered_messages = _filter_messages(messages)
+
+    # Pass 1: Collect session metadata and token tracking
+    with log_timing("Collect session info", t_start):
+        sessions, session_order, show_tokens_for_message = _collect_session_info(
+            filtered_messages
+        )
+
+    # Pass 2: Render messages to TemplateMessage objects
+    with log_timing(
+        lambda: f"Render messages ({len(template_messages)} messages)", t_start
+    ):
+        template_messages = _render_messages(
+            filtered_messages, sessions, show_tokens_for_message
+        )
+
+    # Prepare session navigation data
+    with log_timing(
+        lambda: f"Session navigation building ({len(session_nav)} sessions)", t_start
+    ):
+        session_nav = prepare_session_navigation(sessions, session_order)
+
+    # Reorder messages so each session's messages follow their session header
+    # This fixes interleaving that occurs when sessions are resumed
+    with log_timing("Reorder session messages", t_start):
+        template_messages = _reorder_session_template_messages(template_messages)
+
+    # Identify and mark paired messages (command+output, tool_use+tool_result, etc.)
+    with log_timing("Identify message pairs", t_start):
+        _identify_message_pairs(template_messages)
+
+    # Reorder messages so pairs are adjacent while preserving chronological order
+    with log_timing("Reorder paired messages", t_start):
+        template_messages = _reorder_paired_messages(template_messages)
+
+    # Reorder sidechains to appear after their Task results
+    # This must happen AFTER pair reordering, since that moves tool_results
+    with log_timing("Reorder sidechain messages", t_start):
+        template_messages = _reorder_sidechain_template_messages(template_messages)
+
+    # Build hierarchy (message_id and ancestry) based on final order
+    # This must happen AFTER all reordering to get correct parent-child relationships
+    with log_timing("Build message hierarchy", t_start):
+        _build_message_hierarchy(template_messages)
+
+    # Mark messages that have children for fold/unfold controls
+    with log_timing("Mark messages with children", t_start):
+        _mark_messages_with_children(template_messages)
+
+    # Build tree structure by populating children fields
+    # Returns root messages (typically session headers) with children populated
+    # HtmlRenderer flattens this via pre-order traversal for template rendering
+    with log_timing("Build message tree", t_start):
+        root_messages = _build_message_tree(template_messages)
+
+    return root_messages, session_nav
 
 
-def _convert_ansi_to_html(text: str) -> str:
-    """Convert ANSI escape codes to HTML spans with CSS classes.
+# -- Session Utilities --------------------------------------------------------
 
-    Supports:
-    - Colors (30-37, 90-97 for foreground; 40-47, 100-107 for background)
-    - RGB colors (38;2;r;g;b for foreground; 48;2;r;g;b for background)
-    - Bold (1), Dim (2), Italic (3), Underline (4)
-    - Reset (0, 39, 49, 22, 23, 24)
-    - Strips cursor movement and screen manipulation codes
+
+def prepare_session_summaries(messages: List[TranscriptEntry]) -> None:
+    """Pre-process messages to find and attach session summaries.
+
+    Modifies messages in place by attaching _session_summary attribute.
     """
-    import re
+    session_summaries: Dict[str, str] = {}
+    uuid_to_session: Dict[str, str] = {}
+    uuid_to_session_backup: Dict[str, str] = {}
 
-    # First, strip cursor movement and screen manipulation codes
-    # Common patterns: [1A (cursor up), [2K (erase line), [?25l (hide cursor), etc.
-    cursor_patterns = [
-        r"\x1b\[[0-9]*[ABCD]",  # Cursor movement (up, down, forward, back)
-        r"\x1b\[[0-9]*[EF]",  # Cursor next/previous line
-        r"\x1b\[[0-9]*[GH]",  # Cursor horizontal/home position
-        r"\x1b\[[0-9;]*[Hf]",  # Cursor position
-        r"\x1b\[[0-9]*[JK]",  # Erase display/line
-        r"\x1b\[[0-9]*[ST]",  # Scroll up/down
-        r"\x1b\[\?[0-9]*[hl]",  # Private mode set/reset (show/hide cursor, etc.)
-        r"\x1b\[[0-9]*[PXYZ@]",  # Insert/delete operations
-        r"\x1b\[=[0-9]*[A-Za-z]",  # Alternate character set
-        r"\x1b\][0-9];[^\x07]*\x07",  # Operating System Command (OSC)
-        r"\x1b\][0-9];[^\x1b]*\x1b\\",  # OSC with string terminator
-    ]
+    # Build mapping from message UUID to session ID
+    for message in messages:
+        if hasattr(message, "uuid") and hasattr(message, "sessionId"):
+            message_uuid = getattr(message, "uuid", "")
+            session_id = getattr(message, "sessionId", "")
+            if message_uuid and session_id:
+                # There is often duplication, in that case we want to prioritise the assistant
+                # message because summaries are generated from Claude's (last) success message
+                if type(message) is AssistantTranscriptEntry:
+                    uuid_to_session[message_uuid] = session_id
+                else:
+                    uuid_to_session_backup[message_uuid] = session_id
 
-    # Strip all cursor movement and screen manipulation codes
-    for pattern in cursor_patterns:
-        text = re.sub(pattern, "", text)
+    # Map summaries to sessions via leafUuid -> message UUID -> session ID
+    for message in messages:
+        if isinstance(message, SummaryTranscriptEntry):
+            leaf_uuid = message.leafUuid
+            if leaf_uuid in uuid_to_session:
+                session_summaries[uuid_to_session[leaf_uuid]] = message.summary
+            elif (
+                leaf_uuid in uuid_to_session_backup
+                and uuid_to_session_backup[leaf_uuid] not in session_summaries
+            ):
+                session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
 
-    # Also strip any remaining unhandled escape sequences that aren't color codes
-    # This catches any we might have missed, but preserves \x1b[...m color codes
-    text = re.sub(r"\x1b\[(?![0-9;]*m)[0-9;]*[A-Za-z]", "", text)
+    # Attach summaries to messages
+    for message in messages:
+        if hasattr(message, "sessionId"):
+            session_id = getattr(message, "sessionId", "")
+            if session_id in session_summaries:
+                setattr(message, "_session_summary", session_summaries[session_id])
 
-    result: List[str] = []
-    segments: List[Dict[str, Any]] = []
 
-    # First pass: split text into segments with their styles
-    last_end = 0
-    current_fg = None
-    current_bg = None
-    current_bold = False
-    current_dim = False
-    current_italic = False
-    current_underline = False
-    current_rgb_fg = None
-    current_rgb_bg = None
+def prepare_session_navigation(
+    sessions: Dict[str, Dict[str, Any]],
+    session_order: List[str],
+) -> List[Dict[str, Any]]:
+    """Prepare session navigation data for template rendering.
 
-    for match in re.finditer(r"\x1b\[([0-9;]+)m", text):
-        # Add text before this escape code
-        if match.start() > last_end:
-            segments.append(
-                {
-                    "text": text[last_end : match.start()],
-                    "fg": current_fg,
-                    "bg": current_bg,
-                    "bold": current_bold,
-                    "dim": current_dim,
-                    "italic": current_italic,
-                    "underline": current_underline,
-                    "rgb_fg": current_rgb_fg,
-                    "rgb_bg": current_rgb_bg,
-                }
-            )
+    Args:
+        sessions: Dictionary mapping session_id to session info dict
+        session_order: List of session IDs in display order
 
-        # Process escape codes
-        codes = match.group(1).split(";")
-        i = 0
-        while i < len(codes):
-            code = codes[i]
+    Returns:
+        List of session navigation dicts for template rendering
+    """
+    session_nav: List[Dict[str, Any]] = []
 
-            # Reset codes
-            if code == "0":
-                current_fg = None
-                current_bg = None
-                current_bold = False
-                current_dim = False
-                current_italic = False
-                current_underline = False
-                current_rgb_fg = None
-                current_rgb_bg = None
-            elif code == "39":
-                current_fg = None
-                current_rgb_fg = None
-            elif code == "49":
-                current_bg = None
-                current_rgb_bg = None
-            elif code == "22":
-                current_bold = False
-                current_dim = False
-            elif code == "23":
-                current_italic = False
-            elif code == "24":
-                current_underline = False
+    for session_id in session_order:
+        session_info = sessions[session_id]
 
-            # Style codes
-            elif code == "1":
-                current_bold = True
-            elif code == "2":
-                current_dim = True
-            elif code == "3":
-                current_italic = True
-            elif code == "4":
-                current_underline = True
+        # Skip empty sessions (agent-only, no user messages)
+        if not session_info["first_user_message"]:
+            continue
 
-            # Standard foreground colors
-            elif code in ["30", "31", "32", "33", "34", "35", "36", "37"]:
-                color_map = {
-                    "30": "black",
-                    "31": "red",
-                    "32": "green",
-                    "33": "yellow",
-                    "34": "blue",
-                    "35": "magenta",
-                    "36": "cyan",
-                    "37": "white",
-                }
-                current_fg = f"ansi-{color_map[code]}"
-                current_rgb_fg = None
+        # Format timestamp range
+        first_ts = session_info["first_timestamp"]
+        last_ts = session_info["last_timestamp"]
+        timestamp_range = format_timestamp_range(first_ts, last_ts)
 
-            # Standard background colors
-            elif code in ["40", "41", "42", "43", "44", "45", "46", "47"]:
-                color_map = {
-                    "40": "black",
-                    "41": "red",
-                    "42": "green",
-                    "43": "yellow",
-                    "44": "blue",
-                    "45": "magenta",
-                    "46": "cyan",
-                    "47": "white",
-                }
-                current_bg = f"ansi-bg-{color_map[code]}"
-                current_rgb_bg = None
+        # Format token usage summary
+        token_summary = ""
+        total_input = session_info["total_input_tokens"]
+        total_output = session_info["total_output_tokens"]
+        total_cache_creation = session_info["total_cache_creation_tokens"]
+        total_cache_read = session_info["total_cache_read_tokens"]
 
-            # Bright foreground colors
-            elif code in ["90", "91", "92", "93", "94", "95", "96", "97"]:
-                color_map = {
-                    "90": "bright-black",
-                    "91": "bright-red",
-                    "92": "bright-green",
-                    "93": "bright-yellow",
-                    "94": "bright-blue",
-                    "95": "bright-magenta",
-                    "96": "bright-cyan",
-                    "97": "bright-white",
-                }
-                current_fg = f"ansi-{color_map[code]}"
-                current_rgb_fg = None
+        if total_input > 0 or total_output > 0:
+            token_parts: List[str] = []
+            if total_input > 0:
+                token_parts.append(f"Input: {total_input}")
+            if total_output > 0:
+                token_parts.append(f"Output: {total_output}")
+            if total_cache_creation > 0:
+                token_parts.append(f"Cache Creation: {total_cache_creation}")
+            if total_cache_read > 0:
+                token_parts.append(f"Cache Read: {total_cache_read}")
+            token_summary = "Token usage – " + " | ".join(token_parts)
 
-            # Bright background colors
-            elif code in ["100", "101", "102", "103", "104", "105", "106", "107"]:
-                color_map = {
-                    "100": "bright-black",
-                    "101": "bright-red",
-                    "102": "bright-green",
-                    "103": "bright-yellow",
-                    "104": "bright-blue",
-                    "105": "bright-magenta",
-                    "106": "bright-cyan",
-                    "107": "bright-white",
-                }
-                current_bg = f"ansi-bg-{color_map[code]}"
-                current_rgb_bg = None
-
-            # RGB foreground color
-            elif code == "38" and i + 1 < len(codes) and codes[i + 1] == "2":
-                if i + 4 < len(codes):
-                    r, g, b = codes[i + 2], codes[i + 3], codes[i + 4]
-                    current_rgb_fg = f"color: rgb({r}, {g}, {b})"
-                    current_fg = None
-                    i += 4
-
-            # RGB background color
-            elif code == "48" and i + 1 < len(codes) and codes[i + 1] == "2":
-                if i + 4 < len(codes):
-                    r, g, b = codes[i + 2], codes[i + 3], codes[i + 4]
-                    current_rgb_bg = f"background-color: rgb({r}, {g}, {b})"
-                    current_bg = None
-                    i += 4
-
-            i += 1
-
-        last_end = match.end()
-
-    # Add remaining text
-    if last_end < len(text):
-        segments.append(
+        session_nav.append(
             {
-                "text": text[last_end:],
-                "fg": current_fg,
-                "bg": current_bg,
-                "bold": current_bold,
-                "dim": current_dim,
-                "italic": current_italic,
-                "underline": current_underline,
-                "rgb_fg": current_rgb_fg,
-                "rgb_bg": current_rgb_bg,
+                "id": session_id,
+                "summary": session_info["summary"],
+                "timestamp_range": timestamp_range,
+                "first_timestamp": first_ts,
+                "last_timestamp": last_ts,
+                "message_count": session_info["message_count"],
+                "first_user_message": session_info["first_user_message"]
+                if session_info["first_user_message"] != ""
+                else "[No user message found in session.]",
+                "token_summary": token_summary,
             }
         )
 
-    # Second pass: build HTML
-    for segment in segments:
-        if not segment["text"]:
-            continue
+    return session_nav
 
-        classes: List[str] = []
-        styles: List[str] = []
 
-        if segment["fg"]:
-            classes.append(segment["fg"])
-        if segment["bg"]:
-            classes.append(segment["bg"])
-        if segment["bold"]:
-            classes.append("ansi-bold")
-        if segment["dim"]:
-            classes.append("ansi-dim")
-        if segment["italic"]:
-            classes.append("ansi-italic")
-        if segment["underline"]:
-            classes.append("ansi-underline")
-        if segment["rgb_fg"]:
-            styles.append(segment["rgb_fg"])
-        if segment["rgb_bg"]:
-            styles.append(segment["rgb_bg"])
-
-        escaped_text = escape_html(segment["text"])
-
-        if classes or styles:
-            attrs: List[str] = []
-            if classes:
-                attrs.append(f'class="{" ".join(classes)}"')
-            if styles:
-                attrs.append(f'style="{"; ".join(styles)}"')
-            result.append(f"<span {' '.join(attrs)}>{escaped_text}</span>")
-        else:
-            result.append(escaped_text)
-
-    return "".join(result)
+# -- Message Processing Functions ---------------------------------------------
+# Note: HTML formatting logic has been moved to html/content_formatters.py
+# as part of the refactoring to support format-neutral content models.
 
 
 # def _process_summary_message(message: SummaryTranscriptEntry) -> tuple[str, str, str]:
@@ -2318,192 +634,72 @@ def _convert_ansi_to_html(text: str) -> str:
 #     return css_class, content_html, message_type
 
 
-def _process_command_message(text_content: str) -> tuple[str, str, str, str]:
-    """Process a command message and return (css_class, content_html, message_type, message_title)."""
-    css_class = "system"
-    command_name, command_args, command_contents = extract_command_info(text_content)
-    escaped_command_name = escape_html(command_name)
-    escaped_command_args = escape_html(command_args)
+def _process_command_message(
+    text_content: str,
+) -> tuple[MessageModifiers, Optional["MessageContent"], str, str]:
+    """Process a slash command message and return (modifiers, content, message_type, message_title).
 
-    # Format the command contents with proper line breaks
-    formatted_contents = command_contents.replace("\\n", "\n")
-    escaped_command_contents = escape_html(formatted_contents)
+    These are user messages containing slash command invocations (e.g., /context, /model).
+    The JSONL type is "user", not "system".
+    """
+    modifiers = MessageModifiers(is_slash_command=True)
 
-    # Build the content HTML
-    content_parts: List[str] = [f"<strong>Command:</strong> {escaped_command_name}"]
-    if command_args:
-        content_parts.append(f"<strong>Args:</strong> {escaped_command_args}")
-    if command_contents:
-        lines = escaped_command_contents.splitlines()
-        line_count = len(lines)
-        if line_count <= 12:
-            # Short content, show inline
-            details_html = (
-                f"<strong>Content:</strong><pre>{escaped_command_contents}</pre>"
-            )
-        else:
-            # Long content, make collapsible
-            preview = "\n".join(lines[:5])
-            collapsible = render_collapsible_code(
-                f"<pre>{preview}</pre>",
-                f"<pre>{escaped_command_contents}</pre>",
-                line_count,
-            )
-            details_html = f"<strong>Content:</strong>{collapsible}"
-        content_parts.append(details_html)
+    # Parse to content model (formatting happens in HtmlRenderer)
+    content = parse_slash_command(text_content)
+    # If parsing fails, content will be None and caller will handle fallback
 
-    content_html = "<br>".join(content_parts)
-    message_type = "system"
-    message_title = "System"
-    return css_class, content_html, message_type, message_title
+    message_type = "user"
+    message_title = "Slash Command"
+    return modifiers, content, message_type, message_title
 
 
-def _process_local_command_output(text_content: str) -> tuple[str, str, str, str]:
-    """Process local command output and return (css_class, content_html, message_type, message_title)."""
-    import re
+def _process_local_command_output(
+    text_content: str,
+) -> tuple[MessageModifiers, Optional["MessageContent"], str, str]:
+    """Process slash command output and return (modifiers, content, message_type, message_title).
 
-    css_class = "system command-output"
+    These are user messages containing the output from slash commands (e.g., /context, /model).
+    The JSONL type is "user", not "system".
+    """
+    modifiers = MessageModifiers(is_command_output=True)
 
-    stdout_match = re.search(
-        r"<local-command-stdout>(.*?)</local-command-stdout>",
-        text_content,
-        re.DOTALL,
-    )
-    if stdout_match:
-        stdout_content = stdout_match.group(1).strip()
+    # Parse to content model (formatting happens in HtmlRenderer)
+    content = parse_command_output(text_content)
+    # If parsing fails, content will be None and caller will handle fallback
 
-        # Check if content looks like markdown (starts with markdown headers)
-        is_markdown = bool(re.match(r"^#+\s+", stdout_content, re.MULTILINE))
-
-        if is_markdown:
-            # Render as markdown
-            import mistune
-
-            markdown_html = mistune.html(stdout_content)
-            content_html = (
-                f"<strong>Command Output:</strong><br>"
-                f"<div class='command-output-content'>{markdown_html}</div>"
-            )
-        else:
-            # Convert ANSI codes to HTML for colored display
-            html_content = _convert_ansi_to_html(stdout_content)
-            # Use <pre> to preserve formatting and line breaks
-            content_html = (
-                f"<strong>Command Output:</strong><br>"
-                f"<pre class='command-output-content'>{html_content}</pre>"
-            )
-    else:
-        content_html = escape_html(text_content)
-
-    message_type = "system"
-    message_title = "System"
-    return css_class, content_html, message_type, message_title
+    message_type = "user"
+    message_title = "Command Output"
+    return modifiers, content, message_type, message_title
 
 
-def _process_bash_input(text_content: str) -> tuple[str, str, str, str]:
-    """Process bash input command and return (css_class, content_html, message_type, message_title)."""
-    import re
+def _process_bash_input(
+    text_content: str,
+) -> tuple[MessageModifiers, Optional["MessageContent"], str, str]:
+    """Process bash input command and return (modifiers, content, message_type, message_title)."""
+    modifiers = MessageModifiers()  # bash-input is a message type, not a modifier
 
-    css_class = "bash-input"
+    # Parse to content model (formatting happens in HtmlRenderer)
+    content = parse_bash_input(text_content)
+    # If parsing fails, content will be None and caller will handle fallback
 
-    bash_match = re.search(
-        r"<bash-input>(.*?)</bash-input>",
-        text_content,
-        re.DOTALL,
-    )
-    if bash_match:
-        bash_command = bash_match.group(1).strip()
-        escaped_command = escape_html(bash_command)
-        content_html = (
-            f"<span class='bash-prompt'>❯</span> "
-            f"<code class='bash-command'>{escaped_command}</code>"
-        )
-    else:
-        content_html = escape_html(text_content)
+    message_type = "bash-input"
+    message_title = "Bash"
+    return modifiers, content, message_type, message_title
+
+
+def _process_bash_output(
+    text_content: str,
+) -> tuple[MessageModifiers, Optional["MessageContent"], str, str]:
+    """Process bash output and return (modifiers, content, message_type, message_title)."""
+    modifiers = MessageModifiers()  # bash-output is a message type, not a modifier
+
+    # Parse to content model (formatting happens in HtmlRenderer)
+    content = parse_bash_output(text_content)
+    # If parsing fails, content will be None - caller/renderer handles empty output
 
     message_type = "bash"
     message_title = "Bash"
-    return css_class, content_html, message_type, message_title
-
-
-def _process_bash_output(text_content: str) -> tuple[str, str, str, str]:
-    """Process bash output and return (css_class, content_html, message_type, message_title)."""
-    import re
-
-    css_class = "bash-output"
-    COLLAPSE_THRESHOLD = 10  # Collapse if more than this many lines
-
-    stdout_match = re.search(
-        r"<bash-stdout>(.*?)</bash-stdout>",
-        text_content,
-        re.DOTALL,
-    )
-    stderr_match = re.search(
-        r"<bash-stderr>(.*?)</bash-stderr>",
-        text_content,
-        re.DOTALL,
-    )
-
-    output_parts: List[tuple[str, str, int, str]] = []
-    total_lines = 0
-
-    if stdout_match:
-        stdout_content = stdout_match.group(1).strip()
-        if stdout_content:
-            escaped_stdout = _convert_ansi_to_html(stdout_content)
-            stdout_lines = stdout_content.count("\n") + 1
-            total_lines += stdout_lines
-            output_parts.append(
-                ("stdout", escaped_stdout, stdout_lines, stdout_content)
-            )
-
-    if stderr_match:
-        stderr_content = stderr_match.group(1).strip()
-        if stderr_content:
-            escaped_stderr = _convert_ansi_to_html(stderr_content)
-            stderr_lines = stderr_content.count("\n") + 1
-            total_lines += stderr_lines
-            output_parts.append(
-                ("stderr", escaped_stderr, stderr_lines, stderr_content)
-            )
-
-    if output_parts:
-        # Build the HTML parts
-        html_parts: List[str] = []
-        for output_type, escaped_content, _, _ in output_parts:
-            css_name = f"bash-{output_type}"
-            html_parts.append(f"<pre class='{css_name}'>{escaped_content}</pre>")
-
-        full_html = "".join(html_parts)
-
-        # Wrap in collapsible if output is large
-        if total_lines > COLLAPSE_THRESHOLD:
-            # Create preview (first few lines)
-            preview_lines = 3
-            first_output = output_parts[0]
-            raw_preview = "\n".join(first_output[3].split("\n")[:preview_lines])
-            preview_html = html.escape(raw_preview)
-            if total_lines > preview_lines:
-                preview_html += "\n..."
-
-            content_html = f"""<details class='collapsible-code'>
-                <summary>
-                    <span class='line-count'>{total_lines} lines</span>
-                    <pre class='preview-content bash-stdout'>{preview_html}</pre>
-                </summary>
-                <div class='code-full'>{full_html}</div>
-            </details>"""
-        else:
-            content_html = full_html
-    else:
-        # Empty output
-        content_html = (
-            "<pre class='bash-stdout'><span class='bash-empty'>(no output)</span></pre>"
-        )
-
-    message_type = "bash"
-    message_title = "Bash"
-    return css_class, content_html, message_type, message_title
+    return modifiers, content, message_type, message_title
 
 
 def _process_regular_message(
@@ -2511,8 +707,11 @@ def _process_regular_message(
     message_type: str,
     is_sidechain: bool,
     is_meta: bool = False,
-) -> tuple[str, str, str, str]:
-    """Process regular message and return (css_class, content_html, message_type, message_title).
+) -> tuple[MessageModifiers, Optional["MessageContent"], str, str]:
+    """Process regular message and return (modifiers, content_model, message_type, message_title).
+
+    Returns content_model for user messages, None for non-user messages.
+    Non-user messages (assistant) are handled by the legacy render_message_content path.
 
     Note: Sidechain user messages (Sub-assistant prompts) are now skipped entirely
     in the main processing loop since they duplicate the Task tool input prompt.
@@ -2520,17 +719,18 @@ def _process_regular_message(
     Args:
         is_meta: True for slash command expanded prompts (isMeta=True in JSONL)
     """
-    css_class = f"{message_type}"
     message_title = message_type.title()  # Default title
     is_compacted = False
+    is_slash_command = False
+    content_model: Optional["MessageContent"] = None
 
     # Handle user-specific preprocessing
-    if message_type == "user":
+    if message_type == MessageType.USER:
         # Note: sidechain user messages are skipped before reaching this function
         if is_meta:
-            # Slash command expanded prompts - render as collapsible markdown
+            # Slash command expanded prompts
             # These contain LLM-generated instruction text (markdown formatted)
-            css_class = f"{message_type} slash-command"
+            is_slash_command = True
             message_title = "User (slash command)"
             # Combine all text content (items may be TextContent, dicts, or SDK objects)
             all_text = "\n\n".join(
@@ -2538,43 +738,400 @@ def _process_regular_message(
                 for item in text_only_content
                 if hasattr(item, "text")
             )
-            content_html = render_markdown_collapsible(
-                all_text,
-                "slash-command-content",
-                line_threshold=20,
-                preview_line_count=5,
-            )
+            # Use UserTextContent with is_slash_command flag for HtmlRenderer to format
+            content_model = UserTextContent(text=all_text)
         else:
-            content_html, is_compacted, is_memory_input = render_user_message_content(
-                text_only_content
-            )
-            if is_compacted:
-                css_class = f"{message_type} compacted"
+            content_model = parse_user_message_content(text_only_content)
+            # Determine message_title and modifiers from content type
+            if isinstance(content_model, CompactedSummaryContent):
+                is_compacted = True
                 message_title = "User (compacted conversation)"
-            elif is_memory_input:
+            elif isinstance(content_model, UserMemoryContent):
                 message_title = "Memory"
-    else:
-        # Non-user messages: render directly
-        content_html = render_message_content(text_only_content, message_type)
+    elif message_type == MessageType.ASSISTANT:
+        # Create AssistantTextContent for assistant messages
+        all_text = "\n\n".join(
+            getattr(item, "text", "")
+            for item in text_only_content
+            if hasattr(item, "text")
+        )
+        if all_text:
+            content_model = AssistantTextContent(text=all_text)
 
     if is_sidechain:
-        css_class = f"{css_class} sidechain"
         # Update message title for display (only non-user types reach here)
         if not is_compacted:
             message_title = "🔗 Sub-assistant"
 
-    return css_class, content_html, message_type, message_title
+    modifiers = MessageModifiers(
+        is_sidechain=is_sidechain,
+        is_slash_command=is_slash_command,
+        is_compacted=is_compacted,
+    )
+
+    return modifiers, content_model, message_type, message_title
 
 
-def _get_combined_transcript_link(cache_manager: "CacheManager") -> Optional[str]:
-    """Get link to combined transcript if available."""
-    try:
-        project_cache = cache_manager.get_cached_project_data()
-        if project_cache and project_cache.sessions:
-            return "combined_transcripts.html"
+def _process_system_message(
+    message: SystemTranscriptEntry,
+) -> Optional[TemplateMessage]:
+    """Process a system message and return a TemplateMessage, or None if it should be skipped.
+
+    Handles:
+    - Hook summaries (subtype="stop_hook_summary")
+    - Other system messages with level-specific styling (info, warning, error)
+
+    Note: Slash command messages (<command-name>, <local-command-stdout>) are user messages,
+    not system messages. They are handled by _process_command_message and
+    _process_local_command_output in the main processing loop.
+    """
+    from .models import MessageContent  # Local import to avoid circular dependency
+
+    session_id = getattr(message, "sessionId", "unknown")
+    timestamp = getattr(message, "timestamp", "")
+    formatted_timestamp = format_timestamp(timestamp) if timestamp else ""
+
+    # Build structured content based on message subtype
+    content: MessageContent
+    if message.subtype == "stop_hook_summary":
+        # Skip silent hook successes (no output, no errors)
+        if not message.hasOutput and not message.hookErrors:
+            return None
+        # Create structured hook summary content
+        hook_infos = [
+            HookInfo(command=info.get("command", "unknown"))
+            for info in (message.hookInfos or [])
+        ]
+        content = HookSummaryContent(
+            has_output=bool(message.hasOutput),
+            hook_errors=message.hookErrors or [],
+            hook_infos=hook_infos,
+        )
+        level = "hook"
+    elif not message.content:
+        # Skip system messages without content (shouldn't happen normally)
         return None
-    except Exception:
+    else:
+        # Create structured system content
+        level = getattr(message, "level", "info")
+        content = SystemContent(level=level, text=message.content)
+
+    # Store parent UUID for hierarchy rebuild (handled by _build_message_hierarchy)
+    parent_uuid = getattr(message, "parentUuid", None)
+
+    return TemplateMessage(
+        message_type="system",
+        formatted_timestamp=formatted_timestamp,
+        raw_timestamp=timestamp,
+        session_id=session_id,
+        message_title=f"System {level.title()}",
+        message_id=None,  # Will be assigned by _build_message_hierarchy
+        ancestry=[],  # Will be assigned by _build_message_hierarchy
+        uuid=message.uuid,
+        parent_uuid=parent_uuid,
+        modifiers=MessageModifiers(system_level=level),
+        content=content,
+    )
+
+
+@dataclass
+class ToolItemResult:
+    """Result of processing a single tool/thinking/image item."""
+
+    message_type: str
+    message_title: str
+    content: Optional["MessageContent"] = None  # Structured content for rendering
+    tool_use_id: Optional[str] = None
+    title_hint: Optional[str] = None
+    pending_dedup: Optional[str] = None  # For Task result deduplication
+    is_error: bool = False  # For tool_result error state
+
+
+def _process_tool_use_item(
+    tool_item: ContentItem,
+    tool_use_context: Dict[str, ToolUseContent],
+) -> Optional[ToolItemResult]:
+    """Process a tool_use content item.
+
+    Args:
+        tool_item: The tool use content item
+        tool_use_context: Dict to populate with tool_use_id -> ToolUseContent mapping
+
+    Returns:
+        ToolItemResult with tool_use content model, or None if item should be skipped
+    """
+    # Convert Anthropic type to our format if necessary
+    if not isinstance(tool_item, ToolUseContent):
+        tool_use = ToolUseContent(
+            type="tool_use",
+            id=getattr(tool_item, "id", ""),
+            name=getattr(tool_item, "name", ""),
+            input=getattr(tool_item, "input", {}),
+        )
+    else:
+        tool_use = tool_item
+
+    # Title is computed here but content formatting happens in HtmlRenderer
+    tool_message_title = format_tool_use_title(tool_use)
+    escaped_id = escape_html(tool_use.id)
+    item_tool_use_id = tool_use.id
+    tool_title_hint = f"ID: {escaped_id}"
+
+    # Populate tool_use_context for later use when processing tool results
+    tool_use_context[item_tool_use_id] = tool_use
+
+    return ToolItemResult(
+        message_type="tool_use",
+        message_title=tool_message_title,
+        content=tool_use,  # ToolUseContent is the model
+        tool_use_id=item_tool_use_id,
+        title_hint=tool_title_hint,
+    )
+
+
+def _process_tool_result_item(
+    tool_item: ContentItem,
+    tool_use_context: Dict[str, ToolUseContent],
+) -> Optional[ToolItemResult]:
+    """Process a tool_result content item.
+
+    Args:
+        tool_item: The tool result content item
+        tool_use_context: Dict with tool_use_id -> ToolUseContent mapping
+
+    Returns:
+        ToolItemResult with tool_result content model, or None if item should be skipped
+    """
+    # Convert Anthropic type to our format if necessary
+    if not isinstance(tool_item, ToolResultContent):
+        tool_result = ToolResultContent(
+            type="tool_result",
+            tool_use_id=getattr(tool_item, "tool_use_id", ""),
+            content=getattr(tool_item, "content", ""),
+            is_error=getattr(tool_item, "is_error", False),
+        )
+    else:
+        tool_result = tool_item
+
+    # Get file_path and tool_name from tool_use context for specialized rendering
+    result_file_path: Optional[str] = None
+    result_tool_name: Optional[str] = None
+    if tool_result.tool_use_id in tool_use_context:
+        tool_use_from_ctx = tool_use_context[tool_result.tool_use_id]
+        result_tool_name = tool_use_from_ctx.name
+        if (
+            result_tool_name in ("Read", "Edit", "Write")
+            and "file_path" in tool_use_from_ctx.input
+        ):
+            result_file_path = tool_use_from_ctx.input["file_path"]
+
+    # Create content model with rendering context
+    content_model = ToolResultContentModel(
+        tool_use_id=tool_result.tool_use_id,
+        content=tool_result.content,
+        is_error=tool_result.is_error or False,
+        tool_name=result_tool_name,
+        file_path=result_file_path,
+    )
+
+    # Retroactive deduplication: if Task result, extract content for later matching
+    pending_dedup: Optional[str] = None
+    if result_tool_name == "Task":
+        # Extract text content from tool result
+        # Note: tool_result.content can be str or List[Dict[str, Any]]
+        if isinstance(tool_result.content, str):
+            task_result_content = tool_result.content.strip()
+        else:
+            # Handle list of dicts (tool result format)
+            content_parts: list[str] = []
+            for item in tool_result.content:
+                text_val = item.get("text", "")
+                if isinstance(text_val, str):
+                    content_parts.append(text_val)
+            task_result_content = "\n".join(content_parts).strip()
+        pending_dedup = task_result_content if task_result_content else None
+
+    escaped_id = escape_html(tool_result.tool_use_id)
+    tool_title_hint = f"ID: {escaped_id}"
+    tool_message_title = "Error" if tool_result.is_error else ""
+
+    return ToolItemResult(
+        message_type="tool_result",
+        message_title=tool_message_title,
+        content=content_model,
+        tool_use_id=tool_result.tool_use_id,
+        title_hint=tool_title_hint,
+        pending_dedup=pending_dedup,
+        is_error=tool_result.is_error or False,
+    )
+
+
+def _process_thinking_item(tool_item: ContentItem) -> Optional[ToolItemResult]:
+    """Process a thinking content item.
+
+    Returns:
+        ToolItemResult with thinking content model
+    """
+    # Extract thinking text from the content item
+    if isinstance(tool_item, ThinkingContent):
+        thinking_text = tool_item.thinking.strip()
+        signature = getattr(tool_item, "signature", None)
+    else:
+        thinking_text = getattr(tool_item, "thinking", str(tool_item)).strip()
+        signature = None
+
+    # Create the content model (formatting happens in HtmlRenderer)
+    thinking_model = ThinkingContentModel(thinking=thinking_text, signature=signature)
+
+    return ToolItemResult(
+        message_type="thinking",
+        message_title="Thinking",
+        content=thinking_model,
+    )
+
+
+def _process_image_item(tool_item: ContentItem) -> Optional[ToolItemResult]:
+    """Process an image content item.
+
+    Returns:
+        ToolItemResult with image content model, or None if item should be skipped
+    """
+    # Convert Anthropic type to our format if necessary
+    if not isinstance(tool_item, ImageContent):
+        # For now, skip Anthropic image types - we'll handle when we encounter them
         return None
+
+    return ToolItemResult(
+        message_type="image",
+        message_title="Image",
+        content=tool_item,  # ImageContent is already the model
+    )
+
+
+# -- Message Pairing ----------------------------------------------------------
+
+
+@dataclass
+class PairingIndices:
+    """Indices for efficient message pairing lookups.
+
+    All indices are built in a single pass for efficiency.
+    """
+
+    # (session_id, tool_use_id) -> message index for tool_use messages
+    tool_use: Dict[tuple[str, str], int]
+    # (session_id, tool_use_id) -> message index for tool_result messages
+    tool_result: Dict[tuple[str, str], int]
+    # uuid -> message index for system messages (parent-child pairing)
+    uuid: Dict[str, int]
+    # parent_uuid -> message index for slash-command messages
+    slash_command_by_parent: Dict[str, int]
+
+
+def _build_pairing_indices(messages: List[TemplateMessage]) -> PairingIndices:
+    """Build indices for efficient message pairing lookups.
+
+    Single pass through messages to build all indices needed for pairing.
+    """
+    tool_use_index: Dict[tuple[str, str], int] = {}
+    tool_result_index: Dict[tuple[str, str], int] = {}
+    uuid_index: Dict[str, int] = {}
+    slash_command_by_parent: Dict[str, int] = {}
+
+    for i, msg in enumerate(messages):
+        # Index tool_use and tool_result by (session_id, tool_use_id)
+        if msg.tool_use_id and msg.session_id:
+            key = (msg.session_id, msg.tool_use_id)
+            if msg.type == "tool_use":
+                tool_use_index[key] = i
+            elif msg.type == "tool_result":
+                tool_result_index[key] = i
+
+        # Index system messages by UUID for parent-child pairing
+        if msg.uuid and msg.type == "system":
+            uuid_index[msg.uuid] = i
+
+        # Index slash-command user messages by parent_uuid
+        if msg.parent_uuid and msg.modifiers.is_slash_command:
+            slash_command_by_parent[msg.parent_uuid] = i
+
+    return PairingIndices(
+        tool_use=tool_use_index,
+        tool_result=tool_result_index,
+        uuid=uuid_index,
+        slash_command_by_parent=slash_command_by_parent,
+    )
+
+
+def _mark_pair(first: TemplateMessage, last: TemplateMessage) -> None:
+    """Mark two messages as a pair."""
+    first.is_paired = True
+    first.pair_role = "pair_first"
+    last.is_paired = True
+    last.pair_role = "pair_last"
+
+
+def _try_pair_adjacent(
+    current: TemplateMessage,
+    next_msg: TemplateMessage,
+) -> bool:
+    """Try to pair adjacent messages based on their types.
+
+    Returns True if messages were paired, False otherwise.
+
+    Adjacent pairing rules:
+    - user slash-command + user command-output
+    - bash-input + bash-output
+    - thinking + assistant
+    """
+    # Slash command + command output (both are user messages)
+    if current.modifiers.is_slash_command and next_msg.modifiers.is_command_output:
+        _mark_pair(current, next_msg)
+        return True
+
+    # Bash input + bash output
+    if current.type == "bash-input" and next_msg.type == "bash-output":
+        _mark_pair(current, next_msg)
+        return True
+
+    # Thinking + assistant
+    if current.type == "thinking" and next_msg.type == "assistant":
+        _mark_pair(current, next_msg)
+        return True
+
+    return False
+
+
+def _try_pair_by_index(
+    current: TemplateMessage,
+    messages: List[TemplateMessage],
+    indices: PairingIndices,
+) -> None:
+    """Try to pair current message with another using index lookups.
+
+    Index-based pairing rules (can be any distance apart):
+    - tool_use + tool_result (by tool_use_id within same session)
+    - system parent + system child (by uuid/parent_uuid)
+    - system + slash-command (by uuid -> parent_uuid)
+    """
+    # Tool use + tool result (by tool_use_id within same session)
+    if current.type == "tool_use" and current.tool_use_id and current.session_id:
+        key = (current.session_id, current.tool_use_id)
+        if key in indices.tool_result:
+            result_msg = messages[indices.tool_result[key]]
+            _mark_pair(current, result_msg)
+
+    # System child message finding its parent (by parent_uuid)
+    if current.type == "system" and current.parent_uuid:
+        if current.parent_uuid in indices.uuid:
+            parent_msg = messages[indices.uuid[current.parent_uuid]]
+            _mark_pair(parent_msg, current)
+
+    # System command finding its slash-command child (by uuid -> parent_uuid)
+    if current.type == "system" and current.uuid:
+        if current.uuid in indices.slash_command_by_parent:
+            slash_msg = messages[indices.slash_command_by_parent[current.uuid]]
+            _mark_pair(current, slash_msg)
 
 
 def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
@@ -2583,39 +1140,15 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
     Modifies messages in-place by setting is_paired and pair_role fields.
 
     Uses a two-pass algorithm:
-    1. First pass: Build index of (session_id, tool_use_id) -> message index for tool_use
-                   and tool_result. Session ID is included to prevent cross-session pairing
-                   when sessions are resumed (same tool_use_id can appear in multiple sessions).
-                   Build index of uuid -> message index for parent-child system messages
-                   Build index of parent_uuid -> message index for slash-command messages
-    2. Second pass: Sequential scan for adjacent pairs (system+output, bash, thinking+assistant)
-                   and match tool_use/tool_result and uuid-based pairs using the index
-    """
-    # Pass 1: Build index of tool_use messages and tool_result messages
-    # Key is (session_id, tool_use_id) to prevent cross-session pairing on resume
-    tool_use_index: Dict[
-        tuple[str, str], int
-    ] = {}  # (session_id, tool_use_id) -> index
-    tool_result_index: Dict[
-        tuple[str, str], int
-    ] = {}  # (session_id, tool_use_id) -> index
-    uuid_index: Dict[str, int] = {}  # uuid -> message index for parent-child pairing
-    # Index slash-command messages by their parent_uuid for pairing with system commands
-    slash_command_by_parent: Dict[str, int] = {}  # parent_uuid -> message index
+    1. First pass: Build indices for efficient lookups (tool_use_id, uuid, parent_uuid)
+    2. Second pass: Sequential scan for adjacent pairs and index-based pairs
 
-    for i, msg in enumerate(messages):
-        if msg.tool_use_id and msg.session_id:
-            key = (msg.session_id, msg.tool_use_id)
-            if "tool_use" in msg.css_class:
-                tool_use_index[key] = i
-            elif "tool_result" in msg.css_class:
-                tool_result_index[key] = i
-        # Build UUID index for system messages (both parent and child)
-        if msg.uuid and "system" in msg.css_class:
-            uuid_index[msg.uuid] = i
-        # Index slash-command user messages by parent_uuid
-        if msg.parent_uuid and "slash-command" in msg.css_class:
-            slash_command_by_parent[msg.parent_uuid] = i
+    Pairing types:
+    - Adjacent: system+output, bash-input+output, thinking+assistant
+    - Indexed: tool_use+result (by ID), system parent+child (by UUID)
+    """
+    # Pass 1: Build all indices for efficient lookups
+    indices = _build_pairing_indices(messages)
 
     # Pass 2: Sequential scan to identify pairs
     i = 0
@@ -2627,75 +1160,15 @@ def _identify_message_pairs(messages: List[TemplateMessage]) -> None:
             i += 1
             continue
 
-        # Check for system command + command output pair (adjacent only)
-        if current.css_class == "system" and i + 1 < len(messages):
+        # Try adjacent pairing first (can skip next message if paired)
+        if i + 1 < len(messages):
             next_msg = messages[i + 1]
-            if "command-output" in next_msg.css_class:
-                current.is_paired = True
-                current.pair_role = "pair_first"
-                next_msg.is_paired = True
-                next_msg.pair_role = "pair_last"
+            if _try_pair_adjacent(current, next_msg):
                 i += 2
                 continue
 
-        # Check for tool_use + tool_result pair using index (no distance limit)
-        # Key includes session_id to prevent cross-session pairing on resume
-        if (
-            "tool_use" in current.css_class
-            and current.tool_use_id
-            and current.session_id
-        ):
-            key = (current.session_id, current.tool_use_id)
-            if key in tool_result_index:
-                result_idx = tool_result_index[key]
-                result_msg = messages[result_idx]
-                current.is_paired = True
-                current.pair_role = "pair_first"
-                result_msg.is_paired = True
-                result_msg.pair_role = "pair_last"
-
-        # Check for UUID-based parent-child system message pair (no distance limit)
-        if "system" in current.css_class and current.parent_uuid:
-            if current.parent_uuid in uuid_index:
-                parent_idx = uuid_index[current.parent_uuid]
-                parent_msg = messages[parent_idx]
-                parent_msg.is_paired = True
-                parent_msg.pair_role = "pair_first"
-                current.is_paired = True
-                current.pair_role = "pair_last"
-
-        # Check for system command + user slash-command pair (via parent_uuid)
-        # The slash-command message's parent_uuid points to the system command's uuid
-        if "system" in current.css_class and current.uuid:
-            if current.uuid in slash_command_by_parent:
-                slash_idx = slash_command_by_parent[current.uuid]
-                slash_msg = messages[slash_idx]
-                current.is_paired = True
-                current.pair_role = "pair_first"
-                slash_msg.is_paired = True
-                slash_msg.pair_role = "pair_last"
-
-        # Check for bash-input + bash-output pair (adjacent only)
-        if current.css_class == "bash-input" and i + 1 < len(messages):
-            next_msg = messages[i + 1]
-            if next_msg.css_class == "bash-output":
-                current.is_paired = True
-                current.pair_role = "pair_first"
-                next_msg.is_paired = True
-                next_msg.pair_role = "pair_last"
-                i += 2
-                continue
-
-        # Check for thinking + assistant pair (adjacent only)
-        if "thinking" in current.css_class and i + 1 < len(messages):
-            next_msg = messages[i + 1]
-            if "assistant" in next_msg.css_class:
-                current.is_paired = True
-                current.pair_role = "pair_first"
-                next_msg.is_paired = True
-                next_msg.pair_role = "pair_last"
-                i += 2
-                continue
+        # Try index-based pairing (doesn't skip, continues to next message)
+        _try_pair_by_index(current, messages, indices)
 
         i += 1
 
@@ -2736,7 +1209,7 @@ def _reorder_paired_messages(messages: List[TemplateMessage]) -> List[TemplateMe
             msg.is_paired
             and msg.pair_role == "pair_last"
             and msg.parent_uuid
-            and "slash-command" in msg.css_class
+            and msg.modifiers.is_slash_command
         ):
             slash_command_pair_index[msg.parent_uuid] = i
 
@@ -2768,7 +1241,13 @@ def _reorder_paired_messages(messages: List[TemplateMessage]) -> List[TemplateMe
                 last_idx = slash_command_pair_index[msg.uuid]
                 pair_last = messages[last_idx]
 
-            if pair_last is not None and last_idx is not None:
+            # Only append if we haven't already added this pair_last
+            # (handles case where multiple pair_firsts match the same pair_last)
+            if (
+                pair_last is not None
+                and last_idx is not None
+                and last_idx not in skip_indices
+            ):
                 reordered.append(pair_last)
                 skip_indices.add(last_idx)
 
@@ -2803,42 +1282,11 @@ def _reorder_paired_messages(messages: List[TemplateMessage]) -> List[TemplateMe
     return reordered
 
 
-def generate_session_html(
-    messages: List[TranscriptEntry],
-    session_id: str,
-    title: Optional[str] = None,
-    cache_manager: Optional["CacheManager"] = None,
-) -> str:
-    """Generate HTML for a single session using Jinja2 templates."""
-    # Filter messages for this session only
-    session_messages = [
-        msg
-        for msg in messages
-        if hasattr(msg, "sessionId") and getattr(msg, "sessionId") == session_id
-    ]
-
-    # Get combined transcript link if cache manager is available
-    combined_link = None
-    if cache_manager is not None:
-        combined_link = _get_combined_transcript_link(cache_manager)
-
-    if not session_messages:
-        return generate_html(
-            [],
-            title or f"Session {session_id[:8]}",
-            combined_transcript_link=combined_link,
-        )
-
-    # Use the existing generate_html function but with filtered messages and combined link
-    return generate_html(
-        session_messages,
-        title or f"Session {session_id[:8]}",
-        combined_transcript_link=combined_link,
-    )
+# -- Message Hierarchy --------------------------------------------------------
 
 
-def _get_message_hierarchy_level(css_class: str, is_sidechain: bool) -> int:
-    """Determine the hierarchy level for a message based on its type and sidechain status.
+def _get_message_hierarchy_level(msg: TemplateMessage) -> int:
+    """Determine the hierarchy level for a message based on its type and modifiers.
 
     Correct hierarchy based on logical nesting:
     - Level 0: Session headers
@@ -2854,35 +1302,41 @@ def _get_message_hierarchy_level(css_class: str, is_sidechain: bool) -> int:
     Returns:
         Integer hierarchy level (1-5, session headers are 0)
     """
+    msg_type = msg.type
+    is_sidechain = msg.modifiers.is_sidechain
+    system_level = msg.modifiers.system_level
+
     # User messages at level 1 (under session)
     # Note: sidechain user messages are skipped before reaching this function
-    if "user" in css_class and not is_sidechain:
+    if msg_type == "user" and not is_sidechain:
         return 1
 
     # System info/warning at level 3 (tool-related, e.g., hook notifications)
     if (
-        "system-info" in css_class or "system-warning" in css_class
-    ) and not is_sidechain:
+        msg_type == "system"
+        and system_level in ("info", "warning")
+        and not is_sidechain
+    ):
         return 3
 
     # System commands/errors at level 2 (siblings to assistant)
-    if "system" in css_class and not is_sidechain:
+    if msg_type == "system" and not is_sidechain:
         return 2
 
     # Sidechain assistant/thinking at level 4 (nested under Task tool result)
-    if is_sidechain and ("assistant" in css_class or "thinking" in css_class):
+    if is_sidechain and msg_type in ("assistant", "thinking"):
         return 4
 
     # Sidechain tools at level 5
-    if is_sidechain and ("tool" in css_class):
+    if is_sidechain and msg_type in ("tool_use", "tool_result"):
         return 5
 
     # Main assistant/thinking at level 2 (nested under user)
-    if "assistant" in css_class or "thinking" in css_class:
+    if msg_type in ("assistant", "thinking"):
         return 2
 
     # Main tools at level 3 (nested under assistant)
-    if "tool" in css_class:
+    if msg_type in ("tool_use", "tool_result"):
         return 3
 
     # Default to level 1
@@ -2909,11 +1363,8 @@ def _build_message_hierarchy(messages: List[TemplateMessage]) -> None:
         if message.is_session_header:
             current_level = 0
         else:
-            # Determine level from css_class
-            is_sidechain = "sidechain" in message.css_class
-            current_level = _get_message_hierarchy_level(
-                message.css_class, is_sidechain
-            )
+            # Determine level from message type and modifiers
+            current_level = _get_message_hierarchy_level(message)
 
         # Pop stack until we find the appropriate parent level
         while hierarchy_stack and hierarchy_stack[-1][0] >= current_level:
@@ -2971,7 +1422,7 @@ def _mark_messages_with_children(messages: List[TemplateMessage]) -> None:
         immediate_parent_id = message.ancestry[-1]
 
         # Get message type for categorization
-        msg_type = message.css_class or message.type
+        msg_type = message.type
 
         # Increment immediate parent's child count
         if immediate_parent_id in message_by_id:
@@ -2994,249 +1445,54 @@ def _mark_messages_with_children(messages: List[TemplateMessage]) -> None:
                 )
 
 
-def deduplicate_messages(messages: List[TranscriptEntry]) -> List[TranscriptEntry]:
-    """Remove duplicate messages based on (type, timestamp, sessionId, content_key).
+def _build_message_tree(messages: List[TemplateMessage]) -> List[TemplateMessage]:
+    """Build tree structure by populating children fields based on ancestry.
 
-    Messages with the exact same timestamp are duplicates by definition -
-    the differences (like IDE selection tags) are just logging artifacts.
+    This function takes a flat list of messages (with message_id and ancestry
+    already set by _build_message_hierarchy) and populates the children field
+    of each message to form an explicit tree structure.
 
-    We need a content-based key to handle two cases:
-    1. Version stutter: Same message logged twice during Claude Code upgrade
-       -> Same timestamp, same message.id or tool_use_id -> SHOULD deduplicate
-    2. Concurrent tool results: Multiple tool results with same timestamp
-       -> Same timestamp, different tool_use_ids -> should NOT deduplicate
+    The tree structure enables:
+    - Recursive template rendering with nested DOM elements
+    - Simpler JavaScript fold/unfold (just hide/show children container)
+    - More natural parent-child traversal
 
     Args:
-        messages: List of transcript entries to deduplicate
+        messages: List of template messages with message_id and ancestry set
 
     Returns:
-        List of deduplicated messages, preserving order (first occurrence kept)
+        List of root messages (those with empty ancestry). Each message's
+        children field is populated with its direct children.
     """
-    # Track seen (message_type, timestamp, is_meta, session_id, content_key) tuples
-    seen: set[tuple[str, str, bool, str, str]] = set()
-    deduplicated: List[TranscriptEntry] = []
-
+    # Build index of messages by ID for O(1) lookup
+    message_by_id: dict[str, TemplateMessage] = {}
     for message in messages:
-        # Get basic message type
-        message_type = getattr(message, "type", "unknown")
+        if message.message_id:
+            message_by_id[message.message_id] = message
 
-        # For system messages, include level to differentiate info/warning/error
-        if isinstance(message, SystemTranscriptEntry):
-            level = getattr(message, "level", "info")
-            message_type = f"system-{level}"
+    # Clear any existing children (in case of re-processing)
+    for message in messages:
+        message.children = []
 
-        # Get timestamp
-        timestamp = getattr(message, "timestamp", "")
+    # Collect root messages (those with no ancestry)
+    root_messages: List[TemplateMessage] = []
 
-        # Get isMeta flag (slash command prompts have isMeta=True with same timestamp as parent)
-        is_meta = getattr(message, "isMeta", False)
+    # Populate children based on ancestry
+    for message in messages:
+        if not message.ancestry:
+            # Root message (level 0, no parent)
+            root_messages.append(message)
+        else:
+            # Has a parent - add to parent's children
+            immediate_parent_id = message.ancestry[-1]
+            if immediate_parent_id in message_by_id:
+                parent = message_by_id[immediate_parent_id]
+                parent.children.append(message)
 
-        # Get sessionId for multi-session report deduplication
-        session_id = getattr(message, "sessionId", "")
-
-        # Get content key for differentiating concurrent messages
-        # - For assistant messages: use message.id (same for stutters, different for different msgs)
-        # - For user messages with tool results: use first tool_use_id
-        # - For other messages: use uuid as fallback
-        content_key = ""
-        if isinstance(message, AssistantTranscriptEntry):
-            # For assistant messages, use the message id
-            content_key = message.message.id
-        elif isinstance(message, UserTranscriptEntry):
-            # For user messages, check for tool results
-            if isinstance(message.message.content, list):
-                for item in message.message.content:
-                    if isinstance(item, ToolResultContent):
-                        content_key = item.tool_use_id
-                        break
-        # Fallback to uuid if no content key found
-        if not content_key:
-            content_key = getattr(message, "uuid", "")
-
-        # Create deduplication key - include content_key for proper handling
-        # of both version stutters and concurrent tool results
-        dedup_key = (message_type, timestamp, is_meta, session_id, content_key)
-
-        # Keep only first occurrence
-        if dedup_key not in seen:
-            seen.add(dedup_key)
-            deduplicated.append(message)
-
-    return deduplicated
+    return root_messages
 
 
-def generate_html(
-    messages: List[TranscriptEntry],
-    title: Optional[str] = None,
-    combined_transcript_link: Optional[str] = None,
-) -> str:
-    """Generate HTML from transcript messages using Jinja2 templates."""
-    from .utils import get_warmup_session_ids
-
-    # Performance timing
-    t_start = time.time()
-
-    with log_timing("Initialization", t_start):
-        if not title:
-            title = "Claude Transcript"
-
-    # Filter out warmup-only sessions
-    with log_timing("Filter warmup sessions", t_start):
-        warmup_session_ids = get_warmup_session_ids(messages)
-        if warmup_session_ids:
-            messages = [
-                msg
-                for msg in messages
-                if getattr(msg, "sessionId", None) not in warmup_session_ids
-            ]
-
-    # Pre-process to find and attach session summaries
-    with log_timing("Session summary processing", t_start):
-        session_summaries: Dict[str, str] = {}
-        uuid_to_session: Dict[str, str] = {}
-        uuid_to_session_backup: Dict[str, str] = {}
-
-        # Build mapping from message UUID to session ID
-        for message in messages:
-            if hasattr(message, "uuid") and hasattr(message, "sessionId"):
-                message_uuid = getattr(message, "uuid", "")
-                session_id = getattr(message, "sessionId", "")
-                if message_uuid and session_id:
-                    # There is often duplication, in that case we want to prioritise the assistant
-                    # message because summaries are generated from Claude's (last) success message
-                    if type(message) is AssistantTranscriptEntry:
-                        uuid_to_session[message_uuid] = session_id
-                    else:
-                        uuid_to_session_backup[message_uuid] = session_id
-
-        # Map summaries to sessions via leafUuid -> message UUID -> session ID
-        for message in messages:
-            if isinstance(message, SummaryTranscriptEntry):
-                leaf_uuid = message.leafUuid
-                if leaf_uuid in uuid_to_session:
-                    session_summaries[uuid_to_session[leaf_uuid]] = message.summary
-                elif (
-                    leaf_uuid in uuid_to_session_backup
-                    and uuid_to_session_backup[leaf_uuid] not in session_summaries
-                ):
-                    session_summaries[uuid_to_session_backup[leaf_uuid]] = (
-                        message.summary
-                    )
-
-        # Attach summaries to messages
-        for message in messages:
-            if hasattr(message, "sessionId"):
-                session_id = getattr(message, "sessionId", "")
-                if session_id in session_summaries:
-                    setattr(message, "_session_summary", session_summaries[session_id])
-
-    # Process messages through the main rendering loop
-    template_messages, sessions, session_order = _process_messages_loop(messages)
-
-    # Prepare session navigation data
-    session_nav: List[Dict[str, Any]] = []
-    with log_timing(
-        lambda: f"Session navigation building ({len(session_nav)} sessions)", t_start
-    ):
-        for session_id in session_order:
-            session_info = sessions[session_id]
-
-            # Skip empty sessions (agent-only, no user messages)
-            if not session_info["first_user_message"]:
-                continue
-
-            # Format timestamp range
-            first_ts = session_info["first_timestamp"]
-            last_ts = session_info["last_timestamp"]
-            timestamp_range = ""
-            if first_ts and last_ts:
-                if first_ts == last_ts:
-                    timestamp_range = format_timestamp(first_ts)
-                else:
-                    timestamp_range = (
-                        f"{format_timestamp(first_ts)} - {format_timestamp(last_ts)}"
-                    )
-            elif first_ts:
-                timestamp_range = format_timestamp(first_ts)
-
-            # Format token usage summary
-            token_summary = ""
-            total_input = session_info["total_input_tokens"]
-            total_output = session_info["total_output_tokens"]
-            total_cache_creation = session_info["total_cache_creation_tokens"]
-            total_cache_read = session_info["total_cache_read_tokens"]
-
-            if total_input > 0 or total_output > 0:
-                token_parts: List[str] = []
-                if total_input > 0:
-                    token_parts.append(f"Input: {total_input}")
-                if total_output > 0:
-                    token_parts.append(f"Output: {total_output}")
-                if total_cache_creation > 0:
-                    token_parts.append(f"Cache Creation: {total_cache_creation}")
-                if total_cache_read > 0:
-                    token_parts.append(f"Cache Read: {total_cache_read}")
-                token_summary = "Token usage – " + " | ".join(token_parts)
-
-            session_nav.append(
-                {
-                    "id": session_id,
-                    "summary": session_info["summary"],
-                    "timestamp_range": timestamp_range,
-                    "first_timestamp": first_ts,
-                    "last_timestamp": last_ts,
-                    "message_count": session_info["message_count"],
-                    "first_user_message": session_info["first_user_message"]
-                    if session_info["first_user_message"] != ""
-                    else "[No user message found in session.]",
-                    "token_summary": token_summary,
-                }
-            )
-
-    # Reorder messages so each session's messages follow their session header
-    # This fixes interleaving that occurs when sessions are resumed
-    with log_timing("Reorder session messages", t_start):
-        template_messages = _reorder_session_template_messages(template_messages)
-
-    # Identify and mark paired messages (command+output, tool_use+tool_result, etc.)
-    with log_timing("Identify message pairs", t_start):
-        _identify_message_pairs(template_messages)
-
-    # Reorder messages so pairs are adjacent while preserving chronological order
-    with log_timing("Reorder paired messages", t_start):
-        template_messages = _reorder_paired_messages(template_messages)
-
-    # Reorder sidechains to appear after their Task results
-    # This must happen AFTER pair reordering, since that moves tool_results
-    with log_timing("Reorder sidechain messages", t_start):
-        template_messages = _reorder_sidechain_template_messages(template_messages)
-
-    # Build hierarchy (message_id and ancestry) based on final order
-    # This must happen AFTER all reordering to get correct parent-child relationships
-    with log_timing("Build message hierarchy", t_start):
-        _build_message_hierarchy(template_messages)
-
-    # Mark messages that have children for fold/unfold controls
-    with log_timing("Mark messages with children", t_start):
-        _mark_messages_with_children(template_messages)
-
-    # Render template
-    with log_timing("Template environment setup", t_start):
-        env = _get_template_environment()
-        template = env.get_template("transcript.html")
-
-    with log_timing(lambda: f"Template rendering ({len(html_output)} chars)", t_start):
-        html_output = str(
-            template.render(
-                title=title,
-                messages=template_messages,
-                sessions=session_nav,
-                combined_transcript_link=combined_transcript_link,
-                library_version=get_library_version(),
-            )
-        )
-
-    return html_output
+# -- Message Reordering -------------------------------------------------------
 
 
 def _reorder_session_template_messages(
@@ -3329,7 +1585,7 @@ def _reorder_sidechain_template_messages(
     sidechain_map: Dict[str, List[TemplateMessage]] = {}
 
     for message in messages:
-        is_sidechain = "sidechain" in message.css_class
+        is_sidechain = message.modifiers.is_sidechain
         agent_id = message.agent_id
 
         if is_sidechain and agent_id:
@@ -3357,7 +1613,14 @@ def _reorder_sidechain_template_messages(
         # tool_use ever gets agent_id in the future
         agent_id = message.agent_id
 
-        if agent_id and message.type == "tool_result" and agent_id in sidechain_map:
+        # Only insert sidechain if not already inserted (handles case where
+        # multiple tool_results have the same agent_id)
+        if (
+            agent_id
+            and message.type == MessageType.TOOL_RESULT
+            and agent_id in sidechain_map
+            and agent_id not in used_agents
+        ):
             sidechain_msgs = sidechain_map[agent_id]
 
             # Deduplicate: find the last sidechain assistant with text content
@@ -3365,7 +1628,7 @@ def _reorder_sidechain_template_messages(
             task_result_content = (
                 message.raw_text_content.strip() if message.raw_text_content else None
             )
-            if task_result_content and message.type == "tool_result":
+            if task_result_content and message.type == MessageType.TOOL_RESULT:
                 # Find the last assistant message in this sidechain
                 for sidechain_msg in reversed(sidechain_msgs):
                     sidechain_text = (
@@ -3374,13 +1637,14 @@ def _reorder_sidechain_template_messages(
                         else None
                     )
                     if (
-                        sidechain_msg.type == "assistant"
+                        sidechain_msg.type == MessageType.ASSISTANT
                         and sidechain_text
                         and sidechain_text == task_result_content
                     ):
                         # Replace with note pointing to the Task result
-                        forward_link_html = "<p><em>(Task summary — already displayed in Task tool result above)</em></p>"
-                        sidechain_msg.content_html = forward_link_html
+                        sidechain_msg.content = DedupNoticeContent(
+                            notice_text="(Task summary — already displayed in Task tool result above)"
+                        )
                         # Mark as deduplicated for potential debugging
                         sidechain_msg.raw_text_content = None
                         break
@@ -3398,45 +1662,238 @@ def _reorder_sidechain_template_messages(
     return result
 
 
-def _process_messages_loop(
-    messages: List[TranscriptEntry],
-) -> tuple[
-    List[TemplateMessage],
-    Dict[str, Dict[str, Any]],  # sessions
-    List[str],  # session_order
-]:
-    """Process messages through the main rendering loop.
+def _filter_messages(messages: List[TranscriptEntry]) -> List[TranscriptEntry]:
+    """Filter messages to those that should be rendered.
 
-    This function handles the core message processing logic:
-    - Processes each message into template-friendly format
-    - Tracks sessions and token usage
-    - Handles message deduplication and hierarchy
-    - Collects timing statistics
+    This function filters out:
+    - Summary messages (already attached to sessions)
+    - Queue operations except 'remove' (steering messages)
+    - Messages with no meaningful content (no text and no tool items)
+    - Messages matching should_skip_message() (warmup, etc.)
+    - Sidechain user messages without tool results (prompts duplicate Task result)
 
-    Note: Tool use context must be built before calling this function via
-    _define_tool_use_context()
+    System messages are included as they need special processing in _render_messages.
 
     Args:
-        messages: List of transcript entries to process
+        messages: List of transcript entries to filter
+
+    Returns:
+        Filtered list of messages that should be rendered
+    """
+    filtered: List[TranscriptEntry] = []
+
+    for message in messages:
+        message_type = message.type
+
+        # Skip summary messages
+        if isinstance(message, SummaryTranscriptEntry):
+            continue
+
+        # Skip most queue operations - only process 'remove' for counts
+        if isinstance(message, QueueOperationTranscriptEntry):
+            if message.operation != "remove":
+                continue
+
+        # System messages bypass other checks but are included
+        if isinstance(message, SystemTranscriptEntry):
+            filtered.append(message)
+            continue
+
+        # Get message content for filtering checks
+        if isinstance(message, QueueOperationTranscriptEntry):
+            message_content = message.content if message.content else []
+        else:
+            message_content = message.message.content  # type: ignore
+
+        text_content = extract_text_content(message_content)
+
+        # Skip if no meaningful content
+        if not text_content.strip():
+            # Check for tool items
+            if isinstance(message_content, list):
+                has_tool_items = any(
+                    isinstance(
+                        item, (ToolUseContent, ToolResultContent, ThinkingContent)
+                    )
+                    or getattr(item, "type", None)
+                    in ("tool_use", "tool_result", "thinking")
+                    for item in message_content
+                )
+                if not has_tool_items:
+                    continue
+            else:
+                continue
+
+        # Skip messages that should be filtered out
+        if should_skip_message(text_content):
+            continue
+
+        # Skip sidechain user messages that are just prompts (no tool results)
+        if message_type == MessageType.USER and getattr(message, "isSidechain", False):
+            if isinstance(message_content, list):
+                has_tool_results = any(
+                    getattr(item, "type", None) == "tool_result"
+                    or isinstance(item, ToolResultContent)
+                    for item in message_content
+                )
+                if not has_tool_results:
+                    continue
+
+        # Message passes all filters
+        filtered.append(message)
+
+    return filtered
+
+
+def _collect_session_info(
+    messages: List[TranscriptEntry],
+) -> tuple[
+    Dict[str, Dict[str, Any]],  # sessions
+    List[str],  # session_order
+    set[str],  # show_tokens_for_message
+]:
+    """Collect session metadata and token tracking from pre-filtered messages.
+
+    This function iterates through messages to:
+    - Build session metadata (timestamps, message counts, first user message)
+    - Track token usage per session (deduplicating by requestId)
+    - Determine which messages should display token usage
+
+    Note: Messages should be pre-filtered by _filter_messages. System messages
+    in the input are skipped for session tracking purposes.
+
+    Args:
+        messages: Pre-filtered list of transcript entries
 
     Returns:
         Tuple containing:
-        - template_messages: Processed messages ready for template rendering
         - sessions: Session metadata dict mapping session_id to info
         - session_order: List of session IDs in chronological order
+        - show_tokens_for_message: Set of message UUIDs that should display tokens
     """
-    # Group messages by session and collect session info for navigation
     sessions: Dict[str, Dict[str, Any]] = {}
     session_order: List[str] = []
-    seen_sessions: set[str] = set()
 
     # Track requestIds to avoid double-counting token usage
     seen_request_ids: set[str] = set()
     # Track which messages should show token usage (first occurrence of each requestId)
     show_tokens_for_message: set[str] = set()
 
+    for message in messages:
+        # Skip system messages for session tracking
+        if isinstance(message, SystemTranscriptEntry):
+            continue
+
+        # Get message content
+        if isinstance(message, QueueOperationTranscriptEntry):
+            message_content = message.content if message.content else []
+        else:
+            message_content = message.message.content  # type: ignore
+
+        text_content = extract_text_content(message_content)  # type: ignore[arg-type]
+
+        # Get session info
+        session_id = getattr(message, "sessionId", "unknown")
+
+        # Initialize session if new
+        if session_id not in sessions:
+            current_session_summary = getattr(message, "_session_summary", None)
+
+            # Get first user message content for preview
+            first_user_message = ""
+            if is_user_entry(message) and should_use_as_session_starter(text_content):
+                content = extract_text_content(message.message.content)
+                first_user_message = create_session_preview(content)
+
+            sessions[session_id] = {
+                "id": session_id,
+                "summary": current_session_summary,
+                "first_timestamp": getattr(message, "timestamp", ""),
+                "last_timestamp": getattr(message, "timestamp", ""),
+                "message_count": 0,
+                "first_user_message": first_user_message,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cache_creation_tokens": 0,
+                "total_cache_read_tokens": 0,
+            }
+            session_order.append(session_id)
+
+        # Update first user message if this is a user message and we don't have one yet
+        elif is_user_entry(message) and not sessions[session_id]["first_user_message"]:
+            first_user_content = extract_text_content(message.message.content)
+            if should_use_as_session_starter(first_user_content):
+                sessions[session_id]["first_user_message"] = create_session_preview(
+                    first_user_content
+                )
+
+        sessions[session_id]["message_count"] += 1
+
+        # Update last timestamp for this session
+        current_timestamp = getattr(message, "timestamp", "")
+        if current_timestamp:
+            sessions[session_id]["last_timestamp"] = current_timestamp
+
+        # Extract and accumulate token usage for assistant messages
+        # Only count tokens for the first message with each requestId to avoid duplicates
+        if is_assistant_entry(message):
+            assistant_message = message.message
+            request_id = message.requestId
+            message_uuid = message.uuid
+
+            if (
+                assistant_message.usage
+                and request_id
+                and request_id not in seen_request_ids
+            ):
+                # Mark this requestId as seen to avoid double-counting
+                seen_request_ids.add(request_id)
+                # Mark this specific message UUID as one that should show token usage
+                show_tokens_for_message.add(message_uuid)
+
+                usage = assistant_message.usage
+                sessions[session_id]["total_input_tokens"] += usage.input_tokens
+                sessions[session_id]["total_output_tokens"] += usage.output_tokens
+                if usage.cache_creation_input_tokens:
+                    sessions[session_id]["total_cache_creation_tokens"] += (
+                        usage.cache_creation_input_tokens
+                    )
+                if usage.cache_read_input_tokens:
+                    sessions[session_id]["total_cache_read_tokens"] += (
+                        usage.cache_read_input_tokens
+                    )
+
+    return sessions, session_order, show_tokens_for_message
+
+
+def _render_messages(
+    messages: List[TranscriptEntry],
+    sessions: Dict[str, Dict[str, Any]],
+    show_tokens_for_message: set[str],
+) -> List[TemplateMessage]:
+    """Pass 2: Render pre-filtered messages to TemplateMessage objects.
+
+    This pass creates the actual TemplateMessage objects for rendering:
+    - Creates session headers when entering new sessions
+    - Processes text content into HTML
+    - Handles tool use, tool result, thinking, and image content
+    - Collects timing statistics
+
+    Note: Messages are pre-filtered by _collect_session_info, so no additional
+    filtering is needed here except for system message processing.
+
+    Args:
+        messages: Pre-filtered list of transcript entries from _collect_session_info
+        sessions: Session metadata from _collect_session_info
+        show_tokens_for_message: Set of message UUIDs that should display tokens
+
+    Returns:
+        List of TemplateMessage objects ready for template rendering
+    """
+    # Track which sessions have had headers added
+    seen_sessions: set[str] = set()
+
     # Build mapping of tool_use_id to ToolUseContent for specialized tool result rendering
-    # This will be populated inline as we encounter tool_use items during message processing
     tool_use_context: Dict[str, ToolUseContent] = {}
 
     # Process messages into template-friendly format
@@ -3464,169 +1921,54 @@ def _process_messages_loop(
         # Update current message UUID for timing tracking
         set_timing_var("_current_msg_uuid", msg_uuid)
 
-        # NOTE: Sidechain user messages are handled below after content extraction
-        # to distinguish prompts (skip) from tool results (render)
-
-        # Skip summary messages - they should already be attached to their sessions
-        if isinstance(message, SummaryTranscriptEntry):
-            continue
-
-        # Skip most queue operations - only render 'remove' as steering user messages
-        if isinstance(message, QueueOperationTranscriptEntry):
-            if message.operation != "remove":
-                continue
-            # 'remove' operations fall through to be rendered as user messages
-
-        # Handle system messages separately
+        # Handle system messages separately (already filtered in pass 1)
         if isinstance(message, SystemTranscriptEntry):
-            session_id = getattr(message, "sessionId", "unknown")
-            timestamp = getattr(message, "timestamp", "")
-            formatted_timestamp = format_timestamp(timestamp) if timestamp else ""
-
-            # Handle hook summaries (subtype="stop_hook_summary")
-            if message.subtype == "stop_hook_summary":
-                # Skip silent hook successes (no output, no errors)
-                if not message.hasOutput and not message.hookErrors:
-                    continue
-                # Render hook summary with collapsible details
-                content_html = _render_hook_summary(message)
-                level_css = "system system-hook"
-                level = "hook"
-            elif not message.content:
-                # Skip system messages without content (shouldn't happen normally)
-                continue
-            else:
-                # Extract command name if present
-                command_name_match = re.search(
-                    r"<command-name>(.*?)</command-name>", message.content, re.DOTALL
-                )
-                # Also check for command output (child of user command)
-                command_output_match = re.search(
-                    r"<local-command-stdout>(.*?)</local-command-stdout>",
-                    message.content,
-                    re.DOTALL,
-                )
-
-                # Create level-specific styling and icons
-                level = getattr(message, "level", "info")
-                level_icon = {"warning": "⚠️", "error": "❌", "info": "ℹ️"}.get(
-                    level, "ℹ️"
-                )
-
-                # Determine CSS class:
-                # - Command name (user-initiated): "system" only
-                # - Command output (assistant response): "system system-{level}"
-                # - Other system messages: "system system-{level}"
-                if command_name_match:
-                    # User-initiated command
-                    level_css = "system"
-                else:
-                    # Command output or other system message
-                    level_css = f"system system-{level}"
-
-                # Process content: extract command name or command output, or use full content
-                if command_name_match:
-                    # Show just the command name
-                    command_name = command_name_match.group(1).strip()
-                    html_content = f"<code>{html.escape(command_name)}</code>"
-                    content_html = f"<strong>{level_icon}</strong> {html_content}"
-                elif command_output_match:
-                    # Extract and process command output
-                    output = command_output_match.group(1).strip()
-                    html_content = _convert_ansi_to_html(output)
-                    content_html = f"<strong>{level_icon}</strong> {html_content}"
-                else:
-                    # Process ANSI codes in system messages (they may contain command output)
-                    html_content = _convert_ansi_to_html(message.content)
-                    content_html = f"<strong>{level_icon}</strong> {html_content}"
-
-            # Store parent UUID for hierarchy rebuild (handled by _build_message_hierarchy)
-            parent_uuid = getattr(message, "parentUuid", None)
-
-            system_template_message = TemplateMessage(
-                message_type="system",
-                content_html=content_html,
-                formatted_timestamp=formatted_timestamp,
-                css_class=level_css,
-                raw_timestamp=timestamp,
-                session_id=session_id,
-                message_title=f"System {level.title()}",
-                message_id=None,  # Will be assigned by _build_message_hierarchy
-                ancestry=[],  # Will be assigned by _build_message_hierarchy
-                uuid=message.uuid,
-                parent_uuid=parent_uuid,
-            )
-            template_messages.append(system_template_message)
+            system_template_message = _process_system_message(message)
+            if system_template_message:
+                template_messages.append(system_template_message)
             continue
 
         # Handle queue-operation 'remove' messages as user messages
         if isinstance(message, QueueOperationTranscriptEntry):
-            # Queue operations have content directly, not in message.message
             message_content = message.content if message.content else []
-            # Treat as user message type
-            message_type = "queue-operation"
+            message_type = MessageType.QUEUE_OPERATION
         else:
-            # Extract message content first to check for duplicates
-            # Must be UserTranscriptEntry or AssistantTranscriptEntry
             message_content = message.message.content  # type: ignore
 
-        text_content = extract_text_content(message_content)
+        text_content = extract_text_content(message_content)  # type: ignore[arg-type]
 
         # Separate tool/thinking/image content from text content
-        # Images in user messages stay inline, images in assistant messages are separate
         tool_items: List[ContentItem] = []
         text_only_content: List[ContentItem] = []
 
         if isinstance(message_content, list):
             text_only_items: List[ContentItem] = []
-            for item in message_content:
-                # Check for both custom types and Anthropic types
-                item_type = getattr(item, "type", None)
+            for item in message_content:  # type: ignore[union-attr]
+                item_type = getattr(item, "type", None)  # type: ignore[arg-type]
                 is_image = isinstance(item, ImageContent) or item_type == "image"
                 is_tool_item = isinstance(
                     item,
                     (ToolUseContent, ToolResultContent, ThinkingContent),
                 ) or item_type in ("tool_use", "tool_result", "thinking")
 
-                # Keep images inline for user messages and queue operations (steering),
-                # extract for assistant messages
                 if is_image and (
-                    message_type == "user"
+                    message_type == MessageType.USER
                     or isinstance(message, QueueOperationTranscriptEntry)
                 ):
-                    text_only_items.append(item)
+                    text_only_items.append(item)  # type: ignore[arg-type]
                 elif is_tool_item or is_image:
-                    tool_items.append(item)
+                    tool_items.append(item)  # type: ignore[arg-type]
                 else:
-                    text_only_items.append(item)
+                    text_only_items.append(item)  # type: ignore[arg-type]
             text_only_content = text_only_items
         else:
-            # Single string content
-            message_content = message_content.strip()
+            message_content = message_content.strip()  # type: ignore[union-attr]
             if message_content:
-                text_only_content = [TextContent(type="text", text=message_content)]
+                text_only_content = [TextContent(type="text", text=message_content)]  # type: ignore[arg-type]
 
-        # Skip if no meaningful content
-        if not text_content.strip() and not tool_items:
-            continue
-
-        # Skip messages that should be filtered out
-        if should_skip_message(text_content):
-            continue
-
-        # Skip sidechain user messages that are just prompts (no tool results)
-        # Sidechain prompts duplicate the Task tool input and are redundant,
-        # but tool results from sidechain agents should be rendered
-        if message_type == "user" and getattr(message, "isSidechain", False):
-            has_tool_results = any(
-                getattr(item, "type", None) == "tool_result"
-                or isinstance(item, ToolResultContent)
-                for item in tool_items
-            )
-            if not has_tool_results:
-                continue
-            # For sidechain user messages with tool results, clear text content
-            # to avoid rendering the redundant prompt text
+        # For sidechain user messages with tool results, clear text content
+        # (prompts duplicate Task result; filtering already done in pass 1)
+        if message_type == MessageType.USER and getattr(message, "isSidechain", False):
             text_only_content = []
             text_content = ""
 
@@ -3636,130 +1978,50 @@ def _process_messages_loop(
         is_bash_cmd = is_bash_input(text_content)
         is_bash_result = is_bash_output(text_content)
 
-        # Check if we're in a new session
+        # Get session info
         session_id = getattr(message, "sessionId", "unknown")
         session_summary = getattr(message, "_session_summary", None)
 
-        # Track sessions for navigation and add session header if new
-        if session_id not in sessions:
-            # Get the session summary for this session (may be None)
-            current_session_summary = getattr(message, "_session_summary", None)
+        # Add session header if this is a new session
+        if session_id not in seen_sessions:
+            seen_sessions.add(session_id)
+            current_session_summary = sessions.get(session_id, {}).get("summary")
+            session_title = (
+                f"{current_session_summary} • {session_id[:8]}"
+                if current_session_summary
+                else session_id[:8]
+            )
 
-            # Get first user message content for preview
-            first_user_message = ""
-            if (
-                message_type == "user"
-                and not isinstance(message, QueueOperationTranscriptEntry)
-                and hasattr(message, "message")
-                and should_use_as_session_starter(text_content)
-            ):
-                content = extract_text_content(message.message.content)
-                first_user_message = create_session_preview(content)
-
-            sessions[session_id] = {
-                "id": session_id,
-                "summary": current_session_summary,
-                "first_timestamp": getattr(message, "timestamp", ""),
-                "last_timestamp": getattr(message, "timestamp", ""),
-                "message_count": 0,
-                "first_user_message": first_user_message,
-                "total_input_tokens": 0,
-                "total_output_tokens": 0,
-                "total_cache_creation_tokens": 0,
-                "total_cache_read_tokens": 0,
-            }
-            session_order.append(session_id)
-
-            # Add session header message
-            if session_id not in seen_sessions:
-                seen_sessions.add(session_id)
-                # Create a meaningful session title
-                session_title = (
-                    f"{current_session_summary} • {session_id[:8]}"
-                    if current_session_summary
-                    else session_id[:8]
-                )
-
-                session_header = TemplateMessage(
-                    message_type="session_header",
-                    content_html=session_title,
-                    formatted_timestamp="",
-                    css_class="session-header",
-                    raw_timestamp=None,
-                    session_summary=current_session_summary,
+            session_header = TemplateMessage(
+                message_type="session_header",
+                formatted_timestamp="",
+                raw_timestamp=None,
+                session_summary=current_session_summary,
+                session_id=session_id,
+                is_session_header=True,
+                message_id=None,
+                ancestry=[],
+                modifiers=MessageModifiers(),
+                content=SessionHeaderContent(
+                    title=session_title,
                     session_id=session_id,
-                    is_session_header=True,
-                    message_id=None,  # Will be assigned by _build_message_hierarchy
-                    ancestry=[],  # Session headers are top-level
-                )
-                template_messages.append(session_header)
-
-        # Update first user message if this is a user message and we don't have one yet
-        elif message_type == "user" and not sessions[session_id]["first_user_message"]:
-            if not isinstance(message, QueueOperationTranscriptEntry) and hasattr(
-                message, "message"
-            ):
-                first_user_content = extract_text_content(message.message.content)
-                if should_use_as_session_starter(first_user_content):
-                    sessions[session_id]["first_user_message"] = create_session_preview(
-                        first_user_content
-                    )
-
-        sessions[session_id]["message_count"] += 1
-
-        # Update last timestamp for this session
-        current_timestamp = getattr(message, "timestamp", "")
-        if current_timestamp:
-            sessions[session_id]["last_timestamp"] = current_timestamp
-
-        # Extract and accumulate token usage for assistant messages
-        # Only count tokens for the first message with each requestId to avoid duplicates
-        if message_type == "assistant" and hasattr(message, "message"):
-            assistant_message = getattr(message, "message")
-            request_id = getattr(message, "requestId", None)
-            message_uuid = getattr(message, "uuid", "")
-
-            if (
-                hasattr(assistant_message, "usage")
-                and assistant_message.usage
-                and request_id
-                and request_id not in seen_request_ids
-            ):
-                # Mark this requestId as seen to avoid double-counting
-                seen_request_ids.add(request_id)
-                # Mark this specific message UUID as one that should show token usage
-                show_tokens_for_message.add(message_uuid)
-
-                usage = assistant_message.usage
-                sessions[session_id]["total_input_tokens"] += usage.input_tokens
-                sessions[session_id]["total_output_tokens"] += usage.output_tokens
-                if usage.cache_creation_input_tokens:
-                    sessions[session_id]["total_cache_creation_tokens"] += (
-                        usage.cache_creation_input_tokens
-                    )
-                if usage.cache_read_input_tokens:
-                    sessions[session_id]["total_cache_read_tokens"] += (
-                        usage.cache_read_input_tokens
-                    )
+                    summary=current_session_summary,
+                ),
+            )
+            template_messages.append(session_header)
 
         # Get timestamp (only for non-summary messages)
-        timestamp = (
-            getattr(message, "timestamp", "") if hasattr(message, "timestamp") else ""
-        )
+        timestamp = getattr(message, "timestamp", "")
         formatted_timestamp = format_timestamp(timestamp) if timestamp else ""
 
         # Extract token usage for assistant messages
         # Only show token usage for the first message with each requestId to avoid duplicates
         token_usage_str: Optional[str] = None
-        if message_type == "assistant" and hasattr(message, "message"):
-            assistant_message = getattr(message, "message")
-            message_uuid = getattr(message, "uuid", "")
+        if is_assistant_entry(message):
+            assistant_message = message.message
+            message_uuid = message.uuid
 
-            if (
-                hasattr(assistant_message, "usage")
-                and assistant_message.usage
-                and message_uuid in show_tokens_for_message
-            ):
+            if assistant_message.usage and message_uuid in show_tokens_for_message:
                 # Only show token usage for messages marked as first occurrence of requestId
                 usage = assistant_message.usage
                 token_parts = [
@@ -3774,22 +2036,24 @@ def _process_messages_loop(
                     token_parts.append(f"Cache Read: {usage.cache_read_input_tokens}")
                 token_usage_str = " | ".join(token_parts)
 
-        # Determine CSS class and content based on message type and duplicate status
+        # Determine modifiers and content based on message type
+        content_model: Optional[MessageContent] = None
+
         if is_command:
-            css_class, content_html, message_type, message_title = (
+            modifiers, content_model, message_type, message_title = (
                 _process_command_message(text_content)
             )
         elif is_local_output:
-            css_class, content_html, message_type, message_title = (
+            modifiers, content_model, message_type, message_title = (
                 _process_local_command_output(text_content)
             )
         elif is_bash_cmd:
-            css_class, content_html, message_type, message_title = _process_bash_input(
+            modifiers, content_model, message_type, message_title = _process_bash_input(
                 text_content
             )
         elif is_bash_result:
-            css_class, content_html, message_type, message_title = _process_bash_output(
-                text_content
+            modifiers, content_model, message_type, message_title = (
+                _process_bash_output(text_content)
             )
         else:
             # For queue-operation messages, treat them as user messages
@@ -3798,7 +2062,7 @@ def _process_messages_loop(
             else:
                 effective_type = message_type
 
-            css_class, content_html, message_type_result, message_title = (
+            modifiers, content_model, message_type_result, message_title = (
                 _process_regular_message(
                     text_only_content,
                     effective_type,
@@ -3808,12 +2072,12 @@ def _process_messages_loop(
             )
             message_type = message_type_result  # Update message_type with result
 
-            # Add 'steering' CSS class for queue-operation 'remove' messages
+            # Add 'steering' modifier for queue-operation 'remove' messages
             if (
                 isinstance(message, QueueOperationTranscriptEntry)
                 and message.operation == "remove"
             ):
-                css_class = f"{css_class} steering"
+                modifiers = replace(modifiers, is_steering=True)
                 message_title = "User (steering)"
 
         # Only create main message if it has text content
@@ -3822,9 +2086,7 @@ def _process_messages_loop(
         if text_only_content:
             template_message = TemplateMessage(
                 message_type=message_type,
-                content_html=content_html,
                 formatted_timestamp=formatted_timestamp,
-                css_class=css_class,
                 raw_timestamp=timestamp,
                 session_summary=session_summary,
                 session_id=session_id,
@@ -3835,6 +2097,8 @@ def _process_messages_loop(
                 agent_id=getattr(message, "agentId", None),
                 uuid=getattr(message, "uuid", None),
                 parent_uuid=getattr(message, "parentUuid", None),
+                modifiers=modifiers,
+                content=content_model,
             )
 
             # Store raw text content for potential future use (e.g., deduplication,
@@ -3852,216 +2116,67 @@ def _process_messages_loop(
 
             # Handle both custom types and Anthropic types
             item_type = getattr(tool_item, "type", None)
-            item_tool_use_id: Optional[str] = None
-            tool_title_hint: Optional[str] = None
-            pending_dedup: Optional[str] = (
-                None  # Holds task result content for deduplication
-            )
 
+            # Dispatch to appropriate handler based on item type
+            tool_result: Optional[ToolItemResult] = None
             if isinstance(tool_item, ToolUseContent) or item_type == "tool_use":
-                # Convert Anthropic type to our format if necessary
-                if not isinstance(tool_item, ToolUseContent):
-                    tool_use = ToolUseContent(
-                        type="tool_use",
-                        id=getattr(tool_item, "id", ""),
-                        name=getattr(tool_item, "name", ""),
-                        input=getattr(tool_item, "input", {}),
-                    )
-                else:
-                    tool_use = tool_item
-
-                tool_content_html = format_tool_use_content(tool_use)
-                escaped_name = escape_html(tool_use.name)
-                escaped_id = escape_html(tool_use.id)
-                item_tool_use_id = tool_use.id
-                tool_title_hint = f"ID: {escaped_id}"
-
-                # Populate tool_use_context for later use when processing tool results
-                tool_use_context[item_tool_use_id] = tool_use
-
-                # Get summary for header (description or filepath)
-                summary = get_tool_summary(tool_use)
-
-                # Set message_type (for CSS/logic) and message_title (for display)
-                tool_message_type = "tool_use"
-                if tool_use.name == "TodoWrite":
-                    tool_message_title = "📝 Todo List"
-                elif tool_use.name == "Task":
-                    # Special handling for Task tool: show subagent_type and description
-                    subagent_type = tool_use.input.get("subagent_type", "")
-                    description = tool_use.input.get("description", "")
-                    escaped_subagent = (
-                        escape_html(subagent_type) if subagent_type else ""
-                    )
-
-                    if description and subagent_type:
-                        escaped_desc = escape_html(description)
-                        tool_message_title = f"🔧 {escaped_name} <span class='tool-summary'>{escaped_desc}</span> <span class='tool-subagent'>({escaped_subagent})</span>"
-                    elif description:
-                        escaped_desc = escape_html(description)
-                        tool_message_title = f"🔧 {escaped_name} <span class='tool-summary'>{escaped_desc}</span>"
-                    elif subagent_type:
-                        tool_message_title = f"🔧 {escaped_name} <span class='tool-subagent'>({escaped_subagent})</span>"
-                    else:
-                        tool_message_title = f"🔧 {escaped_name}"
-                elif tool_use.name in ("Edit", "Write"):
-                    # Use 📝 icon for Edit/Write
-                    if summary:
-                        escaped_summary = escape_html(summary)
-                        tool_message_title = f"📝 {escaped_name} <span class='tool-summary'>{escaped_summary}</span>"
-                    else:
-                        tool_message_title = f"📝 {escaped_name}"
-                elif tool_use.name == "Read":
-                    # Use 📄 icon for Read
-                    if summary:
-                        escaped_summary = escape_html(summary)
-                        tool_message_title = f"📄 {escaped_name} <span class='tool-summary'>{escaped_summary}</span>"
-                    else:
-                        tool_message_title = f"📄 {escaped_name}"
-                elif summary:
-                    # For other tools (like Bash), append summary
-                    escaped_summary = escape_html(summary)
-                    tool_message_title = f"{escaped_name} <span class='tool-summary'>{escaped_summary}</span>"
-                else:
-                    tool_message_title = escaped_name
-                tool_css_class = "tool_use"
+                tool_result = _process_tool_use_item(tool_item, tool_use_context)
             elif isinstance(tool_item, ToolResultContent) or item_type == "tool_result":
-                # Convert Anthropic type to our format if necessary
-                if not isinstance(tool_item, ToolResultContent):
-                    tool_result_converted = ToolResultContent(
-                        type="tool_result",
-                        tool_use_id=getattr(tool_item, "tool_use_id", ""),
-                        content=getattr(tool_item, "content", ""),
-                        is_error=getattr(tool_item, "is_error", False),
-                    )
-                else:
-                    tool_result_converted = tool_item
-
-                # Get file_path and tool_name from tool_use context for specialized rendering
-                result_file_path: Optional[str] = None
-                result_tool_name: Optional[str] = None
-                if tool_result_converted.tool_use_id in tool_use_context:
-                    tool_use_from_ctx = tool_use_context[
-                        tool_result_converted.tool_use_id
-                    ]
-                    result_tool_name = tool_use_from_ctx.name
-                    if (
-                        result_tool_name
-                        in (
-                            "Read",
-                            "Edit",
-                            "Write",
-                        )
-                        and "file_path" in tool_use_from_ctx.input
-                    ):
-                        result_file_path = tool_use_from_ctx.input["file_path"]
-
-                tool_content_html = format_tool_result_content(
-                    tool_result_converted,
-                    result_file_path,
-                    result_tool_name,
-                )
-
-                # Retroactive deduplication: if Task result matches a sidechain assistant, replace that assistant with a forward link
-                if result_tool_name == "Task":
-                    # Extract text content from tool result
-                    # Note: tool_result.content can be str or List[Dict[str, Any]] (not List[ContentItem])
-                    if isinstance(tool_result_converted.content, str):
-                        task_result_content = tool_result_converted.content.strip()
-                    else:
-                        # Handle list of dicts (tool result format)
-                        content_parts: list[str] = []
-                        for item in tool_result_converted.content:
-                            # tool_result_converted.content is List[Dict[str, Any]]
-                            text_val = item.get("text", "")
-                            if isinstance(text_val, str):
-                                content_parts.append(text_val)
-                        task_result_content = "\n".join(content_parts).strip()
-
-                    # Store for deduplication - we'll check/update after we have the message_id
-                    pending_dedup = task_result_content if task_result_content else None
-                else:
-                    pending_dedup = None
-
-                escaped_id = escape_html(tool_result_converted.tool_use_id)
-                item_tool_use_id = tool_result_converted.tool_use_id
-                tool_title_hint = f"ID: {escaped_id}"
-                # Simplified: no "Tool Result" heading, icon is set by template
-                tool_message_type = "tool_result"
-                tool_message_title = "Error" if tool_result_converted.is_error else ""
-                tool_css_class = (
-                    "tool_result error"
-                    if tool_result_converted.is_error
-                    else "tool_result"
-                )
+                tool_result = _process_tool_result_item(tool_item, tool_use_context)
             elif isinstance(tool_item, ThinkingContent) or item_type == "thinking":
-                # Convert Anthropic type to our format if necessary
-                if not isinstance(tool_item, ThinkingContent):
-                    thinking_converted = ThinkingContent(
-                        type="thinking",
-                        thinking=getattr(tool_item, "thinking", str(tool_item)),
-                    )
-                else:
-                    thinking_converted = tool_item
-
-                tool_content_html = format_thinking_content(thinking_converted)
-                tool_message_type = "thinking"
-                tool_message_title = "Thinking"
-                tool_css_class = "thinking"
+                tool_result = _process_thinking_item(tool_item)
             elif isinstance(tool_item, ImageContent) or item_type == "image":
-                # Convert Anthropic type to our format if necessary
-                if not isinstance(tool_item, ImageContent):
-                    # For now, skip Anthropic image types - we'll handle when we encounter them
-                    continue
-                else:
-                    tool_content_html = format_image_content(tool_item)
-                tool_message_type = "image"
-                tool_message_title = "Image"
-                tool_css_class = "image"
+                tool_result = _process_image_item(tool_item)
             else:
                 # Handle unknown content types
-                tool_content_html = (
-                    f"<p>Unknown content type: {escape_html(str(type(tool_item)))}</p>"
+                tool_result = ToolItemResult(
+                    message_type="unknown",
+                    content=UnknownContent(type_name=str(type(tool_item))),
+                    message_title="Unknown Content",
                 )
-                tool_message_type = "unknown"
-                tool_message_title = "Unknown Content"
-                tool_css_class = "unknown"
+
+            # Skip if handler returned None (e.g., unsupported image types)
+            if tool_result is None:
+                continue
 
             # Preserve sidechain context for tool/thinking/image content within sidechain messages
             tool_is_sidechain = getattr(message, "isSidechain", False)
-            if tool_is_sidechain:
-                tool_css_class += " sidechain"
+
+            # Build modifiers directly from tool_result properties
+            tool_modifiers = MessageModifiers(
+                is_sidechain=tool_is_sidechain,
+                is_error=tool_result.is_error,
+            )
 
             # Generate unique UUID for this tool message
             # Use tool_use_id if available, otherwise fall back to message UUID + index
             tool_uuid = (
-                item_tool_use_id
-                if item_tool_use_id
+                tool_result.tool_use_id
+                if tool_result.tool_use_id
                 else f"{msg_uuid}-tool-{len(template_messages)}"
             )
 
             tool_template_message = TemplateMessage(
-                message_type=tool_message_type,
-                content_html=tool_content_html,
+                message_type=tool_result.message_type,
                 formatted_timestamp=tool_formatted_timestamp,
-                css_class=tool_css_class,
                 raw_timestamp=tool_timestamp,
                 session_summary=session_summary,
                 session_id=session_id,
-                tool_use_id=item_tool_use_id,
-                title_hint=tool_title_hint,
-                message_title=tool_message_title,
+                tool_use_id=tool_result.tool_use_id,
+                title_hint=tool_result.title_hint,
+                message_title=tool_result.message_title,
                 message_id=None,  # Will be assigned by _build_message_hierarchy
                 ancestry=[],  # Will be assigned by _build_message_hierarchy
                 agent_id=getattr(message, "agentId", None),
                 uuid=tool_uuid,
+                modifiers=tool_modifiers,
+                content=tool_result.content,  # Structured content model
             )
 
             # Store raw text for Task result deduplication
             # (handled later in _reorder_sidechain_template_messages)
-            if pending_dedup is not None:
-                tool_template_message.raw_text_content = pending_dedup
-                pending_dedup = None
+            if tool_result.pending_dedup is not None:
+                tool_template_message.raw_text_content = tool_result.pending_dedup
 
             template_messages.append(tool_template_message)
 
@@ -4077,21 +2192,55 @@ def _process_messages_loop(
             [("Markdown", markdown_timings), ("Pygments", pygments_timings)],
         )
 
-    return (
-        template_messages,
-        sessions,
-        session_order,
+    return template_messages
+
+
+# -- Project Index Generation -------------------------------------------------
+
+
+def prepare_projects_index(
+    project_summaries: List[Dict[str, Any]],
+) -> tuple[List["TemplateProject"], "TemplateSummary"]:
+    """Prepare project data for rendering in any format.
+
+    Args:
+        project_summaries: List of project summary dictionaries.
+
+    Returns:
+        A tuple of (template_projects, template_summary) for use by renderers.
+    """
+    # Sort projects by last modified (most recent first)
+    sorted_projects = sorted(
+        project_summaries, key=lambda p: p["last_modified"], reverse=True
     )
 
+    # Convert to template-friendly format
+    template_projects = [TemplateProject(project) for project in sorted_projects]
+    template_summary = TemplateSummary(project_summaries)
 
-def generate_projects_index_html(
+    return template_projects, template_summary
+
+
+def title_for_projects_index(
     project_summaries: List[Dict[str, Any]],
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
 ) -> str:
-    """Generate an index HTML page listing all projects using Jinja2 templates."""
-    # Try to get a better title from working directories in projects
+    """Generate a title for the projects index page.
+
+    Determines a meaningful title based on working directories from projects,
+    with optional date range suffix.
+
+    Args:
+        project_summaries: List of project summary dictionaries.
+        from_date: Optional start date filter string.
+        to_date: Optional end date filter string.
+
+    Returns:
+        A title string for the projects index page.
+    """
     title = "Claude Code Projects"
+
     if project_summaries:
         # Collect all working directories from all projects
         all_working_dirs: set[str] = set()
@@ -4134,6 +2283,8 @@ def generate_projects_index_html(
                 except Exception:
                     # Fall back to default title if path analysis fails
                     pass
+
+    # Add date range suffix if provided
     if from_date or to_date:
         date_range_parts: List[str] = []
         if from_date:
@@ -4143,23 +2294,77 @@ def generate_projects_index_html(
         date_range_str = " ".join(date_range_parts)
         title += f" ({date_range_str})"
 
-    # Sort projects by last modified (most recent first)
-    sorted_projects = sorted(
-        project_summaries, key=lambda p: p["last_modified"], reverse=True
-    )
+    return title
 
-    # Convert to template-friendly format
-    template_projects = [TemplateProject(project) for project in sorted_projects]
-    template_summary = TemplateSummary(project_summaries)
 
-    # Render template
-    env = _get_template_environment()
-    template = env.get_template("index.html")
-    return str(
-        template.render(
-            title=title,
-            projects=template_projects,
-            summary=template_summary,
-            library_version=get_library_version(),
-        )
-    )
+# -- Renderer Classes ---------------------------------------------------------
+
+
+class Renderer:
+    """Base class for transcript renderers.
+
+    Subclasses implement format-specific rendering (HTML, Markdown, etc.).
+    """
+
+    def generate(
+        self,
+        messages: List[TranscriptEntry],
+        title: Optional[str] = None,
+        combined_transcript_link: Optional[str] = None,
+    ) -> Optional[str]:
+        """Generate output from transcript messages.
+
+        Returns None by default; subclasses override to return formatted output.
+        """
+        return None
+
+    def generate_session(
+        self,
+        messages: List[TranscriptEntry],
+        session_id: str,
+        title: Optional[str] = None,
+        cache_manager: Optional["CacheManager"] = None,
+    ) -> Optional[str]:
+        """Generate output for a single session.
+
+        Returns None by default; subclasses override to return formatted output.
+        """
+        return None
+
+    def generate_projects_index(
+        self,
+        project_summaries: List[Dict[str, Any]],
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> Optional[str]:
+        """Generate a projects index page.
+
+        Returns None by default; subclasses override to return formatted output.
+        """
+        return None
+
+    def is_outdated(self, file_path: Path) -> Optional[bool]:
+        """Check if a rendered file is outdated.
+
+        Returns None by default; subclasses override to return True/False.
+        """
+        return None
+
+
+def get_renderer(format: str) -> Renderer:
+    """Get a renderer instance for the specified format.
+
+    Args:
+        format: The output format (currently only "html" is supported).
+
+    Returns:
+        A Renderer instance for the specified format.
+
+    Raises:
+        ValueError: If the format is not supported.
+    """
+    if format == "html":
+        from .html.renderer import HtmlRenderer
+
+        return HtmlRenderer()
+    raise ValueError(f"Unsupported format: {format}")

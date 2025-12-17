@@ -1,39 +1,374 @@
 #!/usr/bin/env python3
 """Convert Claude transcript JSONL files to HTML."""
 
+import json
+import re
 from pathlib import Path
 import traceback
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
+
+import dateparser
 
 if TYPE_CHECKING:
     from .cache import CacheManager
 
 from .utils import (
+    format_timestamp_range,
+    get_project_display_name,
     should_use_as_session_starter,
     create_session_preview,
     extract_working_directories,
     get_warmup_session_ids,
 )
 from .cache import CacheManager, SessionCacheData, get_library_version
-from .parser import (
-    load_transcript,
-    load_directory_transcripts,
-    filter_messages_by_date,
-)
+from .parser import parse_timestamp, parse_transcript_entry
 from .models import (
     TranscriptEntry,
     AssistantTranscriptEntry,
     SummaryTranscriptEntry,
+    SystemTranscriptEntry,
     UserTranscriptEntry,
+    ToolResultContent,
 )
-from .renderer import (
-    deduplicate_messages,
-    generate_html,
-    generate_session_html,
-    generate_projects_index_html,
-    is_html_outdated,
-    get_project_display_name,
-)
+from .renderer import get_renderer
+
+
+# =============================================================================
+# Transcript Loading Functions
+# =============================================================================
+
+
+def filter_messages_by_date(
+    messages: List[TranscriptEntry], from_date: Optional[str], to_date: Optional[str]
+) -> List[TranscriptEntry]:
+    """Filter messages based on date range."""
+    if not from_date and not to_date:
+        return messages
+
+    # Parse the date strings using dateparser
+    from_dt = None
+    to_dt = None
+
+    if from_date:
+        from_dt = dateparser.parse(from_date)
+        if not from_dt:
+            raise ValueError(f"Could not parse from-date: {from_date}")
+        # If parsing relative dates like "today", start from beginning of day
+        if from_date in ["today", "yesterday"] or "days ago" in from_date:
+            from_dt = from_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if to_date:
+        to_dt = dateparser.parse(to_date)
+        if not to_dt:
+            raise ValueError(f"Could not parse to-date: {to_date}")
+        # If parsing relative dates like "today", end at end of day
+        if to_date in ["today", "yesterday"] or "days ago" in to_date:
+            to_dt = to_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    filtered_messages: List[TranscriptEntry] = []
+    for message in messages:
+        # Handle SummaryTranscriptEntry which doesn't have timestamp
+        if isinstance(message, SummaryTranscriptEntry):
+            filtered_messages.append(message)
+            continue
+
+        timestamp_str = message.timestamp
+        if not timestamp_str:
+            continue
+
+        message_dt = parse_timestamp(timestamp_str)
+        if not message_dt:
+            continue
+
+        # Convert to naive datetime for comparison (dateparser returns naive datetimes)
+        if message_dt.tzinfo:
+            message_dt = message_dt.replace(tzinfo=None)
+
+        # Check if message falls within date range
+        if from_dt and message_dt < from_dt:
+            continue
+        if to_dt and message_dt > to_dt:
+            continue
+
+        filtered_messages.append(message)
+
+    return filtered_messages
+
+
+def load_transcript(
+    jsonl_path: Path,
+    cache_manager: Optional["CacheManager"] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    silent: bool = False,
+    _loaded_files: Optional[set[Path]] = None,
+) -> List[TranscriptEntry]:
+    """Load and parse JSONL transcript file, using cache if available.
+
+    Args:
+        _loaded_files: Internal parameter to track loaded files and prevent infinite recursion.
+    """
+    # Initialize loaded files set on first call
+    if _loaded_files is None:
+        _loaded_files = set()
+
+    # Prevent infinite recursion by checking if this file is already being loaded
+    if jsonl_path in _loaded_files:
+        return []
+
+    _loaded_files.add(jsonl_path)
+    # Try to load from cache first
+    if cache_manager is not None:
+        # Use filtered loading if date parameters are provided
+        if from_date or to_date:
+            cached_entries = cache_manager.load_cached_entries_filtered(
+                jsonl_path, from_date, to_date
+            )
+        else:
+            cached_entries = cache_manager.load_cached_entries(jsonl_path)
+
+        if cached_entries is not None:
+            if not silent:
+                print(f"Loading {jsonl_path} from cache...")
+            return cached_entries
+
+    # Parse from source file
+    messages: List[TranscriptEntry] = []
+    agent_ids: set[str] = set()  # Collect agentId references while parsing
+
+    with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
+        if not silent:
+            print(f"Processing {jsonl_path}...")
+        for line_no, line in enumerate(f, 1):  # Start counting from 1
+            line = line.strip()
+            if line:
+                try:
+                    entry_dict: dict[str, Any] | str = json.loads(line)
+                    if not isinstance(entry_dict, dict):
+                        print(
+                            f"Line {line_no} of {jsonl_path} is not a JSON object: {line}"
+                        )
+                        continue
+
+                    # Check for agentId BEFORE Pydantic parsing
+                    # agentId can be at top level OR nested in toolUseResult
+                    # For UserTranscriptEntry, we need to copy it to top level so Pydantic preserves it
+                    if "agentId" in entry_dict:
+                        agent_id = entry_dict.get("agentId")
+                        if agent_id:
+                            agent_ids.add(agent_id)
+                    elif "toolUseResult" in entry_dict:
+                        tool_use_result = entry_dict.get("toolUseResult")
+                        if (
+                            isinstance(tool_use_result, dict)
+                            and "agentId" in tool_use_result
+                        ):
+                            agent_id_value = tool_use_result.get("agentId")  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+                            if isinstance(agent_id_value, str):
+                                agent_ids.add(agent_id_value)
+                                # Copy agentId to top level for Pydantic to preserve
+                                entry_dict["agentId"] = agent_id_value
+
+                    entry_type: str | None = entry_dict.get("type")
+
+                    if entry_type in [
+                        "user",
+                        "assistant",
+                        "summary",
+                        "system",
+                        "queue-operation",
+                    ]:
+                        # Parse using Pydantic models
+                        entry = parse_transcript_entry(entry_dict)
+                        messages.append(entry)
+                    elif (
+                        entry_type
+                        in [
+                            "file-history-snapshot",  # Internal Claude Code file backup metadata
+                        ]
+                    ):
+                        # Silently skip internal message types we don't render
+                        pass
+                    else:
+                        print(
+                            f"Line {line_no} of {jsonl_path} is not a recognised message type: {line}"
+                        )
+                except json.JSONDecodeError as e:
+                    print(
+                        f"Line {line_no} of {jsonl_path} | JSON decode error: {str(e)}"
+                    )
+                except ValueError as e:
+                    # Extract a more descriptive error message
+                    error_msg = str(e)
+                    if "validation error" in error_msg.lower():
+                        err_no_url = re.sub(
+                            r"    For further information visit https://errors.pydantic(.*)\n?",
+                            "",
+                            error_msg,
+                        )
+                        print(f"Line {line_no} of {jsonl_path} | {err_no_url}")
+                    else:
+                        print(
+                            f"Line {line_no} of {jsonl_path} | ValueError: {error_msg}"
+                            "\n{traceback.format_exc()}"
+                        )
+                except Exception as e:
+                    print(
+                        f"Line {line_no} of {jsonl_path} | Unexpected error: {str(e)}"
+                        "\n{traceback.format_exc()}"
+                    )
+
+    # Load agent files if any were referenced
+    # Build a map of agentId -> agent messages
+    agent_messages_map: dict[str, List[TranscriptEntry]] = {}
+    if agent_ids:
+        parent_dir = jsonl_path.parent
+        for agent_id in agent_ids:
+            agent_file = parent_dir / f"agent-{agent_id}.jsonl"
+            # Skip if the agent file is the same as the current file (self-reference)
+            if agent_file == jsonl_path:
+                continue
+            if agent_file.exists():
+                if not silent:
+                    print(f"Loading agent file {agent_file}...")
+                # Recursively load the agent file (it might reference other agents)
+                agent_messages = load_transcript(
+                    agent_file,
+                    cache_manager,
+                    from_date,
+                    to_date,
+                    silent=True,
+                    _loaded_files=_loaded_files,
+                )
+                agent_messages_map[agent_id] = agent_messages
+
+    # Insert agent messages at their point of use
+    if agent_messages_map:
+        # Iterate through messages and insert agent messages after the message
+        # that references them (via UserTranscriptEntry.agentId)
+        result_messages: List[TranscriptEntry] = []
+        for message in messages:
+            result_messages.append(message)
+
+            # Check if this is a UserTranscriptEntry with agentId
+            if isinstance(message, UserTranscriptEntry) and message.agentId:
+                agent_id = message.agentId
+                if agent_id in agent_messages_map:
+                    # Insert agent messages right after this message
+                    result_messages.extend(agent_messages_map[agent_id])
+
+        messages = result_messages
+
+    # Save to cache if cache manager is available
+    if cache_manager is not None:
+        cache_manager.save_cached_entries(jsonl_path, messages)
+
+    return messages
+
+
+def load_directory_transcripts(
+    directory_path: Path,
+    cache_manager: Optional["CacheManager"] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    silent: bool = False,
+) -> List[TranscriptEntry]:
+    """Load all JSONL transcript files from a directory and combine them."""
+    all_messages: List[TranscriptEntry] = []
+
+    # Find all .jsonl files
+    jsonl_files = list(directory_path.glob("*.jsonl"))
+
+    for jsonl_file in jsonl_files:
+        messages = load_transcript(
+            jsonl_file, cache_manager, from_date, to_date, silent
+        )
+        all_messages.extend(messages)
+
+    # Sort all messages chronologically
+    def get_timestamp(entry: TranscriptEntry) -> str:
+        if hasattr(entry, "timestamp"):
+            return entry.timestamp  # type: ignore
+        return ""
+
+    all_messages.sort(key=get_timestamp)
+    return all_messages
+
+
+# =============================================================================
+# Deduplication
+# =============================================================================
+
+
+def deduplicate_messages(messages: List[TranscriptEntry]) -> List[TranscriptEntry]:
+    """Remove duplicate messages based on (type, timestamp, sessionId, content_key).
+
+    Messages with the exact same timestamp are duplicates by definition -
+    the differences (like IDE selection tags) are just logging artifacts.
+
+    We need a content-based key to handle two cases:
+    1. Version stutter: Same message logged twice during Claude Code upgrade
+       -> Same timestamp, same message.id or tool_use_id -> SHOULD deduplicate
+    2. Concurrent tool results: Multiple tool results with same timestamp
+       -> Same timestamp, different tool_use_ids -> should NOT deduplicate
+
+    Args:
+        messages: List of transcript entries to deduplicate
+
+    Returns:
+        List of deduplicated messages, preserving order (first occurrence kept)
+    """
+    # Track seen (message_type, timestamp, is_meta, session_id, content_key) tuples
+    seen: set[tuple[str, str, bool, str, str]] = set()
+    deduplicated: List[TranscriptEntry] = []
+
+    for message in messages:
+        # Get basic message type
+        message_type = getattr(message, "type", "unknown")
+
+        # For system messages, include level to differentiate info/warning/error
+        if isinstance(message, SystemTranscriptEntry):
+            level = getattr(message, "level", "info")
+            message_type = f"system-{level}"
+
+        # Get timestamp
+        timestamp = getattr(message, "timestamp", "")
+
+        # Get isMeta flag (slash command prompts have isMeta=True with same timestamp as parent)
+        is_meta = getattr(message, "isMeta", False)
+
+        # Get sessionId for multi-session report deduplication
+        session_id = getattr(message, "sessionId", "")
+
+        # Get content key for differentiating concurrent messages
+        # - For assistant messages: use message.id (same for stutters, different for different msgs)
+        # - For user messages with tool results: use first tool_use_id
+        # - For other messages: use uuid as fallback
+        content_key = ""
+        if isinstance(message, AssistantTranscriptEntry):
+            # For assistant messages, use the message id
+            content_key = message.message.id
+        elif isinstance(message, UserTranscriptEntry):
+            # For user messages, check for tool results
+            if isinstance(message.message.content, list):
+                for item in message.message.content:
+                    if isinstance(item, ToolResultContent):
+                        content_key = item.tool_use_id
+                        break
+        # Fallback to uuid if no content key found
+        if not content_key:
+            content_key = getattr(message, "uuid", "")
+
+        # Create deduplication key - include content_key for proper handling
+        # of both version stutters and concurrent tool results
+        dedup_key = (message_type, timestamp, is_meta, session_id, content_key)
+
+        # Keep only first occurrence
+        if dedup_key not in seen:
+            seen.add(dedup_key)
+            deduplicated.append(message)
+
+    return deduplicated
 
 
 def convert_jsonl_to_html(
@@ -45,7 +380,33 @@ def convert_jsonl_to_html(
     use_cache: bool = True,
     silent: bool = False,
 ) -> Path:
-    """Convert JSONL transcript(s) to HTML file(s)."""
+    """Convert JSONL transcript(s) to HTML file(s).
+
+    Convenience wrapper around convert_jsonl_to() for HTML format.
+    """
+    return convert_jsonl_to(
+        "html",
+        input_path,
+        output_path,
+        from_date,
+        to_date,
+        generate_individual_sessions,
+        use_cache,
+        silent,
+    )
+
+
+def convert_jsonl_to(
+    format: str,
+    input_path: Path,
+    output_path: Optional[Path] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    generate_individual_sessions: bool = True,
+    use_cache: bool = True,
+    silent: bool = False,
+) -> Path:
+    """Convert JSONL transcript(s) to the specified format."""
     if not input_path.exists():
         raise FileNotFoundError(f"Input path not found: {input_path}")
 
@@ -61,14 +422,14 @@ def convert_jsonl_to_html(
     if input_path.is_file():
         # Single file mode - cache only available for directory mode
         if output_path is None:
-            output_path = input_path.with_suffix(".html")
+            output_path = input_path.with_suffix(f".{format}")
         messages = load_transcript(input_path, silent=silent)
         title = f"Claude Transcript - {input_path.stem}"
         cache_was_updated = False  # No cache in single file mode
     else:
         # Directory mode - Cache-First Approach
         if output_path is None:
-            output_path = input_path / "combined_transcripts.html"
+            output_path = input_path / f"combined_transcripts.{format}"
 
         # Phase 1: Ensure cache is fresh and populated
         cache_was_updated = ensure_fresh_cache(
@@ -102,10 +463,11 @@ def convert_jsonl_to_html(
         date_range_str = " ".join(date_range_parts)
         title += f" ({date_range_str})"
 
-    # Generate combined HTML file (check if regeneration needed)
+    # Generate combined output file (check if regeneration needed)
     assert output_path is not None
+    renderer = get_renderer(format)
     should_regenerate = (
-        is_html_outdated(output_path)
+        renderer.is_outdated(output_path)
         or from_date is not None
         or to_date is not None
         or not output_path.exists()
@@ -115,15 +477,24 @@ def convert_jsonl_to_html(
     )
 
     if should_regenerate:
-        html_content = generate_html(messages, title)
-        output_path.write_text(html_content, encoding="utf-8")
+        content = renderer.generate(messages, title)
+        assert content is not None
+        output_path.write_text(content, encoding="utf-8")
     else:
-        print(f"HTML file {output_path.name} is current, skipping regeneration")
+        print(
+            f"{format.upper()} file {output_path.name} is current, skipping regeneration"
+        )
 
     # Generate individual session files if requested and in directory mode
     if generate_individual_sessions and input_path.is_dir():
         _generate_individual_session_files(
-            messages, input_path, from_date, to_date, cache_manager, cache_was_updated
+            format,
+            messages,
+            input_path,
+            from_date,
+            to_date,
+            cache_manager,
+            cache_was_updated,
         )
 
     return output_path
@@ -333,21 +704,6 @@ def _update_cache_with_session_data(
     )
 
 
-def _format_session_timestamp_range(first_timestamp: str, last_timestamp: str) -> str:
-    """Format session timestamp range for display."""
-    from .renderer import format_timestamp
-
-    if first_timestamp and last_timestamp:
-        if first_timestamp == last_timestamp:
-            return format_timestamp(first_timestamp)
-        else:
-            return f"{format_timestamp(first_timestamp)} - {format_timestamp(last_timestamp)}"
-    elif first_timestamp:
-        return format_timestamp(first_timestamp)
-    else:
-        return ""
-
-
 def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str, Any]]:
     """Collect session data for project index navigation."""
     from .parser import extract_text_content
@@ -428,21 +784,10 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
     # Convert to list format with formatted timestamps
     session_list: List[Dict[str, Any]] = []
     for session_data in sessions.values():
-        from .renderer import format_timestamp
-
-        first_ts = session_data["first_timestamp"]
-        last_ts = session_data["last_timestamp"]
-        timestamp_range = ""
-        if first_ts and last_ts:
-            if first_ts == last_ts:
-                timestamp_range = format_timestamp(first_ts)
-            else:
-                timestamp_range = (
-                    f"{format_timestamp(first_ts)} - {format_timestamp(last_ts)}"
-                )
-        elif first_ts:
-            timestamp_range = format_timestamp(first_ts)
-
+        timestamp_range = format_timestamp_range(
+            session_data["first_timestamp"],
+            session_data["last_timestamp"],
+        )
         session_dict: Dict[str, Any] = {
             "id": session_data["id"],
             "summary": session_data["summary"],
@@ -464,6 +809,7 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
 
 
 def _generate_individual_session_files(
+    format: str,
     messages: List[TranscriptEntry],
     output_dir: Path,
     from_date: Optional[str] = None,
@@ -471,7 +817,7 @@ def _generate_individual_session_files(
     cache_manager: Optional["CacheManager"] = None,
     cache_was_updated: bool = False,
 ) -> None:
-    """Generate individual HTML files for each session."""
+    """Generate individual files for each session in the specified format."""
     # Pre-compute warmup sessions to exclude them
     warmup_session_ids = get_warmup_session_ids(messages)
 
@@ -528,11 +874,12 @@ def _generate_individual_session_files(
             session_title += f" ({date_range_str})"
 
         # Check if session file needs regeneration
-        session_file_path = output_dir / f"session-{session_id}.html"
+        session_file_path = output_dir / f"session-{session_id}.{format}"
+        renderer = get_renderer(format)
 
         # Only regenerate if outdated, doesn't exist, or date filtering is active
         should_regenerate_session = (
-            is_html_outdated(session_file_path)
+            renderer.is_outdated(session_file_path)
             or from_date is not None
             or to_date is not None
             or not session_file_path.exists()
@@ -540,12 +887,13 @@ def _generate_individual_session_files(
         )
 
         if should_regenerate_session:
-            # Generate session HTML
-            session_html = generate_session_html(
+            # Generate session content
+            session_content = renderer.generate_session(
                 messages, session_id, session_title, cache_manager
             )
+            assert session_content is not None
             # Write session file
-            session_file_path.write_text(session_html, encoding="utf-8")
+            session_file_path.write_text(session_content, encoding="utf-8")
         else:
             print(
                 f"Session file {session_file_path.name} is current, skipping regeneration"
@@ -638,7 +986,7 @@ def process_projects_hierarchy(
                                 {
                                     "id": session_data.session_id,
                                     "summary": session_data.summary,
-                                    "timestamp_range": _format_session_timestamp_range(
+                                    "timestamp_range": format_timestamp_range(
                                         session_data.first_timestamp,
                                         session_data.last_timestamp,
                                     ),
@@ -749,8 +1097,12 @@ def process_projects_hierarchy(
 
     # Generate index HTML (always regenerate if outdated)
     index_path = projects_path / "index.html"
-    if is_html_outdated(index_path) or from_date or to_date or any_cache_updated:
-        index_html = generate_projects_index_html(project_summaries, from_date, to_date)
+    renderer = get_renderer("html")
+    if renderer.is_outdated(index_path) or from_date or to_date or any_cache_updated:
+        index_html = renderer.generate_projects_index(
+            project_summaries, from_date, to_date
+        )
+        assert index_html is not None
         index_path.write_text(index_html, encoding="utf-8")
     else:
         print("Index HTML is current, skipping regeneration")
