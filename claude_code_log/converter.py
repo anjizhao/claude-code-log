@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 import traceback
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import Optional, Any, TYPE_CHECKING
 
 import dateparser
 
@@ -39,18 +39,22 @@ from .renderer import get_renderer
 
 
 def filter_messages_by_date(
-    messages: List[TranscriptEntry], from_date: Optional[str], to_date: Optional[str]
-) -> List[TranscriptEntry]:
-    """Filter messages based on date range."""
+    messages: list[TranscriptEntry], from_date: Optional[str], to_date: Optional[str]
+) -> list[TranscriptEntry]:
+    """Filter messages based on date range.
+
+    Date parsing is done in UTC to match transcript timestamps which are stored in UTC.
+    """
     if not from_date and not to_date:
         return messages
 
-    # Parse the date strings using dateparser
+    # Parse dates in UTC to match transcript timestamps (which are stored in UTC)
+    dateparser_settings: Any = {"TIMEZONE": "UTC", "RETURN_AS_TIMEZONE_AWARE": False}
     from_dt = None
     to_dt = None
 
     if from_date:
-        from_dt = dateparser.parse(from_date)
+        from_dt = dateparser.parse(from_date, settings=dateparser_settings)
         if not from_dt:
             raise ValueError(f"Could not parse from-date: {from_date}")
         # If parsing relative dates like "today", start from beginning of day
@@ -58,14 +62,14 @@ def filter_messages_by_date(
             from_dt = from_dt.replace(hour=0, minute=0, second=0, microsecond=0)
 
     if to_date:
-        to_dt = dateparser.parse(to_date)
+        to_dt = dateparser.parse(to_date, settings=dateparser_settings)
         if not to_dt:
             raise ValueError(f"Could not parse to-date: {to_date}")
         # If parsing relative dates like "today", end at end of day
         if to_date in ["today", "yesterday"] or "days ago" in to_date:
             to_dt = to_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-    filtered_messages: List[TranscriptEntry] = []
+    filtered_messages: list[TranscriptEntry] = []
     for message in messages:
         # Handle SummaryTranscriptEntry which doesn't have timestamp
         if isinstance(message, SummaryTranscriptEntry):
@@ -102,7 +106,7 @@ def load_transcript(
     to_date: Optional[str] = None,
     silent: bool = False,
     _loaded_files: Optional[set[Path]] = None,
-) -> List[TranscriptEntry]:
+) -> list[TranscriptEntry]:
     """Load and parse JSONL transcript file, using cache if available.
 
     Args:
@@ -133,7 +137,7 @@ def load_transcript(
             return cached_entries
 
     # Parse from source file
-    messages: List[TranscriptEntry] = []
+    messages: list[TranscriptEntry] = []
     agent_ids: set[str] = set()  # Collect agentId references while parsing
 
     with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
@@ -210,17 +214,17 @@ def load_transcript(
                     else:
                         print(
                             f"Line {line_no} of {jsonl_path} | ValueError: {error_msg}"
-                            "\n{traceback.format_exc()}"
+                            f"\n{traceback.format_exc()}"
                         )
                 except Exception as e:
                     print(
                         f"Line {line_no} of {jsonl_path} | Unexpected error: {str(e)}"
-                        "\n{traceback.format_exc()}"
+                        f"\n{traceback.format_exc()}"
                     )
 
     # Load agent files if any were referenced
     # Build a map of agentId -> agent messages
-    agent_messages_map: dict[str, List[TranscriptEntry]] = {}
+    agent_messages_map: dict[str, list[TranscriptEntry]] = {}
     if agent_ids:
         parent_dir = jsonl_path.parent
         for agent_id in agent_ids:
@@ -242,11 +246,11 @@ def load_transcript(
                 )
                 agent_messages_map[agent_id] = agent_messages
 
-    # Insert agent messages at their point of use
+    # Insert agent messages at their point of use (only once per agent)
     if agent_messages_map:
-        # Iterate through messages and insert agent messages after the message
+        # Iterate through messages and insert agent messages after the FIRST message
         # that references them (via UserTranscriptEntry.agentId)
-        result_messages: List[TranscriptEntry] = []
+        result_messages: list[TranscriptEntry] = []
         for message in messages:
             result_messages.append(message)
 
@@ -254,8 +258,8 @@ def load_transcript(
             if isinstance(message, UserTranscriptEntry) and message.agentId:
                 agent_id = message.agentId
                 if agent_id in agent_messages_map:
-                    # Insert agent messages right after this message
-                    result_messages.extend(agent_messages_map[agent_id])
+                    # Insert agent messages right after this message (pop to insert only once)
+                    result_messages.extend(agent_messages_map.pop(agent_id))
 
         messages = result_messages
 
@@ -272,12 +276,15 @@ def load_directory_transcripts(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     silent: bool = False,
-) -> List[TranscriptEntry]:
+) -> list[TranscriptEntry]:
     """Load all JSONL transcript files from a directory and combine them."""
-    all_messages: List[TranscriptEntry] = []
+    all_messages: list[TranscriptEntry] = []
 
-    # Find all .jsonl files
-    jsonl_files = list(directory_path.glob("*.jsonl"))
+    # Find all .jsonl files, excluding agent files (they are loaded via load_transcript
+    # when a session references them via agentId)
+    jsonl_files = [
+        f for f in directory_path.glob("*.jsonl") if not f.name.startswith("agent-")
+    ]
 
     for jsonl_file in jsonl_files:
         messages = load_transcript(
@@ -300,7 +307,7 @@ def load_directory_transcripts(
 # =============================================================================
 
 
-def deduplicate_messages(messages: List[TranscriptEntry]) -> List[TranscriptEntry]:
+def deduplicate_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
     """Remove duplicate messages based on (type, timestamp, sessionId, content_key).
 
     Messages with the exact same timestamp are duplicates by definition -
@@ -320,7 +327,7 @@ def deduplicate_messages(messages: List[TranscriptEntry]) -> List[TranscriptEntr
     """
     # Track seen (message_type, timestamp, is_meta, session_id, content_key) tuples
     seen: set[tuple[str, str, bool, str, str]] = set()
-    deduplicated: List[TranscriptEntry] = []
+    deduplicated: list[TranscriptEntry] = []
 
     for message in messages:
         # Get basic message type
@@ -343,6 +350,7 @@ def deduplicate_messages(messages: List[TranscriptEntry]) -> List[TranscriptEntr
         # Get content key for differentiating concurrent messages
         # - For assistant messages: use message.id (same for stutters, different for different msgs)
         # - For user messages with tool results: use first tool_use_id
+        # - For summary messages: use leafUuid (summaries have no timestamp/uuid)
         # - For other messages: use uuid as fallback
         content_key = ""
         if isinstance(message, AssistantTranscriptEntry):
@@ -350,11 +358,13 @@ def deduplicate_messages(messages: List[TranscriptEntry]) -> List[TranscriptEntr
             content_key = message.message.id
         elif isinstance(message, UserTranscriptEntry):
             # For user messages, check for tool results
-            if isinstance(message.message.content, list):
-                for item in message.message.content:
-                    if isinstance(item, ToolResultContent):
-                        content_key = item.tool_use_id
-                        break
+            for item in message.message.content:
+                if isinstance(item, ToolResultContent):
+                    content_key = item.tool_use_id
+                    break
+        elif isinstance(message, SummaryTranscriptEntry):
+            # Summaries have no timestamp or uuid - use leafUuid to keep them distinct
+            content_key = message.leafUuid
         # Fallback to uuid if no content key found
         if not content_key:
             content_key = getattr(message, "uuid", "")
@@ -455,7 +465,7 @@ def convert_jsonl_to(
 
     # Update title to include date range if specified
     if from_date or to_date:
-        date_range_parts: List[str] = []
+        date_range_parts: list[str] = []
         if from_date:
             date_range_parts.append(f"from {from_date}")
         if to_date:
@@ -512,21 +522,28 @@ def ensure_fresh_cache(
         return False
 
     # Check if cache needs updating
-    jsonl_files = list(project_dir.glob("*.jsonl"))
-    if not jsonl_files:
+    # Exclude agent files from direct check - they are loaded via session references
+    # Note: If only an agent file changes (session unchanged), cache won't detect it.
+    # This is acceptable since agent files typically change alongside their sessions.
+    session_jsonl_files = [
+        f for f in project_dir.glob("*.jsonl") if not f.name.startswith("agent-")
+    ]
+    if not session_jsonl_files:
         return False
 
     # Get cached project data
     cached_project_data = cache_manager.get_cached_project_data()
 
     # Check various invalidation conditions
-    modified_files = cache_manager.get_modified_files(jsonl_files)
+    modified_files = cache_manager.get_modified_files(session_jsonl_files)
     needs_update = (
         cached_project_data is None
         or from_date is not None
         or to_date is not None
-        or bool(modified_files)  # Files changed
-        or (cached_project_data.total_message_count == 0 and jsonl_files)  # Stale cache
+        or bool(modified_files)  # Session files changed
+        or (
+            cached_project_data.total_message_count == 0 and session_jsonl_files
+        )  # Stale cache
     )
 
     if not needs_update:
@@ -545,15 +562,15 @@ def ensure_fresh_cache(
 
 
 def _update_cache_with_session_data(
-    cache_manager: CacheManager, messages: List[TranscriptEntry]
+    cache_manager: CacheManager, messages: list[TranscriptEntry]
 ) -> None:
     """Update cache with session and project aggregate data."""
     from .parser import extract_text_content
 
     # Collect session data (similar to _collect_project_sessions but for cache)
-    session_summaries: Dict[str, str] = {}
-    uuid_to_session: Dict[str, str] = {}
-    uuid_to_session_backup: Dict[str, str] = {}
+    session_summaries: dict[str, str] = {}
+    uuid_to_session: dict[str, str] = {}
+    uuid_to_session_backup: dict[str, str] = {}
 
     # Build mapping from message UUID to session ID
     for message in messages:
@@ -579,7 +596,7 @@ def _update_cache_with_session_data(
                 session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
 
     # Group messages by session and calculate session data
-    sessions_cache_data: Dict[str, SessionCacheData] = {}
+    sessions_cache_data: dict[str, SessionCacheData] = {}
 
     # Track token usage and timestamps for project aggregates
     total_input_tokens = 0
@@ -704,7 +721,7 @@ def _update_cache_with_session_data(
     )
 
 
-def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str, Any]]:
+def _collect_project_sessions(messages: list[TranscriptEntry]) -> list[dict[str, Any]]:
     """Collect session data for project index navigation."""
     from .parser import extract_text_content
 
@@ -713,9 +730,9 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
 
     # Pre-process to find and attach session summaries
     # This matches the logic from renderer.py generate_html() exactly
-    session_summaries: Dict[str, str] = {}
-    uuid_to_session: Dict[str, str] = {}
-    uuid_to_session_backup: Dict[str, str] = {}
+    session_summaries: dict[str, str] = {}
+    uuid_to_session: dict[str, str] = {}
+    uuid_to_session_backup: dict[str, str] = {}
 
     # Build mapping from message UUID to session ID across ALL messages
     # This allows summaries from later sessions to be matched to earlier sessions
@@ -745,7 +762,7 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
                 session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
 
     # Group messages by session (excluding warmup-only sessions)
-    sessions: Dict[str, Dict[str, Any]] = {}
+    sessions: dict[str, dict[str, Any]] = {}
     for message in messages:
         if hasattr(message, "sessionId") and not isinstance(
             message, SummaryTranscriptEntry
@@ -782,13 +799,13 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
                     )
 
     # Convert to list format with formatted timestamps
-    session_list: List[Dict[str, Any]] = []
+    session_list: list[dict[str, Any]] = []
     for session_data in sessions.values():
         timestamp_range = format_timestamp_range(
             session_data["first_timestamp"],
             session_data["last_timestamp"],
         )
-        session_dict: Dict[str, Any] = {
+        session_dict: dict[str, Any] = {
             "id": session_data["id"],
             "summary": session_data["summary"],
             "timestamp_range": timestamp_range,
@@ -810,7 +827,7 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
 
 def _generate_individual_session_files(
     format: str,
-    messages: List[TranscriptEntry],
+    messages: list[TranscriptEntry],
     output_dir: Path,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
@@ -830,7 +847,7 @@ def _generate_individual_session_files(
                 session_ids.add(session_id)
 
     # Get session data from cache for better titles
-    session_data: Dict[str, Any] = {}
+    session_data: dict[str, Any] = {}
     working_directories = None
     if cache_manager is not None:
         project_cache = cache_manager.get_cached_project_data()
@@ -841,6 +858,9 @@ def _generate_individual_session_files(
                 working_directories = project_cache.working_directories
 
     project_title = get_project_display_name(output_dir.name, working_directories)
+
+    # Get renderer once outside the loop
+    renderer = get_renderer(format)
 
     # Generate HTML file for each session
     for session_id in session_ids:
@@ -865,7 +885,7 @@ def _generate_individual_session_files(
 
         # Add date range if specified
         if from_date or to_date:
-            date_range_parts: List[str] = []
+            date_range_parts: list[str] = []
             if from_date:
                 date_range_parts.append(f"from {from_date}")
             if to_date:
@@ -875,7 +895,6 @@ def _generate_individual_session_files(
 
         # Check if session file needs regeneration
         session_file_path = output_dir / f"session-{session_id}.{format}"
-        renderer = get_renderer(format)
 
         # Only regenerate if outdated, doesn't exist, or date filtering is active
         should_regenerate_session = (
@@ -912,7 +931,7 @@ def process_projects_hierarchy(
         raise FileNotFoundError(f"Projects path not found: {projects_path}")
 
     # Find all project directories (those with JSONL files)
-    project_dirs: List[Path] = []
+    project_dirs: list[Path] = []
     for child in projects_path.iterdir():
         if child.is_dir() and list(child.glob("*.jsonl")):
             project_dirs.append(child)
@@ -926,7 +945,7 @@ def process_projects_hierarchy(
     library_version = get_library_version()
 
     # Process each project directory
-    project_summaries: List[Dict[str, Any]] = []
+    project_summaries: list[dict[str, Any]] = []
     any_cache_updated = False  # Track if any project had cache updates
     for project_dir in sorted(project_dirs):
         try:
@@ -956,7 +975,12 @@ def process_projects_hierarchy(
             )
 
             # Get project info for index - use cached data if available
-            jsonl_files = list(project_dir.glob("*.jsonl"))
+            # Exclude agent files (they are loaded via session references)
+            jsonl_files = [
+                f
+                for f in project_dir.glob("*.jsonl")
+                if not f.name.startswith("agent-")
+            ]
             jsonl_count = len(jsonl_files)
             last_modified: float = (
                 max(f.stat().st_mtime for f in jsonl_files) if jsonl_files else 0.0

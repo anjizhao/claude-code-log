@@ -14,9 +14,11 @@ These formatters take tool-specific input/output data and generate
 HTML for display in transcripts.
 """
 
+import base64
+import binascii
 import json
 import re
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Optional, cast
 
 from .utils import (
     escape_html,
@@ -48,7 +50,7 @@ from .renderer_code import render_single_diff
 
 def _render_question_item(q: AskUserQuestionItem) -> str:
     """Render a single question item to HTML."""
-    html_parts: List[str] = ['<div class="question-block">']
+    html_parts: list[str] = ['<div class="question-block">']
 
     # Header (if present)
     if q.header:
@@ -89,7 +91,7 @@ def format_askuserquestion_content(ask_input: AskUserQuestionInput) -> str:
     options (with label and description), and multiSelect flag.
     """
     # Build list of questions from both formats
-    questions: List[AskUserQuestionItem] = list(ask_input.questions)
+    questions: list[AskUserQuestionItem] = list(ask_input.questions)
 
     # Handle single question format (legacy)
     if not questions and ask_input.question:
@@ -99,7 +101,7 @@ def format_askuserquestion_content(ask_input: AskUserQuestionInput) -> str:
         return '<div class="askuserquestion-content"><em>No question</em></div>'
 
     # Build HTML for all questions
-    html_parts: List[str] = ['<div class="askuserquestion-content">']
+    html_parts: list[str] = ['<div class="askuserquestion-content">']
     for q in questions:
         html_parts.append(_render_question_item(q))
     html_parts.append("</div>")  # Close askuserquestion-content
@@ -140,7 +142,7 @@ def format_askuserquestion_result(content: str) -> str:
         return ""
 
     # Build styled HTML
-    html_parts: List[str] = [
+    html_parts: list[str] = [
         '<div class="askuserquestion-content askuserquestion-result">'
     ]
 
@@ -217,7 +219,7 @@ def format_todowrite_content(todo_input: TodoWriteInput) -> str:
     status_emojis = {"pending": "⏳", "in_progress": "🔄", "completed": "✅"}
 
     # Build todo list HTML - todos are typed TodoWriteItem objects
-    todo_items: List[str] = []
+    todo_items: list[str] = []
     for todo in todo_input.todos:
         todo_id = escape_html(todo.id) if todo.id else ""
         content = escape_html(todo.content) if todo.content else ""
@@ -266,7 +268,7 @@ def format_read_tool_content(read_input: ReadInput) -> str:  # noqa: ARG001
 
 
 def _parse_cat_n_snippet(
-    lines: List[str], start_idx: int = 0
+    lines: list[str], start_idx: int = 0
 ) -> Optional[tuple[str, Optional[str], int]]:
     """Parse cat-n formatted snippet from lines.
 
@@ -277,7 +279,7 @@ def _parse_cat_n_snippet(
     Returns:
         Tuple of (code_content, system_reminder, line_offset) or None if not parseable
     """
-    code_lines: List[str] = []
+    code_lines: list[str] = []
     system_reminder: Optional[str] = None
     in_system_reminder = False
     line_offset = 1  # Default offset
@@ -631,7 +633,7 @@ def format_tool_use_title(tool_use: ToolUseContent) -> str:
 # -- Generic Parameter Table --------------------------------------------------
 
 
-def render_params_table(params: Dict[str, Any]) -> str:
+def render_params_table(params: dict[str, Any]) -> str:
     """Render a dictionary of parameters as an HTML table.
 
     Reusable for tool parameters, diagnostic objects, etc.
@@ -788,11 +790,11 @@ def format_tool_result_content(
     if isinstance(tool_result.content, str):
         raw_content = tool_result.content
         has_images = False
-        image_html_parts: List[str] = []
+        image_html_parts: list[str] = []
     else:
         # Content is a list of structured items, extract text and images
-        content_parts: List[str] = []
-        image_html_parts: List[str] = []
+        content_parts: list[str] = []
+        image_html_parts: list[str] = []
         for item in tool_result.content:
             item_type = item.get("type")
             if item_type == "text":
@@ -801,14 +803,28 @@ def format_tool_result_content(
                     content_parts.append(text_value)
             elif item_type == "image":
                 # Handle image content within tool results
-                source = cast(Dict[str, Any], item.get("source", {}))
+                source = cast(dict[str, Any], item.get("source", {}))
                 if source:
                     media_type: str = str(source.get("media_type", "image/png"))
+                    # Restrict to safe image types to prevent XSS via SVG
+                    allowed_media_types = {
+                        "image/png",
+                        "image/jpeg",
+                        "image/gif",
+                        "image/webp",
+                    }
+                    if media_type not in allowed_media_types:
+                        continue
                     data: str = str(source.get("data", ""))
                     if data:
+                        # Validate base64 data to prevent corruption/injection
+                        try:
+                            base64.b64decode(data, validate=True)
+                        except (binascii.Error, ValueError):
+                            continue
                         data_url = f"data:{media_type};base64,{data}"
                         image_html_parts.append(
-                            f'<img src="{data_url}" alt="Tool result image" '
+                            f'<img src="{escape_html(data_url)}" alt="Tool result image" '
                             f'class="tool-result-image" />'
                         )
         raw_content = "\n".join(content_parts)
@@ -868,15 +884,21 @@ def format_tool_result_content(
 
     # Check if this looks like Bash tool output and process ANSI codes
     # Bash tool results often contain ANSI escape sequences and terminal output
-    if _looks_like_bash_output(raw_content):
-        escaped_content = convert_ansi_to_html(raw_content)
-    else:
-        escaped_content = escape_html(raw_content)
+    is_ansi = _looks_like_bash_output(raw_content)
+    full_html = (
+        convert_ansi_to_html(raw_content) if is_ansi else escape_html(raw_content)
+    )
+    # For preview, always use plain escaped text (don't truncate HTML with tags)
+    preview_html = (
+        escape_html(raw_content[:200]) + "..."
+        if len(raw_content) > 200
+        else escape_html(raw_content)
+    )
 
     # Build final HTML based on content length and presence of images
     if has_images:
         # Combine text and images
-        text_html = f"<pre>{escaped_content}</pre>" if escaped_content else ""
+        text_html = f"<pre>{full_html}</pre>" if full_html else ""
         images_html = "".join(image_html_parts)
         combined_content = f"{text_html}{images_html}"
 
@@ -895,18 +917,17 @@ def format_tool_result_content(
     else:
         # Text-only content (existing behavior)
         # For simple content, show directly without collapsible wrapper
-        if len(escaped_content) <= 200:
-            return f"<pre>{escaped_content}</pre>"
+        if len(raw_content) <= 200:
+            return f"<pre>{full_html}</pre>"
 
         # For longer content, use collapsible details but no extra wrapper
-        preview_text = escaped_content[:200] + "..."
         return f"""
     <details class="collapsible-details">
         <summary>
-            <div class="preview-content"><pre>{preview_text}</pre></div>
+            <div class="preview-content"><pre>{preview_html}</pre></div>
         </summary>
         <div class="details-content">
-            <pre>{escaped_content}</pre>
+            <pre>{full_html}</pre>
         </div>
     </details>
     """

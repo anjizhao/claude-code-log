@@ -8,10 +8,6 @@ Part of the thematic formatter organization:
 - tool_formatters.py: tool use/result content
 """
 
-from typing import List
-
-import mistune
-
 from .ansi_colors import convert_ansi_to_html
 from ..models import (
     BashInputContent,
@@ -52,7 +48,7 @@ def format_slash_command_content(content: SlashCommandContent) -> str:
     escaped_command_contents = escape_html(formatted_contents)
 
     # Build the content HTML - command name is the primary content
-    content_parts: List[str] = [f"<code>{escaped_command_name}</code>"]
+    content_parts: list[str] = [f"<code>{escaped_command_name}</code>"]
     if content.command_args:
         content_parts.append(f"<strong>Args:</strong> {escaped_command_args}")
     if content.command_contents:
@@ -64,8 +60,8 @@ def format_slash_command_content(content: SlashCommandContent) -> str:
                 f"<strong>Content:</strong><pre>{escaped_command_contents}</pre>"
             )
         else:
-            # Long content, make collapsible
-            preview = "\n".join(lines[:5])
+            # Long content, make collapsible with truncation indicator
+            preview = "\n".join(lines[:5]) + "\n..."
             collapsible = render_collapsible_code(
                 f"<pre>{preview}</pre>",
                 f"<pre>{escaped_command_contents}</pre>",
@@ -87,9 +83,10 @@ def format_command_output_content(content: CommandOutputContent) -> str:
         HTML string for the command output display
     """
     if content.is_markdown:
-        # Render as markdown
-        markdown_html = mistune.html(content.stdout)
-        return f"<div class='command-output-content'>{markdown_html}</div>"
+        # Render as markdown using shared renderer for GFM plugins and syntax highlighting
+        return render_markdown_collapsible(
+            content.stdout, "command-output-content", line_threshold=20
+        )
     else:
         # Convert ANSI codes to HTML for colored display
         html_content = convert_ansi_to_html(content.stdout)
@@ -128,18 +125,18 @@ def format_bash_output_content(
     Returns:
         HTML string for the bash output display
     """
-    output_parts: List[tuple[str, str, int, str]] = []
+    output_parts: list[tuple[str, str, int, str]] = []
     total_lines = 0
 
     if content.stdout:
         escaped_stdout = convert_ansi_to_html(content.stdout)
-        stdout_lines = content.stdout.count("\n") + 1
+        stdout_lines = len(content.stdout.splitlines())
         total_lines += stdout_lines
         output_parts.append(("stdout", escaped_stdout, stdout_lines, content.stdout))
 
     if content.stderr:
         escaped_stderr = convert_ansi_to_html(content.stderr)
-        stderr_lines = content.stderr.count("\n") + 1
+        stderr_lines = len(content.stderr.splitlines())
         total_lines += stderr_lines
         output_parts.append(("stderr", escaped_stderr, stderr_lines, content.stderr))
 
@@ -150,7 +147,7 @@ def format_bash_output_content(
         )
 
     # Build the HTML parts
-    html_parts: List[str] = []
+    html_parts: list[str] = []
     for output_type, escaped_content, _, _ in output_parts:
         css_name = f"bash-{output_type}"
         html_parts.append(f"<pre class='{css_name}'>{escaped_content}</pre>")
@@ -166,13 +163,12 @@ def format_bash_output_content(
         if total_lines > preview_lines:
             preview_html += "\n..."
 
-        return f"""<details class='collapsible-code'>
-            <summary>
-                <span class='line-count'>{total_lines} lines</span>
-                <pre class='preview-content bash-stdout'>{preview_html}</pre>
-            </summary>
-            <div class='code-full'>{full_html}</div>
-        </details>"""
+        # Use render_collapsible_code for consistent collapse markup
+        return render_collapsible_code(
+            preview_html=f"<pre class='bash-stdout'>{preview_html}</pre>",
+            full_html=full_html,
+            line_count=total_lines,
+        )
 
     return full_html
 
@@ -205,7 +201,7 @@ def format_user_text_model_content(content: UserTextContent) -> str:
     Returns:
         HTML string combining IDE notifications and main text content
     """
-    parts: List[str] = []
+    parts: list[str] = []
 
     # Add IDE notifications first if present
     if content.ide_notifications:
@@ -280,21 +276,21 @@ def _format_selection(selection: IdeSelection) -> str:
     # For large selections, make them collapsible
     if len(selection.content) > 200:
         preview = escape_html(selection.content[:150]) + "..."
-        return f"""
-            <div class='ide-notification ide-selection'>
-                <details class='ide-selection-collapsible'>
-                    <summary>📝 {preview}</summary>
-                    <pre class='ide-selection-content'>{escaped_content}</pre>
-                </details>
-            </div>
-        """
+        return (
+            f"<div class='ide-notification ide-selection'>"
+            f"<details class='ide-selection-collapsible'>"
+            f"<summary>📝 {preview}</summary>"
+            f"<pre class='ide-selection-content'>{escaped_content}</pre>"
+            f"</details>"
+            f"</div>"
+        )
     else:
         return f"<div class='ide-notification ide-selection'>📝 {escaped_content}</div>"
 
 
-def _format_diagnostic(diagnostic: IdeDiagnostic) -> List[str]:
+def _format_diagnostic(diagnostic: IdeDiagnostic) -> list[str]:
     """Format a single IDE diagnostic as HTML (may produce multiple notifications)."""
-    notifications: List[str] = []
+    notifications: list[str] = []
 
     if diagnostic.diagnostics:
         # Parsed JSON diagnostics - render each as a table
@@ -308,17 +304,19 @@ def _format_diagnostic(diagnostic: IdeDiagnostic) -> List[str]:
             notifications.append(notification_html)
     elif diagnostic.raw_content:
         # JSON parsing failed, render as plain text
+        is_truncated = len(diagnostic.raw_content) > 200
         escaped_content = escape_html(diagnostic.raw_content[:200])
+        truncation_marker = "..." if is_truncated else ""
         notification_html = (
             f"<div class='ide-notification'>🤖 IDE Diagnostics (parse error)<br>"
-            f"<pre>{escaped_content}...</pre></div>"
+            f"<pre>{escaped_content}{truncation_marker}</pre></div>"
         )
         notifications.append(notification_html)
 
     return notifications
 
 
-def format_ide_notification_content(content: IdeNotificationContent) -> List[str]:
+def format_ide_notification_content(content: IdeNotificationContent) -> list[str]:
     """Format IDE notification content as HTML.
 
     Takes structured IdeNotificationContent and returns a list of HTML
@@ -330,7 +328,7 @@ def format_ide_notification_content(content: IdeNotificationContent) -> List[str
     Returns:
         List of HTML notification strings
     """
-    notifications: List[str] = []
+    notifications: list[str] = []
 
     # Format opened files
     for opened_file in content.opened_files:

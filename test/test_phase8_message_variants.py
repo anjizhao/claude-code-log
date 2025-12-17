@@ -126,15 +126,12 @@ class TestSlashCommandRendering:
             messages = load_transcript(test_file_path)
             html = generate_html(messages, "Test Sidechain Slash Command")
 
-            # Note: Sidechain user messages are typically skipped, but isMeta ones
-            # may have different behavior. This test documents the actual behavior.
-            # The key is that if rendered, it should have both modifiers.
-
-            # If the message is rendered, check for combined CSS classes
-            if "Sub-agent Slash Command" in html:
-                assert "sidechain" in html or "slash-command" in html, (
-                    "If rendered, should have sidechain or slash-command class"
-                )
+            # Sidechain user messages without tool results are skipped during filtering
+            # (see _filter_messages in renderer.py). Even with isMeta=True, they don't
+            # contain tool results so they are not rendered.
+            assert "Sub-agent Slash Command" not in html, (
+                "Sidechain user messages without tool results should be skipped"
+            )
 
         finally:
             test_file_path.unlink()
@@ -380,11 +377,14 @@ class TestCssClassModifiers:
             messages = load_transcript(test_file_path)
             html = generate_html(messages, "Test Compacted Sidechain")
 
-            # Sidechain user messages are typically skipped, but if rendered...
-            # The presence of context-messages tag triggers compacted detection
-            if "context-messages" in html or "compacted" in html.lower():
-                # If rendered, should have both modifiers
-                pass  # Test documents behavior
+            # Sidechain user messages are skipped (duplicate of Task prompt input)
+            # Verify the raw content is not rendered
+            assert "context-messages" not in html, (
+                "Sidechain user messages should be skipped"
+            )
+            assert "[Compacted conversation]" not in html, (
+                "Sidechain user message content should not be rendered"
+            )
 
         finally:
             test_file_path.unlink()

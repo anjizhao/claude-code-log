@@ -7,7 +7,7 @@ to HTML with appropriate CSS classes for styling.
 
 import html
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 
 def _escape_html(text: str) -> str:
@@ -54,8 +54,8 @@ def convert_ansi_to_html(text: str) -> str:
     # This catches any we might have missed, but preserves \x1b[...m color codes
     text = re.sub(r"\x1b\[(?![0-9;]*m)[0-9;]*[A-Za-z]", "", text)
 
-    result: List[str] = []
-    segments: List[Dict[str, Any]] = []
+    result: list[str] = []
+    segments: list[dict[str, Any]] = []
 
     # First pass: split text into segments with their styles
     last_end = 0
@@ -68,7 +68,7 @@ def convert_ansi_to_html(text: str) -> str:
     current_rgb_fg = None
     current_rgb_bg = None
 
-    for match in re.finditer(r"\x1b\[([0-9;]+)m", text):
+    for match in re.finditer(r"\x1b\[([0-9;]*)m", text):
         # Add text before this escape code
         if match.start() > last_end:
             segments.append(
@@ -85,8 +85,11 @@ def convert_ansi_to_html(text: str) -> str:
                 }
             )
 
-        # Process escape codes
-        codes = match.group(1).split(";")
+        # Process escape codes (empty params = reset, same as code 0)
+        code_blob = match.group(1)
+        codes = code_blob.split(";") if code_blob else ["0"]
+        if codes == [""]:
+            codes = ["0"]
         i = 0
         while i < len(codes):
             code = codes[i]
@@ -189,16 +192,20 @@ def convert_ansi_to_html(text: str) -> str:
             elif code == "38" and i + 1 < len(codes) and codes[i + 1] == "2":
                 if i + 4 < len(codes):
                     r, g, b = codes[i + 2], codes[i + 3], codes[i + 4]
-                    current_rgb_fg = f"color: rgb({r}, {g}, {b})"
-                    current_fg = None
+                    # Validate RGB values are numeric to avoid invalid CSS
+                    if r.isdigit() and g.isdigit() and b.isdigit():
+                        current_rgb_fg = f"color: rgb({r}, {g}, {b})"
+                        current_fg = None
                     i += 4
 
             # RGB background color
             elif code == "48" and i + 1 < len(codes) and codes[i + 1] == "2":
                 if i + 4 < len(codes):
                     r, g, b = codes[i + 2], codes[i + 3], codes[i + 4]
-                    current_rgb_bg = f"background-color: rgb({r}, {g}, {b})"
-                    current_bg = None
+                    # Validate RGB values are numeric to avoid invalid CSS
+                    if r.isdigit() and g.isdigit() and b.isdigit():
+                        current_rgb_bg = f"background-color: rgb({r}, {g}, {b})"
+                        current_bg = None
                     i += 4
 
             i += 1
@@ -226,8 +233,8 @@ def convert_ansi_to_html(text: str) -> str:
         if not segment["text"]:
             continue
 
-        classes: List[str] = []
-        styles: List[str] = []
+        classes: list[str] = []
+        styles: list[str] = []
 
         if segment["fg"]:
             classes.append(segment["fg"])
@@ -249,7 +256,7 @@ def convert_ansi_to_html(text: str) -> str:
         escaped_text = _escape_html(segment["text"])
 
         if classes or styles:
-            attrs: List[str] = []
+            attrs: list[str] = []
             if classes:
                 attrs.append(f'class="{" ".join(classes)}"')
             if styles:
