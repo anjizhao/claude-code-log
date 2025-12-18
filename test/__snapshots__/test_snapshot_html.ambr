@@ -2388,8 +2388,7 @@
   
   /* Slash command prompts (isMeta=true, LLM-generated content) */
   .user.slash-command {
-      border-left-color: var(--user-dimmed);
-      opacity: 0.85;
+      border-left-color: var(--user-color);
   }
   
   .assistant {
@@ -2480,8 +2479,8 @@
   
   /* Command output styling */
   .command-output {
-      background-color: #1e1e1e11;
-      border-left-color: var(--warning-dimmed);
+      background-color: var(--highlight-light);
+      border-left-color: var(--user-color);
   }
   
   .command-output-content {
@@ -2506,6 +2505,10 @@
   .command-output-content th {
       text-align: left;
       padding: 0 1em;
+  }
+  
+  .content pre.command-output-content {
+      padding: .5em;
   }
   
   /* Bash command styling (user-initiated, right-aligned) */
@@ -2829,8 +2832,12 @@
   }
   
   .thinking-content {
-      background-color: var(--thinking-dimmed);
-      border-left: #66666688 1px solid;
+      font-style: italic;
+      font-size: 80%;
+  }
+  
+  .thinking-content em {
+      font-style: normal;
   }
   
   .thinking-text {
@@ -7182,8 +7189,7 @@
   
   /* Slash command prompts (isMeta=true, LLM-generated content) */
   .user.slash-command {
-      border-left-color: var(--user-dimmed);
-      opacity: 0.85;
+      border-left-color: var(--user-color);
   }
   
   .assistant {
@@ -7274,8 +7280,8 @@
   
   /* Command output styling */
   .command-output {
-      background-color: #1e1e1e11;
-      border-left-color: var(--warning-dimmed);
+      background-color: var(--highlight-light);
+      border-left-color: var(--user-color);
   }
   
   .command-output-content {
@@ -7300,6 +7306,10 @@
   .command-output-content th {
       text-align: left;
       padding: 0 1em;
+  }
+  
+  .content pre.command-output-content {
+      padding: .5em;
   }
   
   /* Bash command styling (user-initiated, right-aligned) */
@@ -7623,8 +7633,12 @@
   }
   
   .thinking-content {
-      background-color: var(--thinking-dimmed);
-      border-left: #66666688 1px solid;
+      font-style: italic;
+      font-size: 80%;
+  }
+  
+  .thinking-content em {
+      font-style: normal;
   }
   
   .thinking-text {
@@ -9834,7 +9848,7 @@
       
       <div class='message user command-output pair_last session-edge_cases' data-message-id='d-6' id='msg-d-6'>
           <div class='header'>
-              <span>Command output</span>
+              <span></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
                       <span class='timestamp' data-timestamp='2025-06-14T11:02:20Z'>2025-06-14 11:02:20</span>
@@ -12066,8 +12080,7 @@
   
   /* Slash command prompts (isMeta=true, LLM-generated content) */
   .user.slash-command {
-      border-left-color: var(--user-dimmed);
-      opacity: 0.85;
+      border-left-color: var(--user-color);
   }
   
   .assistant {
@@ -12158,8 +12171,8 @@
   
   /* Command output styling */
   .command-output {
-      background-color: #1e1e1e11;
-      border-left-color: var(--warning-dimmed);
+      background-color: var(--highlight-light);
+      border-left-color: var(--user-color);
   }
   
   .command-output-content {
@@ -12184,6 +12197,10 @@
   .command-output-content th {
       text-align: left;
       padding: 0 1em;
+  }
+  
+  .content pre.command-output-content {
+      padding: .5em;
   }
   
   /* Bash command styling (user-initiated, right-aligned) */
@@ -12507,8 +12524,12 @@
   }
   
   .thinking-content {
-      background-color: var(--thinking-dimmed);
-      border-left: #66666688 1px solid;
+      font-style: italic;
+      font-size: 80%;
+  }
+  
+  .thinking-content em {
+      font-style: normal;
   }
   
   .thinking-text {
@@ -16998,8 +17019,7 @@
   
   /* Slash command prompts (isMeta=true, LLM-generated content) */
   .user.slash-command {
-      border-left-color: var(--user-dimmed);
-      opacity: 0.85;
+      border-left-color: var(--user-color);
   }
   
   .assistant {
@@ -17090,8 +17110,8 @@
   
   /* Command output styling */
   .command-output {
-      background-color: #1e1e1e11;
-      border-left-color: var(--warning-dimmed);
+      background-color: var(--highlight-light);
+      border-left-color: var(--user-color);
   }
   
   .command-output-content {
@@ -17116,6 +17136,10 @@
   .command-output-content th {
       text-align: left;
       padding: 0 1em;
+  }
+  
+  .content pre.command-output-content {
+      padding: .5em;
   }
   
   /* Bash command styling (user-initiated, right-aligned) */
@@ -17439,8 +17463,12 @@
   }
   
   .thinking-content {
-      background-color: var(--thinking-dimmed);
-      border-left: #66666688 1px solid;
+      font-style: italic;
+      font-size: 80%;
+  }
+  
+  .thinking-content em {
+      font-style: normal;
   }
   
   .thinking-text {
