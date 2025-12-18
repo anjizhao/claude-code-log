@@ -267,9 +267,6 @@ class UserTextContent(MessageContent):
 
     Wraps user text that may have been preprocessed to extract
     IDE notifications, compacted summaries, or memory input markers.
-
-    TODO: Not currently instantiated - formatter exists but pipeline uses
-    separate IdeNotificationContent and plain text instead.
     """
 
     text: str
@@ -472,6 +469,9 @@ class DedupNoticeContent(MessageContent):
     """
 
     notice_text: str
+    target_uuid: Optional[str] = None  # UUID of target message (for resolving link)
+    target_message_id: Optional[str] = None  # Resolved message ID for anchor link
+    original_text: Optional[str] = None  # Original duplicated content (for debugging)
 
 
 # =============================================================================
