@@ -1,7 +1,8 @@
 """HTML renderer implementation for Claude Code transcripts."""
 
+from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Optional, Tuple
 
 from ..cache import get_library_version
 from ..models import (
@@ -12,7 +13,6 @@ from ..models import (
     CompactedSummaryContent,
     DedupNoticeContent,
     HookSummaryContent,
-    ImageContent,
     SessionHeaderContent,
     SlashCommandContent,
     SystemContent,
@@ -23,6 +23,7 @@ from ..models import (
     TranscriptEntry,
     UnknownContent,
     UserMemoryContent,
+    UserSlashCommandContent,
     UserTextContent,
 )
 from ..renderer import (
@@ -46,11 +47,11 @@ from .user_formatters import (
     format_compacted_summary_content,
     format_slash_command_content,
     format_user_memory_content,
+    format_user_slash_command_content,
     format_user_text_model_content,
 )
 from .assistant_formatters import (
     format_assistant_text_content,
-    format_image_content,
     format_thinking_content,
     format_unknown_content,
 )
@@ -93,79 +94,50 @@ def check_html_version(html_file_path: Path) -> Optional[str]:
 class HtmlRenderer(Renderer):
     """HTML renderer for Claude Code transcripts."""
 
-    def _format_message_content(self, message: TemplateMessage) -> str:
-        """Format structured content to HTML for a single message.
+    def _build_dispatcher(self) -> dict[type, Callable[..., str]]:
+        """Build content type to HTML formatter mapping.
 
-        Args:
-            message: TemplateMessage with content model to format
-
-        Returns:
-            HTML string for the message content, or empty string if no content
+        Maps MessageContent subclasses to their HTML formatting functions.
+        Handlers receive the content directly (not the full TemplateMessage).
+        The cast to the correct type happens in format_content().
         """
-        if message.content is None:
-            return ""
+        return {
+            # System content types
+            SystemContent: format_system_content,
+            HookSummaryContent: format_hook_summary_content,
+            SessionHeaderContent: format_session_header_content,
+            DedupNoticeContent: format_dedup_notice_content,
+            # User content types
+            SlashCommandContent: format_slash_command_content,
+            CommandOutputContent: format_command_output_content,
+            BashInputContent: format_bash_input_content,
+            BashOutputContent: format_bash_output_content,
+            CompactedSummaryContent: format_compacted_summary_content,
+            UserMemoryContent: format_user_memory_content,
+            UserSlashCommandContent: format_user_slash_command_content,
+            UserTextContent: format_user_text_model_content,
+            # Assistant content types
+            ThinkingContentModel: partial(format_thinking_content, line_threshold=10),
+            AssistantTextContent: format_assistant_text_content,
+            UnknownContent: format_unknown_content,
+            # Tool content types
+            ToolUseContent: format_tool_use_content,
+            ToolResultContentModel: self._format_tool_result_content,
+        }
 
-        # Dispatch to appropriate formatter based on content type
-        if isinstance(message.content, SystemContent):
-            return format_system_content(message.content)
-        elif isinstance(message.content, HookSummaryContent):
-            return format_hook_summary_content(message.content)
-        elif isinstance(message.content, SessionHeaderContent):
-            return format_session_header_content(message.content)
-        elif isinstance(message.content, DedupNoticeContent):
-            return format_dedup_notice_content(message.content)
-        elif isinstance(message.content, SlashCommandContent):
-            return format_slash_command_content(message.content)
-        elif isinstance(message.content, CommandOutputContent):
-            return format_command_output_content(message.content)
-        elif isinstance(message.content, BashInputContent):
-            return format_bash_input_content(message.content)
-        elif isinstance(message.content, BashOutputContent):
-            return format_bash_output_content(message.content)
-        elif isinstance(message.content, ThinkingContentModel):
-            return format_thinking_content(message.content, line_threshold=10)
-        elif isinstance(message.content, AssistantTextContent):
-            return format_assistant_text_content(message.content)
-        elif isinstance(message.content, ImageContent):
-            return format_image_content(message.content)
-        elif isinstance(message.content, ToolUseContent):
-            return format_tool_use_content(message.content)
-        elif isinstance(message.content, ToolResultContentModel):
-            # Create ToolResultContent from the model for formatting
-            tool_result = ToolResultContent(
-                type="tool_result",
-                tool_use_id=message.content.tool_use_id,
-                content=message.content.content,
-                is_error=message.content.is_error,
-            )
-            return format_tool_result_content(
-                tool_result,
-                message.content.file_path,
-                message.content.tool_name,
-            )
-        # User message content types
-        elif isinstance(message.content, CompactedSummaryContent):
-            return format_compacted_summary_content(message.content)
-        elif isinstance(message.content, UserMemoryContent):
-            return format_user_memory_content(message.content)
-        elif isinstance(message.content, UserTextContent):
-            # Check if this is a slash command expanded prompt (via modifiers)
-            if message.modifiers and message.modifiers.is_slash_command:
-                # Slash command expanded prompts are markdown (LLM-generated)
-                from .utils import render_markdown_collapsible
-
-                return render_markdown_collapsible(
-                    message.content.text,
-                    "slash-command-content",
-                    line_threshold=20,
-                    preview_line_count=5,
-                )
-            else:
-                return format_user_text_model_content(message.content)
-        elif isinstance(message.content, UnknownContent):
-            return format_unknown_content(message.content)
-        # Future content types will be added here as they are migrated
-        return ""
+    def _format_tool_result_content(self, content: ToolResultContentModel) -> str:
+        """Format ToolResultContentModel with associated tool context."""
+        tool_result = ToolResultContent(
+            type="tool_result",
+            tool_use_id=content.tool_use_id,
+            content=content.content,
+            is_error=content.is_error,
+        )
+        return format_tool_result_content(
+            tool_result,
+            content.file_path,
+            content.tool_name,
+        )
 
     def _flatten_preorder(
         self, roots: list[TemplateMessage]
@@ -184,7 +156,7 @@ class HtmlRenderer(Renderer):
         flat: list[Tuple[TemplateMessage, str]] = []
 
         def visit(msg: TemplateMessage) -> None:
-            html = self._format_message_content(msg)
+            html = self.format_content(msg)
             flat.append((msg, html))
             for child in msg.children:
                 visit(child)

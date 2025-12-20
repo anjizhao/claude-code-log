@@ -18,8 +18,10 @@ from ..models import (
     IdeNotificationContent,
     IdeOpenedFile,
     IdeSelection,
+    ImageContent,
     SlashCommandContent,
     UserMemoryContent,
+    UserSlashCommandContent,
     UserTextContent,
 )
 from .tool_formatters import render_params_table
@@ -193,37 +195,37 @@ def format_user_text_model_content(content: UserTextContent) -> str:
     """Format UserTextContent model as HTML.
 
     Handles user text with optional IDE notifications, compacted summaries,
-    and memory input markers.
+    memory input markers, and inline images.
+
+    When `items` is set, iterates through the content items preserving order:
+    - TextContent: Rendered as preformatted text
+    - ImageContent: Rendered as inline <img> tag with base64 data URL
+    - IdeNotificationContent: Rendered as IDE notification blocks
+
+    Falls back to legacy text-only behavior when `items` is None.
 
     Args:
-        content: UserTextContent with text and optional flags/notifications
+        content: UserTextContent with text/items and optional flags/notifications
 
     Returns:
-        HTML string combining IDE notifications and main text content
+        HTML string combining all content items
     """
+    # Import here to avoid circular dependency
+    from .assistant_formatters import format_image_content
+
     parts: list[str] = []
 
-    # Add IDE notifications first if present
-    if content.ide_notifications:
-        notifications = format_ide_notification_content(content.ide_notifications)
-        parts.extend(notifications)
+    for item in content.items:
+        if isinstance(item, IdeNotificationContent):
+            notifications = format_ide_notification_content(item)
+            parts.extend(notifications)
+        elif isinstance(item, ImageContent):
+            parts.append(format_image_content(item))
+        else:  # TextContent
+            # Regular user text as preformatted
+            if item.text.strip():
+                parts.append(format_user_text_content(item.text))
 
-    # Format main text content based on type
-    if content.is_compacted:
-        # Render compacted summaries as markdown
-        text_html = render_markdown_collapsible(
-            content.text, "compacted-summary", line_threshold=20
-        )
-    elif content.is_memory_input:
-        # Render memory input as markdown
-        text_html = render_markdown_collapsible(
-            content.text, "user-memory", line_threshold=20
-        )
-    else:
-        # Regular user text as preformatted
-        text_html = format_user_text_content(content.text)
-
-    parts.append(text_html)
     return "\n".join(parts)
 
 
@@ -261,6 +263,26 @@ def format_user_memory_content(content: UserMemoryContent) -> str:
     """
     escaped_text = escape_html(content.memory_text)
     return f"<pre>{escaped_text}</pre>"
+
+
+def format_user_slash_command_content(content: UserSlashCommandContent) -> str:
+    """Format slash command expanded prompt (isMeta) as HTML.
+
+    These are LLM-generated instruction text from slash commands,
+    rendered as collapsible markdown.
+
+    Args:
+        content: UserSlashCommandContent with markdown text
+
+    Returns:
+        HTML string with collapsible markdown rendering
+    """
+    return render_markdown_collapsible(
+        content.text,
+        "slash-command",
+        line_threshold=30,
+        preview_line_count=10,
+    )
 
 
 def _format_opened_file(opened_file: IdeOpenedFile) -> str:
