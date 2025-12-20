@@ -1,15 +1,9 @@
-"""Pydantic models for Claude Code transcript JSON structures.
-
-Enhanced to leverage official Anthropic types where beneficial.
-"""
+"""Pydantic models for Claude Code transcript JSON structures."""
 
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Union, Optional, Literal
 
-from anthropic.types import Message as AnthropicMessage
-from anthropic.types import StopReason
-from anthropic.types import Usage as AnthropicUsage
 from pydantic import BaseModel, PrivateAttr
 
 
@@ -49,28 +43,6 @@ class MessageType(str, Enum):
     SYSTEM_INFO = "system-info"
     SYSTEM_WARNING = "system-warning"
     SYSTEM_ERROR = "system-error"
-
-
-@dataclass
-class MessageModifiers:
-    """Semantic modifiers that affect message display.
-
-    These are format-neutral flags that renderers can use to determine
-    how to display a message. HTML renderer converts these to CSS classes,
-    text renderer might use them for indentation or formatting.
-
-    The modifiers capture traits that were previously encoded in the
-    css_class string (e.g., "user sidechain slash-command").
-    """
-
-    is_sidechain: bool = False
-    is_slash_command: bool = False
-    is_command_output: bool = False
-    is_compacted: bool = False
-    is_error: bool = False
-    is_steering: bool = False
-    # System message level (mutually exclusive: info, warning, error, hook)
-    system_level: Optional[str] = None
 
 
 # =============================================================================
@@ -321,6 +293,17 @@ class UserTextContent(MessageContent):
     items: list[  # pyright: ignore[reportUnknownVariableType]
         TextContent | ImageContent | IdeNotificationContent
     ] = field(default_factory=list)
+
+
+@dataclass
+class UserSteeringContent(UserTextContent):
+    """Content for user steering prompts (queue-operation "remove").
+
+    These are user messages that steer the conversation by removing
+    items from the queue. Inherits from UserTextContent.
+    """
+
+    pass
 
 
 # =============================================================================
@@ -699,7 +682,7 @@ ToolInput = Union[
 
 
 class UsageInfo(BaseModel):
-    """Token usage information that extends Anthropic's Usage type to handle optional fields."""
+    """Token usage information for tracking API consumption."""
 
     input_tokens: Optional[int] = None
     cache_creation_input_tokens: Optional[int] = None
@@ -707,33 +690,6 @@ class UsageInfo(BaseModel):
     output_tokens: Optional[int] = None
     service_tier: Optional[str] = None
     server_tool_use: Optional[dict[str, Any]] = None
-
-    def to_anthropic_usage(self) -> Optional[AnthropicUsage]:
-        """Convert to Anthropic Usage type if both required fields are present."""
-        if self.input_tokens is not None and self.output_tokens is not None:
-            return AnthropicUsage(
-                input_tokens=self.input_tokens,
-                output_tokens=self.output_tokens,
-                cache_creation_input_tokens=self.cache_creation_input_tokens,
-                cache_read_input_tokens=self.cache_read_input_tokens,
-                service_tier=self.service_tier,  # type: ignore
-                server_tool_use=self.server_tool_use,  # type: ignore
-            )
-        return None
-
-    @classmethod
-    def from_anthropic_usage(cls, usage: AnthropicUsage) -> "UsageInfo":
-        """Create UsageInfo from Anthropic Usage."""
-        return cls(
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            cache_creation_input_tokens=usage.cache_creation_input_tokens,
-            cache_read_input_tokens=usage.cache_read_input_tokens,
-            service_tier=usage.service_tier,
-            server_tool_use=usage.server_tool_use.model_dump()
-            if usage.server_tool_use
-            else None,
-        )
 
 
 class ToolUseContent(BaseModel, MessageContent):
@@ -793,35 +749,16 @@ class UserMessage(BaseModel):
 
 
 class AssistantMessage(BaseModel):
-    """Assistant message model compatible with Anthropic's Message type."""
+    """Assistant message model."""
 
     id: str
     type: Literal["message"]
     role: Literal["assistant"]
     model: str
     content: list[ContentItem]
-    stop_reason: Optional[StopReason] = None
+    stop_reason: Optional[str] = None
     stop_sequence: Optional[str] = None
     usage: Optional[UsageInfo] = None
-
-    @classmethod
-    def from_anthropic_message(
-        cls, anthropic_msg: AnthropicMessage
-    ) -> "AssistantMessage":
-        """Create AssistantMessage from official Anthropic Message."""
-        from .parser import normalize_usage_info
-
-        # Convert Anthropic Message to our format, preserving official types where possible
-        return cls(
-            id=anthropic_msg.id,
-            type=anthropic_msg.type,
-            role=anthropic_msg.role,
-            model=anthropic_msg.model,
-            content=list(anthropic_msg.content),  # type: ignore[arg-type]
-            stop_reason=anthropic_msg.stop_reason,
-            stop_sequence=anthropic_msg.stop_sequence,
-            usage=normalize_usage_info(anthropic_msg.usage),
-        )
 
 
 # Tool result type - flexible to accept various result formats from JSONL
