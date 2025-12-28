@@ -1,30 +1,47 @@
 """HTML renderer implementation for Claude Code transcripts."""
 
-from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple, cast
 
 from ..cache import get_library_version
 from ..models import (
-    AssistantTextContent,
-    BashInputContent,
-    BashOutputContent,
-    CommandOutputContent,
-    CompactedSummaryContent,
-    DedupNoticeContent,
-    HookSummaryContent,
-    SessionHeaderContent,
-    SlashCommandContent,
-    SystemContent,
-    ThinkingContentModel,
-    ToolResultContent,
-    ToolResultContentModel,
-    ToolUseContent,
+    AssistantTextMessage,
+    BashInputMessage,
+    BashOutputMessage,
+    CommandOutputMessage,
+    CompactedSummaryMessage,
+    DedupNoticeMessage,
+    HookSummaryMessage,
+    SessionHeaderMessage,
+    SlashCommandMessage,
+    SystemMessage,
+    ThinkingMessage,
+    ToolUseMessage,
     TranscriptEntry,
-    UnknownContent,
-    UserMemoryContent,
-    UserSlashCommandContent,
-    UserTextContent,
+    UnknownMessage,
+    UserMemoryMessage,
+    UserSlashCommandMessage,
+    UserTextMessage,
+    # Tool input types
+    AskUserQuestionInput,
+    BashInput,
+    EditInput,
+    ExitPlanModeInput,
+    MultiEditInput,
+    ReadInput,
+    TaskInput,
+    TodoWriteInput,
+    ToolUseContent,
+    WriteInput,
+    # Tool output types
+    AskUserQuestionOutput,
+    BashOutput,
+    EditOutput,
+    ExitPlanModeOutput,
+    ReadOutput,
+    TaskOutput,
+    ToolResultContent,
+    WriteOutput,
 )
 from ..renderer import (
     Renderer,
@@ -33,7 +50,13 @@ from ..renderer import (
     prepare_projects_index,
     title_for_projects_index,
 )
-from ..renderer_timings import log_timing
+from ..renderer_timings import (
+    DEBUG_TIMING,
+    log_timing,
+    report_timing_statistics,
+    set_timing_var,
+)
+from ..utils import format_timestamp
 from .system_formatters import (
     format_dedup_notice_content,
     format_hook_summary_content,
@@ -55,8 +78,33 @@ from .assistant_formatters import (
     format_thinking_content,
     format_unknown_content,
 )
-from .tool_formatters import format_tool_result_content, format_tool_use_content
-from .utils import css_class_from_message, get_message_emoji, get_template_environment
+from .tool_formatters import (
+    format_askuserquestion_input,
+    format_askuserquestion_output,
+    format_bash_input,
+    format_bash_output,
+    format_edit_input,
+    format_edit_output,
+    format_exitplanmode_input,
+    format_exitplanmode_output,
+    format_multiedit_input,
+    format_read_input,
+    format_read_output,
+    format_task_input,
+    format_task_output,
+    format_todowrite_input,
+    format_tool_result_content_raw,
+    format_write_input,
+    format_write_output,
+    render_params_table,
+)
+from .utils import (
+    css_class_from_message,
+    escape_html,
+    get_message_emoji,
+    get_template_environment,
+    is_session_header,
+)
 
 if TYPE_CHECKING:
     from ..cache import CacheManager
@@ -94,77 +142,226 @@ def check_html_version(html_file_path: Path) -> Optional[str]:
 class HtmlRenderer(Renderer):
     """HTML renderer for Claude Code transcripts."""
 
-    def _build_dispatcher(self) -> dict[type, Callable[..., str]]:
-        """Build content type to HTML formatter mapping.
+    # -------------------------------------------------------------------------
+    # System Content Formatters
+    # -------------------------------------------------------------------------
 
-        Maps MessageContent subclasses to their HTML formatting functions.
-        Handlers receive the content directly (not the full TemplateMessage).
-        The cast to the correct type happens in format_content().
-        """
-        return {
-            # System content types
-            SystemContent: format_system_content,
-            HookSummaryContent: format_hook_summary_content,
-            SessionHeaderContent: format_session_header_content,
-            DedupNoticeContent: format_dedup_notice_content,
-            # User content types
-            SlashCommandContent: format_slash_command_content,
-            CommandOutputContent: format_command_output_content,
-            BashInputContent: format_bash_input_content,
-            BashOutputContent: format_bash_output_content,
-            CompactedSummaryContent: format_compacted_summary_content,
-            UserMemoryContent: format_user_memory_content,
-            UserSlashCommandContent: format_user_slash_command_content,
-            UserTextContent: format_user_text_model_content,
-            # Assistant content types
-            ThinkingContentModel: partial(format_thinking_content, line_threshold=10),
-            AssistantTextContent: format_assistant_text_content,
-            UnknownContent: format_unknown_content,
-            # Tool content types
-            ToolUseContent: format_tool_use_content,
-            ToolResultContentModel: self._format_tool_result_content,
-        }
+    def format_SystemMessage(self, message: SystemMessage) -> str:
+        return format_system_content(message)
 
-    def _format_tool_result_content(self, content: ToolResultContentModel) -> str:
-        """Format ToolResultContentModel with associated tool context."""
-        tool_result = ToolResultContent(
-            type="tool_result",
-            tool_use_id=content.tool_use_id,
-            content=content.content,
-            is_error=content.is_error,
+    def format_HookSummaryMessage(self, message: HookSummaryMessage) -> str:
+        return format_hook_summary_content(message)
+
+    def format_SessionHeaderMessage(self, message: SessionHeaderMessage) -> str:
+        return format_session_header_content(message)
+
+    def format_DedupNoticeMessage(self, message: DedupNoticeMessage) -> str:
+        return format_dedup_notice_content(message)
+
+    # -------------------------------------------------------------------------
+    # User Content Formatters
+    # -------------------------------------------------------------------------
+
+    def format_UserTextMessage(self, message: UserTextMessage) -> str:
+        return format_user_text_model_content(message)
+
+    def format_UserSlashCommandMessage(self, message: UserSlashCommandMessage) -> str:
+        return format_user_slash_command_content(message)
+
+    def format_SlashCommandMessage(self, message: SlashCommandMessage) -> str:
+        return format_slash_command_content(message)
+
+    def format_CommandOutputMessage(self, message: CommandOutputMessage) -> str:
+        return format_command_output_content(message)
+
+    def format_BashInputMessage(self, message: BashInputMessage) -> str:
+        return format_bash_input_content(message)
+
+    def format_BashOutputMessage(self, message: BashOutputMessage) -> str:
+        return format_bash_output_content(message)
+
+    def format_CompactedSummaryMessage(self, message: CompactedSummaryMessage) -> str:
+        return format_compacted_summary_content(message)
+
+    def format_UserMemoryMessage(self, message: UserMemoryMessage) -> str:
+        return format_user_memory_content(message)
+
+    # -------------------------------------------------------------------------
+    # Assistant Content Formatters
+    # -------------------------------------------------------------------------
+
+    def format_AssistantTextMessage(self, message: AssistantTextMessage) -> str:
+        return format_assistant_text_content(message)
+
+    def format_ThinkingMessage(self, message: ThinkingMessage) -> str:
+        return format_thinking_content(message, line_threshold=10)
+
+    def format_UnknownMessage(self, message: UnknownMessage) -> str:
+        return format_unknown_content(message)
+
+    # -------------------------------------------------------------------------
+    # Tool Input Formatters
+    # -------------------------------------------------------------------------
+
+    def format_BashInput(self, input: BashInput) -> str:
+        return format_bash_input(input)
+
+    def format_ReadInput(self, input: ReadInput) -> str:
+        return format_read_input(input)
+
+    def format_WriteInput(self, input: WriteInput) -> str:
+        return format_write_input(input)
+
+    def format_EditInput(self, input: EditInput) -> str:
+        return format_edit_input(input)
+
+    def format_MultiEditInput(self, input: MultiEditInput) -> str:
+        return format_multiedit_input(input)
+
+    def format_TaskInput(self, input: TaskInput) -> str:
+        return format_task_input(input)
+
+    def format_TodoWriteInput(self, input: TodoWriteInput) -> str:
+        return format_todowrite_input(input)
+
+    def format_AskUserQuestionInput(self, input: AskUserQuestionInput) -> str:
+        return format_askuserquestion_input(input)
+
+    def format_ExitPlanModeInput(self, input: ExitPlanModeInput) -> str:
+        return format_exitplanmode_input(input)
+
+    def format_ToolUseContent(self, content: ToolUseContent) -> str:
+        return render_params_table(content.input)
+
+    # -------------------------------------------------------------------------
+    # Tool Output Formatters
+    # -------------------------------------------------------------------------
+
+    def format_ReadOutput(self, output: ReadOutput) -> str:
+        return format_read_output(output)
+
+    def format_WriteOutput(self, output: WriteOutput) -> str:
+        return format_write_output(output)
+
+    def format_EditOutput(self, output: EditOutput) -> str:
+        return format_edit_output(output)
+
+    def format_BashOutput(self, output: BashOutput) -> str:
+        return format_bash_output(output)
+
+    def format_TaskOutput(self, output: TaskOutput) -> str:
+        return format_task_output(output)
+
+    def format_AskUserQuestionOutput(self, output: AskUserQuestionOutput) -> str:
+        return format_askuserquestion_output(output)
+
+    def format_ExitPlanModeOutput(self, output: ExitPlanModeOutput) -> str:
+        return format_exitplanmode_output(output)
+
+    def format_ToolResultContent(self, output: ToolResultContent) -> str:
+        return format_tool_result_content_raw(output)
+
+    # -------------------------------------------------------------------------
+    # Tool Input Title Methods (for Renderer.title_ToolUseMessage dispatch)
+    # -------------------------------------------------------------------------
+
+    def _tool_title(
+        self, message: TemplateMessage, icon: str, summary: Optional[str] = None
+    ) -> str:
+        """Format tool title with icon and optional summary."""
+        content = cast(ToolUseMessage, message.content)
+        escaped_name = escape_html(content.tool_name)
+        prefix = f"{icon} " if icon else ""
+        if summary:
+            escaped_summary = escape_html(summary)
+            return f"{prefix}{escaped_name} <span class='tool-summary'>{escaped_summary}</span>"
+        return f"{prefix}{escaped_name}"
+
+    def title_TodoWriteInput(self, message: TemplateMessage) -> str:  # noqa: ARG002
+        return "📝 Todo List"
+
+    def title_TaskInput(self, message: TemplateMessage) -> str:
+        content = cast(ToolUseMessage, message.content)
+        input = cast(TaskInput, content.input)
+        escaped_name = escape_html(content.tool_name)
+        escaped_subagent = (
+            escape_html(input.subagent_type) if input.subagent_type else ""
         )
-        return format_tool_result_content(
-            tool_result,
-            content.file_path,
-            content.tool_name,
-        )
+        if input.description and input.subagent_type:
+            escaped_desc = escape_html(input.description)
+            return f"🔧 {escaped_name} <span class='tool-summary'>{escaped_desc}</span> <span class='tool-subagent'>({escaped_subagent})</span>"
+        elif input.description:
+            return self._tool_title(message, "🔧", input.description)
+        elif input.subagent_type:
+            return f"🔧 {escaped_name} <span class='tool-subagent'>({escaped_subagent})</span>"
+        return f"🔧 {escaped_name}"
+
+    def title_EditInput(self, message: TemplateMessage) -> str:
+        input = cast(EditInput, cast(ToolUseMessage, message.content).input)
+        return self._tool_title(message, "📝", input.file_path)
+
+    def title_WriteInput(self, message: TemplateMessage) -> str:
+        input = cast(WriteInput, cast(ToolUseMessage, message.content).input)
+        return self._tool_title(message, "📝", input.file_path)
+
+    def title_ReadInput(self, message: TemplateMessage) -> str:
+        input = cast(ReadInput, cast(ToolUseMessage, message.content).input)
+        return self._tool_title(message, "📄", input.file_path)
+
+    def title_BashInput(self, message: TemplateMessage) -> str:
+        input = cast(BashInput, cast(ToolUseMessage, message.content).input)
+        return self._tool_title(message, "💻", input.description)
 
     def _flatten_preorder(
         self, roots: list[TemplateMessage]
-    ) -> list[Tuple[TemplateMessage, str]]:
+    ) -> Tuple[
+        list[Tuple[TemplateMessage, str, str, str]],
+        list[Tuple[str, list[Tuple[float, str]]]],
+    ]:
         """Flatten message tree via pre-order traversal, formatting each message.
 
-        Traverses the tree depth-first (pre-order), formats each message's
-        content to HTML, and builds a flat list of (message, html) pairs.
+        Traverses the tree depth-first (pre-order), computes title and formats
+        content to HTML, building a flat list of (message, title, html, timestamp) tuples.
+
+        Also tracks timing statistics for Markdown and Pygments operations when
+        DEBUG_TIMING is enabled.
 
         Args:
             roots: Root messages (typically session headers) with children populated
 
         Returns:
-            Flat list of (message, html_content) tuples in pre-order
+            Tuple of:
+            - Flat list of (message, title, html_content, formatted_timestamp) tuples
+            - Operation timing data for reporting: [("Markdown", timings), ("Pygments", timings)]
         """
-        flat: list[Tuple[TemplateMessage, str]] = []
+        flat: list[Tuple[TemplateMessage, str, str, str]] = []
+
+        # Initialize timing tracking for expensive operations
+        markdown_timings: list[Tuple[float, str]] = []
+        pygments_timings: list[Tuple[float, str]] = []
+        set_timing_var("_markdown_timings", markdown_timings)
+        set_timing_var("_pygments_timings", pygments_timings)
 
         def visit(msg: TemplateMessage) -> None:
+            # Update current message ID for timing tracking
+            set_timing_var("_current_msg_id", msg.message_id)
+            title = self.title_content(msg)
             html = self.format_content(msg)
-            flat.append((msg, html))
+            formatted_ts = format_timestamp(msg.meta.timestamp if msg.meta else None)
+            flat.append((msg, title, html, formatted_ts))
             for child in msg.children:
                 visit(child)
 
         for root in roots:
             visit(root)
 
-        return flat
+        # Return timing data for reporting
+        operation_timings: list[Tuple[str, list[Tuple[float, str]]]] = [
+            ("Markdown", markdown_timings),
+            ("Pygments", pygments_timings),
+        ]
+
+        return flat, operation_timings
 
     def generate(
         self,
@@ -185,7 +382,11 @@ class HtmlRenderer(Renderer):
 
         # Flatten tree via pre-order traversal, formatting content along the way
         with log_timing("Content formatting (pre-order)", t_start):
-            template_messages = self._flatten_preorder(root_messages)
+            template_messages, operation_timings = self._flatten_preorder(root_messages)
+
+        # Report timing statistics for Markdown/Pygments operations
+        if DEBUG_TIMING:
+            report_timing_statistics([], operation_timings)
 
         # Render template
         with log_timing("Template environment setup", t_start):
@@ -204,6 +405,7 @@ class HtmlRenderer(Renderer):
                     library_version=get_library_version(),
                     css_class_from_message=css_class_from_message,
                     get_message_emoji=get_message_emoji,
+                    is_session_header=is_session_header,
                 )
             )
 

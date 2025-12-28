@@ -25,7 +25,7 @@ def set_timing_var(name: str, value: Any) -> None:
     """Set a timing variable in the global timing data dict.
 
     Args:
-        name: Variable name (e.g., "_markdown_timings", "_pygments_timings", "_current_msg_uuid")
+        name: Variable name (e.g., "_markdown_timings", "_pygments_timings", "_current_msg_id")
         value: Value to set
     """
     if DEBUG_TIMING:
@@ -106,8 +106,8 @@ def timing_stat(list_name: str) -> Iterator[None]:
     finally:
         duration = time.time() - t_start
         if list_name in _timing_data:
-            msg_uuid = _timing_data.get("_current_msg_uuid", "")
-            _timing_data[list_name].append((duration, msg_uuid))
+            msg_id = _timing_data.get("_current_msg_id", "")
+            _timing_data[list_name].append((duration, msg_id))
 
 
 def report_timing_statistics(
@@ -117,30 +117,32 @@ def report_timing_statistics(
     """Report timing statistics for message rendering.
 
     Args:
-        message_timings: List of (duration, message_type, index, uuid) tuples
-        operation_timings: List of (name, timings) tuples where timings is a list of (duration, uuid)
+        message_timings: List of (duration, message_type, index, msg_id) tuples.
+                        Can be empty if only operation timings are being reported.
+        operation_timings: List of (name, timings) tuples where timings is a list of (duration, msg_id)
                           e.g., [("Markdown", markdown_timings), ("Pygments", pygments_timings)]
     """
-    if not message_timings:
-        return
+    # Report message loop statistics if available
+    if message_timings:
+        # Sort by duration descending
+        sorted_timings = sorted(message_timings, key=lambda x: x[0], reverse=True)
 
-    # Sort by duration descending
-    sorted_timings = sorted(message_timings, key=lambda x: x[0], reverse=True)
+        # Calculate statistics
+        total_msg_time = sum(t[0] for t in message_timings)
+        avg_time = total_msg_time / len(message_timings)
 
-    # Calculate statistics
-    total_msg_time = sum(t[0] for t in message_timings)
-    avg_time = total_msg_time / len(message_timings)
-
-    # Report slowest messages
-    print("\n[TIMING] Loop statistics:", flush=True)
-    print(f"[TIMING]   Total messages: {len(message_timings)}", flush=True)
-    print(f"[TIMING]   Average time per message: {avg_time * 1000:.1f}ms", flush=True)
-    print("[TIMING]   Slowest 10 messages:", flush=True)
-    for duration, msg_type, idx, uuid in sorted_timings[:10]:
+        # Report slowest messages
+        print("\n[TIMING] Loop statistics:", flush=True)
+        print(f"[TIMING]   Total messages: {len(message_timings)}", flush=True)
         print(
-            f"[TIMING]     Message {uuid} (#{idx}, {msg_type}): {duration * 1000:.1f}ms",
-            flush=True,
+            f"[TIMING]   Average time per message: {avg_time * 1000:.1f}ms", flush=True
         )
+        print("[TIMING]   Slowest 10 messages:", flush=True)
+        for duration, msg_type, idx, msg_id in sorted_timings[:10]:
+            print(
+                f"[TIMING]     Message {msg_id} (#{idx}, {msg_type}): {duration * 1000:.1f}ms",
+                flush=True,
+            )
 
     # Report operation-specific statistics
     for operation_name, timings in operation_timings:
@@ -151,8 +153,8 @@ def report_timing_statistics(
             print(f"[TIMING]   Total operations: {len(timings)}", flush=True)
             print(f"[TIMING]   Total time: {total_time:.3f}s", flush=True)
             print("[TIMING]   Slowest 10 operations:", flush=True)
-            for duration, uuid in sorted_ops[:10]:
+            for duration, msg_id in sorted_ops[:10]:
                 print(
-                    f"[TIMING]     {uuid}: {duration * 1000:.1f}ms",
+                    f"[TIMING]     {msg_id}: {duration * 1000:.1f}ms",
                     flush=True,
                 )

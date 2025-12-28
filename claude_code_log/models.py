@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Union, Optional, Literal
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, Field
 
 
 class MessageType(str, Enum):
@@ -46,6 +46,229 @@ class MessageType(str, Enum):
 
 
 # =============================================================================
+# JSONL Content Models (Pydantic)
+# =============================================================================
+# Low-level content types parsed from JSONL transcript entries.
+# These are defined first as they're the "input" types from transcript files.
+
+
+class TextContent(BaseModel):
+    """Text content block within a message content array."""
+
+    type: Literal["text"]
+    text: str
+
+
+class ImageSource(BaseModel):
+    """Base64-encoded image source data."""
+
+    type: Literal["base64"]
+    media_type: str
+    data: str
+
+
+class ImageContent(BaseModel):
+    """Image content.
+
+    This represents an image within a content array, not a standalone message.
+    Images are always part of UserTextMessage.items or AssistantTextMessage.items.
+    """
+
+    type: Literal["image"]
+    source: ImageSource
+
+
+class UsageInfo(BaseModel):
+    """Token usage information for tracking API consumption."""
+
+    input_tokens: Optional[int] = None
+    cache_creation_input_tokens: Optional[int] = None
+    cache_read_input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    service_tier: Optional[str] = None
+    server_tool_use: Optional[dict[str, Any]] = None
+
+
+class ToolUseContent(BaseModel):
+    type: Literal["tool_use"]
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
+class ToolResultContent(BaseModel):
+    type: Literal["tool_result"]
+    tool_use_id: str
+    content: Union[str, list[dict[str, Any]]]
+    is_error: Optional[bool] = None
+    agentId: Optional[str] = None  # Reference to agent file for sub-agent messages
+
+
+class ThinkingContent(BaseModel):
+    type: Literal["thinking"]
+    thinking: str
+    signature: Optional[str] = None
+
+
+# Content item types that appear in message content arrays
+ContentItem = Union[
+    TextContent,
+    ToolUseContent,
+    ToolResultContent,
+    ThinkingContent,
+    ImageContent,
+]
+
+
+class UserMessageModel(BaseModel):
+    role: Literal["user"]
+    content: list[ContentItem]
+    usage: Optional["UsageInfo"] = (
+        None  # For type compatibility with AssistantMessageModel
+    )
+
+
+class AssistantMessageModel(BaseModel):
+    """Assistant message model."""
+
+    id: str
+    type: Literal["message"]
+    role: Literal["assistant"]
+    model: str
+    content: list[ContentItem]
+    stop_reason: Optional[str] = None
+    stop_sequence: Optional[str] = None
+    usage: Optional[UsageInfo] = None
+
+
+# Tool result type - flexible to accept various result formats from JSONL
+# The specific parsing/formatting happens in tool_formatters.py using
+# ReadOutput, EditOutput, etc. (see Tool Output Content Models section)
+ToolUseResult = Union[
+    str,
+    list[Any],  # Covers list[TodoWriteItem], list[ContentItem], etc.
+    dict[str, Any],  # Covers structured results
+]
+
+
+class BaseTranscriptEntry(BaseModel):
+    parentUuid: Optional[str]
+    isSidechain: bool
+    userType: str
+    cwd: str
+    sessionId: str
+    version: str
+    uuid: str
+    timestamp: str
+    isMeta: Optional[bool] = None
+    agentId: Optional[str] = None  # Agent ID for sidechain messages
+    gitBranch: Optional[str] = None  # Git branch name when available
+
+
+class UserTranscriptEntry(BaseTranscriptEntry):
+    type: Literal["user"]
+    message: UserMessageModel
+    toolUseResult: Optional[ToolUseResult] = None
+    agentId: Optional[str] = None  # From toolUseResult when present
+
+
+class AssistantTranscriptEntry(BaseTranscriptEntry):
+    type: Literal["assistant"]
+    message: AssistantMessageModel
+    requestId: Optional[str] = None
+
+
+class SummaryTranscriptEntry(BaseModel):
+    type: Literal["summary"]
+    summary: str
+    leafUuid: str
+    cwd: Optional[str] = None
+    sessionId: None = None  # Summaries don't have a sessionId
+
+
+class SystemTranscriptEntry(BaseTranscriptEntry):
+    """System messages like warnings, notifications, hook summaries, etc."""
+
+    type: Literal["system"]
+    content: Optional[str] = None
+    subtype: Optional[str] = None  # e.g., "stop_hook_summary"
+    level: Optional[str] = None  # e.g., "warning", "info", "error"
+    # Hook summary fields (for subtype="stop_hook_summary")
+    hasOutput: Optional[bool] = None
+    hookErrors: Optional[list[str]] = None
+    hookInfos: Optional[list[dict[str, Any]]] = None
+    preventedContinuation: Optional[bool] = None
+
+
+class QueueOperationTranscriptEntry(BaseModel):
+    """Queue operations (enqueue/dequeue/remove) for message queueing tracking.
+
+    enqueue/dequeue are internal operations that track when messages are queued and dequeued.
+    They are parsed but not rendered, as the content duplicates actual user messages.
+
+    'remove' operations are out-of-band user inputs made visible to the agent while working
+    for "steering" purposes. These should be rendered as user messages with a 'steering' CSS class.
+    Content can be a list of ContentItems or a simple string (for 'remove' operations).
+    """
+
+    type: Literal["queue-operation"]
+    operation: Literal["enqueue", "dequeue", "remove", "popAll"]
+    timestamp: str
+    sessionId: str
+    content: Optional[Union[list[ContentItem], str]] = (
+        None  # List for enqueue, str for remove/popAll
+    )
+
+
+TranscriptEntry = Union[
+    UserTranscriptEntry,
+    AssistantTranscriptEntry,
+    SummaryTranscriptEntry,
+    SystemTranscriptEntry,
+    QueueOperationTranscriptEntry,
+]
+
+
+# =============================================================================
+# Message Metadata
+# =============================================================================
+# Common metadata fields extracted from transcript entries.
+
+
+@dataclass
+class MessageMeta:
+    """Common metadata extracted from transcript entries.
+
+    These fields are shared across all message types and are used to create
+    the TemplateMessage wrapper for rendering.
+
+    Note: formatted_timestamp is computed at render time, not stored here.
+    """
+
+    # Identity fields
+    session_id: str
+    timestamp: str  # Raw ISO timestamp
+    uuid: str
+    parent_uuid: Optional[str] = None
+
+    # Context fields
+    is_sidechain: bool = False
+    is_meta: bool = False  # User slash command (isMeta=True in transcript)
+    agent_id: Optional[str] = None
+    cwd: str = ""
+    git_branch: Optional[str] = None
+
+    @classmethod
+    def empty(cls, uuid: str = "") -> "MessageMeta":
+        """Create a placeholder MessageMeta with empty/default values.
+
+        Useful for cases where full metadata isn't available at creation time
+        (e.g., SummaryTranscriptEntry where session_id is matched later).
+        """
+        return cls(session_id="", timestamp="", uuid=uuid)
+
+
+# =============================================================================
 # Message Content Models
 # =============================================================================
 # Structured content models for format-neutral message representation.
@@ -53,21 +276,43 @@ class MessageType(str, Enum):
 # renderers (HTML, text, etc.) to format the content appropriately.
 
 
+@dataclass
 class MessageContent:
     """Base class for structured message content.
 
     Subclasses represent specific content types that renderers can format
     appropriately for their output format.
 
-    Note: This is a plain class (not dataclass) to allow Pydantic BaseModel
-    subclasses like ToolUseContent and ImageContent to inherit from it.
+    The `meta` field is required and first positional, ensuring all message
+    content always has associated metadata. Use MessageMeta.empty() when
+    full metadata isn't available at creation time.
+
+    Note: Render-time relationship data (pairing, hierarchy, children) is stored
+    on TemplateMessage, not here. MessageContent is pure transcript data.
     """
 
-    pass
+    meta: MessageMeta
+
+    @property
+    def message_type(self) -> str:
+        """Return the message type identifier for this content.
+
+        Subclasses MUST override this to return their specific type.
+        This is used for CSS classes, filtering, and type-based rendering.
+        """
+        raise NotImplementedError("Subclasses must implement message_type property")
+
+    @property
+    def has_markdown(self) -> bool:
+        """Whether this content should be rendered as markdown.
+
+        Subclasses that contain markdown content should override to return True.
+        """
+        return False
 
 
 @dataclass
-class SystemContent(MessageContent):
+class SystemMessage(MessageContent):
     """System message with level indicator.
 
     Used for info, warning, and error system messages.
@@ -75,6 +320,10 @@ class SystemContent(MessageContent):
 
     level: str  # "info", "warning", "error"
     text: str  # Raw text content (may contain ANSI codes)
+
+    @property
+    def message_type(self) -> str:
+        return "system"
 
 
 @dataclass
@@ -86,7 +335,7 @@ class HookInfo:
 
 
 @dataclass
-class HookSummaryContent(MessageContent):
+class HookSummaryMessage(MessageContent):
     """Hook execution summary.
 
     Used for subtype="stop_hook_summary" system messages.
@@ -95,6 +344,10 @@ class HookSummaryContent(MessageContent):
     has_output: bool
     hook_errors: list[str]  # Error messages from hooks
     hook_infos: list[HookInfo]  # Info about each hook executed
+
+    @property
+    def message_type(self) -> str:
+        return "system"
 
 
 # =============================================================================
@@ -105,7 +358,7 @@ class HookSummaryContent(MessageContent):
 
 
 @dataclass
-class SlashCommandContent(MessageContent):
+class SlashCommandMessage(MessageContent):
     """Content for slash command invocations (e.g., /context, /model).
 
     These are user messages containing command-name, command-args, and
@@ -116,9 +369,13 @@ class SlashCommandContent(MessageContent):
     command_args: str
     command_contents: str
 
+    @property
+    def message_type(self) -> str:
+        return "user"
+
 
 @dataclass
-class CommandOutputContent(MessageContent):
+class CommandOutputMessage(MessageContent):
     """Content for local command output (e.g., output from /context).
 
     These are user messages containing local-command-stdout tags.
@@ -127,9 +384,13 @@ class CommandOutputContent(MessageContent):
     stdout: str
     is_markdown: bool  # True if content appears to be markdown
 
+    @property
+    def message_type(self) -> str:
+        return "user"
+
 
 @dataclass
-class BashInputContent(MessageContent):
+class BashInputMessage(MessageContent):
     """Content for inline bash commands in user messages.
 
     These are user messages containing bash-input tags.
@@ -137,9 +398,13 @@ class BashInputContent(MessageContent):
 
     command: str
 
+    @property
+    def message_type(self) -> str:
+        return "bash-input"
+
 
 @dataclass
-class BashOutputContent(MessageContent):
+class BashOutputMessage(MessageContent):
     """Content for bash command output.
 
     These are user messages containing bash-stdout and/or bash-stderr tags.
@@ -148,24 +413,17 @@ class BashOutputContent(MessageContent):
     stdout: Optional[str] = None  # Raw stdout content (may contain ANSI codes)
     stderr: Optional[str] = None  # Raw stderr content (may contain ANSI codes)
 
+    @property
+    def message_type(self) -> str:
+        return "bash-output"
 
-@dataclass
-class ToolResultContentModel(MessageContent):
-    """Content model for tool results with rendering context.
 
-    Wraps ToolResultContent with additional context needed for rendering,
-    such as the associated tool name and file path.
-    """
-
-    tool_use_id: str
-    content: Any  # Union[str, list[dict[str, Any]]]
-    is_error: bool = False
-    tool_name: Optional[str] = None  # Name of the tool that produced this result
-    file_path: Optional[str] = None  # File path for Read/Edit/Write tools
+# Note: ToolResultMessage and ToolUseMessage are defined in the
+# "Tool Message Models" section (before Tool Input Models).
 
 
 @dataclass
-class CompactedSummaryContent(MessageContent):
+class CompactedSummaryMessage(MessageContent):
     """Content for compacted session summaries.
 
     These are user messages that contain previous conversation context
@@ -176,9 +434,17 @@ class CompactedSummaryContent(MessageContent):
 
     summary_text: str
 
+    @property
+    def message_type(self) -> str:
+        return "user"
+
+    @property
+    def has_markdown(self) -> bool:
+        return True
+
 
 @dataclass
-class UserMemoryContent(MessageContent):
+class UserMemoryMessage(MessageContent):
     """Content for user memory input.
 
     These are user messages containing user-memory-input tags.
@@ -188,9 +454,13 @@ class UserMemoryContent(MessageContent):
 
     memory_text: str
 
+    @property
+    def message_type(self) -> str:
+        return "user"
+
 
 @dataclass
-class UserSlashCommandContent(MessageContent):
+class UserSlashCommandMessage(MessageContent):
     """Content for slash command expanded prompts (isMeta=True).
 
     These are LLM-generated instruction text from slash commands.
@@ -199,6 +469,10 @@ class UserSlashCommandContent(MessageContent):
     """
 
     text: str
+
+    @property
+    def message_type(self) -> str:
+        return "user"
 
 
 @dataclass
@@ -227,10 +501,13 @@ class IdeDiagnostic:
 
 
 @dataclass
-class IdeNotificationContent(MessageContent):
-    """Content for IDE notification tags.
+class IdeNotificationContent:
+    """Content for IDE notification tags (embedded within user messages).
 
-    These are user messages containing IDE notification tags like:
+    This is NOT a MessageContent subclass - it's used as an item within
+    UserTextMessage.items alongside TextContent and ImageContent.
+
+    Represents IDE notification tags like:
     - <ide_opened_file>: File open notifications
     - <ide_selection>: Code selection notifications
     - <post-tool-use-hook><ide_diagnostics>: Diagnostic JSON arrays
@@ -244,41 +521,8 @@ class IdeNotificationContent(MessageContent):
     remaining_text: str  # Text after notifications extracted
 
 
-# =============================================================================
-# Content Item Models (Pydantic)
-# =============================================================================
-# These are content items that appear within message content arrays.
-# Defined here before the dataclass models that reference them.
-
-
-class TextContent(BaseModel):
-    """Text content block within a message content array."""
-
-    type: Literal["text"]
-    text: str
-
-
-class ImageSource(BaseModel):
-    """Base64-encoded image source data."""
-
-    type: Literal["base64"]
-    media_type: str
-    data: str
-
-
-class ImageContent(BaseModel):
-    """Image content from the Anthropic API.
-
-    This represents an image within a content array, not a standalone message.
-    Images are always part of UserTextContent.items or AssistantTextContent.items.
-    """
-
-    type: Literal["image"]
-    source: ImageSource
-
-
 @dataclass
-class UserTextContent(MessageContent):
+class UserTextMessage(MessageContent):
     """Content for user text with interleaved images and IDE notifications.
 
     The `items` field preserves the original order of content:
@@ -294,13 +538,20 @@ class UserTextContent(MessageContent):
         TextContent | ImageContent | IdeNotificationContent
     ] = field(default_factory=list)
 
+    # Cached raw text extracted from items (for dedup matching, simple renderers)
+    raw_text_content: Optional[str] = None
+
+    @property
+    def message_type(self) -> str:
+        return "user"
+
 
 @dataclass
-class UserSteeringContent(UserTextContent):
+class UserSteeringMessage(UserTextMessage):
     """Content for user steering prompts (queue-operation "remove").
 
     These are user messages that steer the conversation by removing
-    items from the queue. Inherits from UserTextContent.
+    items from the queue. Inherits from UserTextMessage.
     """
 
     pass
@@ -314,7 +565,7 @@ class UserSteeringContent(UserTextContent):
 
 
 @dataclass
-class AssistantTextContent(MessageContent):
+class AssistantTextMessage(MessageContent):
     """Content for assistant text messages with interleaved images.
 
     These are the text portions of assistant messages that get
@@ -332,10 +583,24 @@ class AssistantTextContent(MessageContent):
         TextContent | ImageContent
     ] = field(default_factory=list)
 
+    # Cached raw text extracted from items (for dedup matching, simple renderers)
+    raw_text_content: Optional[str] = None
+
+    # Token usage string (formatted from UsageInfo when available)
+    token_usage: Optional[str] = None
+
+    @property
+    def message_type(self) -> str:
+        return "assistant"
+
+    @property
+    def has_markdown(self) -> bool:
+        return True
+
 
 @dataclass
-class ThinkingContentModel(MessageContent):
-    """Content for assistant thinking/reasoning blocks.
+class ThinkingMessage(MessageContent):
+    """Message for assistant thinking/reasoning blocks.
 
     These are the <thinking> blocks that show the assistant's
     internal reasoning process.
@@ -347,9 +612,24 @@ class ThinkingContentModel(MessageContent):
     thinking: str
     signature: Optional[str] = None
 
+    # Token usage string (formatted from UsageInfo when available)
+    token_usage: Optional[str] = None
+
+    @property
+    def message_type(self) -> str:
+        return "thinking"
+
+    @property
+    def has_markdown(self) -> bool:
+        return True
+
+
+# Note: ToolUseMessage is also an assistant content type, defined in
+# "Tool Message Models" section (before Tool Input Models).
+
 
 @dataclass
-class UnknownContent(MessageContent):
+class UnknownMessage(MessageContent):
     """Content for unknown/unrecognized content types.
 
     Used as a fallback when encountering content types that don't have
@@ -358,126 +638,9 @@ class UnknownContent(MessageContent):
 
     type_name: str  # The name/description of the unknown type
 
-
-# =============================================================================
-# Tool Output Content Models
-# =============================================================================
-# Structured content models for tool results (symmetric with Tool Input Models).
-# These provide format-neutral representation of tool outputs that renderers
-# can format appropriately.
-
-
-@dataclass
-class ReadOutput(MessageContent):
-    """Parsed Read tool output.
-
-    Represents the result of reading a file with optional line range.
-    Symmetric with ReadInput for tool_use → tool_result pairing.
-    """
-
-    file_path: str
-    content: str  # File content (may be truncated)
-    start_line: int  # 1-based starting line number
-    num_lines: int  # Number of lines in content
-    total_lines: int  # Total lines in file
-    is_truncated: bool  # Whether content was truncated
-    system_reminder: Optional[str] = None  # Embedded system reminder text
-
-
-@dataclass
-class WriteOutput(MessageContent):
-    """Parsed Write tool output.
-
-    Symmetric with WriteInput for tool_use → tool_result pairing.
-
-    TODO: Not currently used - tool results handled as raw strings.
-    """
-
-    file_path: str
-    success: bool
-    message: str  # Success or error message
-
-
-@dataclass
-class EditDiff:
-    """Single diff hunk for edit operations."""
-
-    old_text: str
-    new_text: str
-
-
-@dataclass
-class EditOutput(MessageContent):
-    """Parsed Edit tool output.
-
-    Contains diff information for file edits.
-    Symmetric with EditInput for tool_use → tool_result pairing.
-    """
-
-    file_path: str
-    success: bool
-    diffs: list[EditDiff]  # Changes made
-    message: str  # Result message or code snippet
-    start_line: int = 1  # Starting line number for code display
-
-
-@dataclass
-class BashOutput(MessageContent):
-    """Parsed Bash tool output.
-
-    Symmetric with BashInput for tool_use → tool_result pairing.
-
-    TODO: Not currently used - tool results handled as raw strings.
-    """
-
-    stdout: str
-    stderr: str
-    exit_code: Optional[int]
-    interrupted: bool
-    is_image: bool  # True if output contains image data
-
-
-@dataclass
-class TaskOutput(MessageContent):
-    """Parsed Task (sub-agent) tool output.
-
-    Symmetric with TaskInput for tool_use → tool_result pairing.
-
-    TODO: Not currently used - tool results handled as raw strings.
-    """
-
-    agent_id: Optional[str]
-    result: str  # Agent's response
-    is_background: bool
-
-
-@dataclass
-class GlobOutput(MessageContent):
-    """Parsed Glob tool output.
-
-    Symmetric with GlobInput for tool_use → tool_result pairing.
-
-    TODO: Not currently used - tool results handled as raw strings.
-    """
-
-    pattern: str
-    files: list[str]  # Matching file paths
-    truncated: bool  # Whether list was truncated
-
-
-@dataclass
-class GrepOutput(MessageContent):
-    """Parsed Grep tool output.
-
-    Symmetric with GrepInput for tool_use → tool_result pairing.
-
-    TODO: Not currently used - tool results handled as raw strings.
-    """
-
-    pattern: str
-    matches: list[str]  # Matching lines/files
-    output_mode: str  # "content", "files_with_matches", or "count"
-    truncated: bool
+    @property
+    def message_type(self) -> str:
+        return "unknown"
 
 
 # =============================================================================
@@ -488,7 +651,7 @@ class GrepOutput(MessageContent):
 
 
 @dataclass
-class SessionHeaderContent(MessageContent):
+class SessionHeaderMessage(MessageContent):
     """Content for session headers in transcript rendering.
 
     Represents the header displayed at the start of each session
@@ -499,19 +662,81 @@ class SessionHeaderContent(MessageContent):
     session_id: str
     summary: Optional[str] = None
 
+    @property
+    def message_type(self) -> str:
+        return "session_header"
+
 
 @dataclass
-class DedupNoticeContent(MessageContent):
+class DedupNoticeMessage(MessageContent):
     """Content for deduplication notices.
 
     Displayed when content is deduplicated (e.g., sidechain assistant
-    text that duplicates the Task tool result).
+    text that duplicates the Task tool result). Styled as assistant message
+    since it replaces sidechain assistant content.
+
+    The `original` field preserves the original AssistantTextMessage so renderers
+    can optionally show the full content instead of the link.
     """
 
     notice_text: str
-    target_uuid: Optional[str] = None  # UUID of target message (for resolving link)
-    target_message_id: Optional[str] = None  # Resolved message ID for anchor link
+    target_message_id: Optional[str] = None  # Message ID for anchor link
     original_text: Optional[str] = None  # Original duplicated content (for debugging)
+    original: Optional["AssistantTextMessage"] = None  # Original message for renderers
+
+    @property
+    def message_type(self) -> str:
+        return "assistant"  # Styled as assistant (replaces sidechain assistant)
+
+
+# =============================================================================
+# Tool Message Models
+# =============================================================================
+# High-level message wrappers for tool invocations and results.
+# These wrap the specialized Tool Input/Output models for rendering.
+
+
+@dataclass
+class ToolResultMessage(MessageContent):
+    """Message for tool results with rendering context.
+
+    Wraps ToolResultContent or specialized output with additional context
+    needed for rendering, such as the associated tool name and file path.
+    """
+
+    tool_use_id: str
+    output: (
+        "ToolOutput"  # Specialized (ReadOutput, etc.) or generic (ToolResultContent)
+    )
+    is_error: bool = False
+    tool_name: Optional[str] = None  # Name of the tool that produced this result
+    file_path: Optional[str] = None  # File path for Read/Edit/Write tools
+
+    @property
+    def message_type(self) -> str:
+        return "tool_result"
+
+    @property
+    def has_markdown(self) -> bool:
+        """TaskOutput results contain markdown (agent responses)."""
+        return isinstance(self.output, TaskOutput)
+
+
+@dataclass
+class ToolUseMessage(MessageContent):
+    """Message for tool invocations.
+
+    Wraps ToolUseContent with the parsed input for specialized formatting.
+    Falls back to the original ToolUseContent when no specialized parser exists.
+    """
+
+    input: "ToolInput"  # Specialized (BashInput, etc.) or ToolUseContent fallback
+    tool_use_id: str  # From ToolUseContent.id
+    tool_name: str  # From ToolUseContent.name
+
+    @property
+    def message_type(self) -> str:
+        return "tool_use"
 
 
 # =============================================================================
@@ -642,7 +867,9 @@ class AskUserQuestionItem(BaseModel):
 
     question: str = ""
     header: Optional[str] = None
-    options: list[AskUserQuestionOption] = []
+    options: list[AskUserQuestionOption] = Field(
+        default_factory=lambda: list[AskUserQuestionOption]()
+    )
     multiSelect: bool = False
 
 
@@ -652,7 +879,9 @@ class AskUserQuestionInput(BaseModel):
     Supports both modern format (questions list) and legacy format (single question).
     """
 
-    questions: list[AskUserQuestionItem] = []
+    questions: list[AskUserQuestionItem] = Field(
+        default_factory=lambda: list[AskUserQuestionItem]()
+    )
     question: Optional[str] = None  # Legacy single question format
 
 
@@ -677,172 +906,164 @@ ToolInput = Union[
     TodoWriteInput,
     AskUserQuestionInput,
     ExitPlanModeInput,
-    dict[str, Any],  # Fallback for unknown tools
+    ToolUseContent,  # Generic fallback when no specialized parser
 ]
 
 
-class UsageInfo(BaseModel):
-    """Token usage information for tracking API consumption."""
-
-    input_tokens: Optional[int] = None
-    cache_creation_input_tokens: Optional[int] = None
-    cache_read_input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
-    service_tier: Optional[str] = None
-    server_tool_use: Optional[dict[str, Any]] = None
+# =============================================================================
+# Tool Output Models
+# =============================================================================
+# Typed models for tool outputs (symmetric with Tool Input Models).
+# These are data containers stored inside ToolResultMessage.output,
+# NOT standalone message types (so they don't inherit from MessageContent).
 
 
-class ToolUseContent(BaseModel, MessageContent):
-    type: Literal["tool_use"]
-    id: str
-    name: str
-    input: dict[str, Any]
-    _parsed_input: Optional["ToolInput"] = PrivateAttr(
-        default=None
-    )  # Cached parsed input
+@dataclass
+class ReadOutput:
+    """Parsed Read tool output.
 
-    @property
-    def parsed_input(self) -> "ToolInput":
-        """Get typed input model if available, otherwise return raw dict.
-
-        Lazily parses the input dict into a typed model.
-        Uses strict validation first, then lenient parsing if available.
-        Result is cached for subsequent accesses.
-        """
-        if self._parsed_input is None:
-            from .parser import parse_tool_input
-
-            object.__setattr__(
-                self, "_parsed_input", parse_tool_input(self.name, self.input)
-            )
-        return self._parsed_input  # type: ignore[return-value]
-
-
-class ToolResultContent(BaseModel):
-    type: Literal["tool_result"]
-    tool_use_id: str
-    content: Union[str, list[dict[str, Any]]]
-    is_error: Optional[bool] = None
-    agentId: Optional[str] = None  # Reference to agent file for sub-agent messages
-
-
-class ThinkingContent(BaseModel):
-    type: Literal["thinking"]
-    thinking: str
-    signature: Optional[str] = None
-
-
-# Content item types that appear in message content arrays
-ContentItem = Union[
-    TextContent,
-    ToolUseContent,
-    ToolResultContent,
-    ThinkingContent,
-    ImageContent,
-]
-
-
-class UserMessage(BaseModel):
-    role: Literal["user"]
-    content: list[ContentItem]
-    usage: Optional["UsageInfo"] = None  # For type compatibility with AssistantMessage
-
-
-class AssistantMessage(BaseModel):
-    """Assistant message model."""
-
-    id: str
-    type: Literal["message"]
-    role: Literal["assistant"]
-    model: str
-    content: list[ContentItem]
-    stop_reason: Optional[str] = None
-    stop_sequence: Optional[str] = None
-    usage: Optional[UsageInfo] = None
-
-
-# Tool result type - flexible to accept various result formats from JSONL
-# The specific parsing/formatting happens in tool_formatters.py using
-# ReadOutput, EditOutput, etc. (see Tool Output Content Models section)
-ToolUseResult = Union[
-    str,
-    list[Any],  # Covers list[TodoWriteItem], list[ContentItem], etc.
-    dict[str, Any],  # Covers structured results
-]
-
-
-class BaseTranscriptEntry(BaseModel):
-    parentUuid: Optional[str]
-    isSidechain: bool
-    userType: str
-    cwd: str
-    sessionId: str
-    version: str
-    uuid: str
-    timestamp: str
-    isMeta: Optional[bool] = None
-    agentId: Optional[str] = None  # Agent ID for sidechain messages
-
-
-class UserTranscriptEntry(BaseTranscriptEntry):
-    type: Literal["user"]
-    message: UserMessage
-    toolUseResult: Optional[ToolUseResult] = None
-    agentId: Optional[str] = None  # From toolUseResult when present
-
-
-class AssistantTranscriptEntry(BaseTranscriptEntry):
-    type: Literal["assistant"]
-    message: AssistantMessage
-    requestId: Optional[str] = None
-
-
-class SummaryTranscriptEntry(BaseModel):
-    type: Literal["summary"]
-    summary: str
-    leafUuid: str
-    cwd: Optional[str] = None
-    sessionId: None = None  # Summaries don't have a sessionId
-
-
-class SystemTranscriptEntry(BaseTranscriptEntry):
-    """System messages like warnings, notifications, hook summaries, etc."""
-
-    type: Literal["system"]
-    content: Optional[str] = None
-    subtype: Optional[str] = None  # e.g., "stop_hook_summary"
-    level: Optional[str] = None  # e.g., "warning", "info", "error"
-    # Hook summary fields (for subtype="stop_hook_summary")
-    hasOutput: Optional[bool] = None
-    hookErrors: Optional[list[str]] = None
-    hookInfos: Optional[list[dict[str, Any]]] = None
-    preventedContinuation: Optional[bool] = None
-
-
-class QueueOperationTranscriptEntry(BaseModel):
-    """Queue operations (enqueue/dequeue/remove) for message queueing tracking.
-
-    enqueue/dequeue are internal operations that track when messages are queued and dequeued.
-    They are parsed but not rendered, as the content duplicates actual user messages.
-
-    'remove' operations are out-of-band user inputs made visible to the agent while working
-    for "steering" purposes. These should be rendered as user messages with a 'steering' CSS class.
-    Content can be a list of ContentItems or a simple string (for 'remove' operations).
+    Represents the result of reading a file with optional line range.
+    Symmetric with ReadInput for tool_use → tool_result pairing.
     """
 
-    type: Literal["queue-operation"]
-    operation: Literal["enqueue", "dequeue", "remove", "popAll"]
-    timestamp: str
-    sessionId: str
-    content: Optional[Union[list[ContentItem], str]] = (
-        None  # List for enqueue, str for remove/popAll
-    )
+    file_path: str
+    content: str  # File content (may be truncated)
+    start_line: int  # 1-based starting line number
+    num_lines: int  # Number of lines in content
+    total_lines: int  # Total lines in file
+    is_truncated: bool  # Whether content was truncated
+    system_reminder: Optional[str] = None  # Embedded system reminder text
 
 
-TranscriptEntry = Union[
-    UserTranscriptEntry,
-    AssistantTranscriptEntry,
-    SummaryTranscriptEntry,
-    SystemTranscriptEntry,
-    QueueOperationTranscriptEntry,
+@dataclass
+class WriteOutput:
+    """Parsed Write tool output.
+
+    Symmetric with WriteInput for tool_use → tool_result pairing.
+    """
+
+    file_path: str
+    success: bool
+    message: str  # First line acknowledgment (truncated from full output)
+
+
+@dataclass
+class EditDiff:
+    """Single diff hunk for edit operations."""
+
+    old_text: str
+    new_text: str
+
+
+@dataclass
+class EditOutput:
+    """Parsed Edit tool output.
+
+    Contains diff information for file edits.
+    Symmetric with EditInput for tool_use → tool_result pairing.
+    """
+
+    file_path: str
+    success: bool
+    diffs: list[EditDiff]  # Changes made
+    message: str  # Result message or code snippet
+    start_line: int = 1  # Starting line number for code display
+
+
+@dataclass
+class BashOutput:
+    """Parsed Bash tool output.
+
+    Symmetric with BashInput for tool_use → tool_result pairing.
+    Contains the output with ANSI flag for terminal formatting.
+    """
+
+    content: str  # Output content (stdout/stderr combined)
+    has_ansi: bool  # True if content contains ANSI escape sequences
+
+
+@dataclass
+class TaskOutput:
+    """Parsed Task (sub-agent) tool output.
+
+    Symmetric with TaskInput for tool_use → tool_result pairing.
+    Contains the agent's final response as markdown.
+    """
+
+    result: str  # Agent's response (markdown)
+
+
+@dataclass
+class GlobOutput:
+    """Parsed Glob tool output.
+
+    Symmetric with GlobInput for tool_use → tool_result pairing.
+
+    TODO: Not currently used - tool results handled as raw strings.
+    """
+
+    pattern: str
+    files: list[str]  # Matching file paths
+    truncated: bool  # Whether list was truncated
+
+
+@dataclass
+class GrepOutput:
+    """Parsed Grep tool output.
+
+    Symmetric with GrepInput for tool_use → tool_result pairing.
+
+    TODO: Not currently used - tool results handled as raw strings.
+    """
+
+    pattern: str
+    matches: list[str]  # Matching lines/files
+    output_mode: str  # "content", "files_with_matches", or "count"
+    truncated: bool
+
+
+@dataclass
+class AskUserQuestionAnswer:
+    """Single Q&A pair from AskUserQuestion result."""
+
+    question: str
+    answer: str
+
+
+@dataclass
+class AskUserQuestionOutput:
+    """Parsed AskUserQuestion tool output.
+
+    Symmetric with AskUserQuestionInput for tool_use → tool_result pairing.
+    Contains the Q&A pairs extracted from the result message.
+    """
+
+    answers: list[AskUserQuestionAnswer]  # Q&A pairs
+    raw_message: str  # Original message for fallback
+
+
+@dataclass
+class ExitPlanModeOutput:
+    """Parsed ExitPlanMode tool output.
+
+    Symmetric with ExitPlanModeInput for tool_use → tool_result pairing.
+    Truncates redundant plan echo on success.
+    """
+
+    message: str  # Truncated message (without redundant plan)
+    approved: bool  # Whether the plan was approved
+
+
+# Union of all specialized output types + ToolResultContent as generic fallback
+ToolOutput = Union[
+    ReadOutput,
+    WriteOutput,
+    EditOutput,
+    BashOutput,
+    TaskOutput,
+    AskUserQuestionOutput,
+    ExitPlanModeOutput,
+    # TODO: Add as parsers are implemented:
+    # GlobOutput, GrepOutput
+    ToolResultContent,  # Generic fallback for unparsed results
 ]

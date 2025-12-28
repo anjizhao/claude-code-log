@@ -1,8 +1,8 @@
 """Tests for user message parsing and rendering.
 
 Split into:
-- Parsing tests: test parse_compacted_summary(), parse_user_memory()
-- Content model tests: test parse_user_message_content()
+- Parsing tests: test create_compacted_summary_message(), create_user_memory_message()
+- Content model tests: test create_user_message()
 - HTML rendering tests: test full pipeline from JSONL to HTML
 """
 
@@ -19,28 +19,31 @@ from claude_code_log.html.user_formatters import (
     format_user_text_model_content,
 )
 from claude_code_log.models import (
-    CompactedSummaryContent,
+    CompactedSummaryMessage,
+    ContentItem,
+    MessageMeta,
     TextContent,
-    UserMemoryContent,
-    UserTextContent,
+    UserMemoryMessage,
+    UserTextMessage,
 )
-from claude_code_log.parser import (
+from claude_code_log.factories import (
     COMPACTED_SUMMARY_PREFIX,
-    parse_compacted_summary,
-    parse_user_memory,
-    parse_user_message_content,
+    create_compacted_summary_message,
+    create_user_memory_message,
+    create_user_message,
 )
+from claude_code_log.parser import extract_text_content
 
 
 # =============================================================================
-# Parsing Tests - parse_compacted_summary()
+# Parsing Tests - create_compacted_summary_message()
 # =============================================================================
 
 
-class TestParseCompactedSummary:
-    """Tests for parse_compacted_summary() parser function (takes content list)."""
+class TestCreateCompactedSummaryMessage:
+    """Tests for create_compacted_summary_message() factory function (takes content list)."""
 
-    def test_parse_compacted_summary_detected(self):
+    def test_create_compacted_summary_message_detected(self):
         """Test that compacted summary is detected and content combined."""
         text = (
             f"{COMPACTED_SUMMARY_PREFIX}. The conversation is summarized below:\n"
@@ -48,27 +51,27 @@ class TestParseCompactedSummary:
         )
         content_list = [TextContent(type="text", text=text)]
 
-        result = parse_compacted_summary(content_list)
+        result = create_compacted_summary_message(MessageMeta.empty(), content_list)
 
         assert result is not None
-        assert isinstance(result, CompactedSummaryContent)
+        assert isinstance(result, CompactedSummaryMessage)
         assert result.summary_text == text
 
-    def test_parse_compacted_summary_not_detected(self):
+    def test_create_compacted_summary_message_not_detected(self):
         """Test that regular text is not detected as compacted summary."""
         text = "This is a regular user message."
         content_list = [TextContent(type="text", text=text)]
 
-        result = parse_compacted_summary(content_list)
+        result = create_compacted_summary_message(MessageMeta.empty(), content_list)
 
         assert result is None
 
-    def test_parse_compacted_summary_empty_list(self):
+    def test_create_compacted_summary_message_empty_list(self):
         """Test that empty content list returns None."""
-        result = parse_compacted_summary([])
+        result = create_compacted_summary_message(MessageMeta.empty(), [])
         assert result is None
 
-    def test_parse_compacted_summary_combines_multiple_texts(self):
+    def test_create_compacted_summary_message_combines_multiple_texts(self):
         """Test that multiple text items are combined with double newlines."""
         first_text = f"{COMPACTED_SUMMARY_PREFIX}. Part 1."
         second_text = "Part 2."
@@ -79,7 +82,7 @@ class TestParseCompactedSummary:
             TextContent(type="text", text=third_text),
         ]
 
-        result = parse_compacted_summary(content_list)
+        result = create_compacted_summary_message(MessageMeta.empty(), content_list)
 
         assert result is not None
         expected = "\n\n".join([first_text, second_text, third_text])
@@ -87,77 +90,79 @@ class TestParseCompactedSummary:
 
 
 # =============================================================================
-# Parsing Tests - parse_user_memory()
+# Parsing Tests - create_user_memory_message()
 # =============================================================================
 
 
 class TestParseUserMemory:
-    """Tests for parse_user_memory() parser function."""
+    """Tests for create_user_memory_message() parser function."""
 
-    def test_parse_user_memory_detected(self):
+    def test_create_user_memory_message_detected(self):
         """Test that user memory input tag is detected correctly."""
         text = "<user-memory-input>Memory content from CLAUDE.md</user-memory-input>"
 
-        result = parse_user_memory(text)
+        result = create_user_memory_message(MessageMeta.empty(), text)
 
         assert result is not None
-        assert isinstance(result, UserMemoryContent)
+        assert isinstance(result, UserMemoryMessage)
         assert result.memory_text == "Memory content from CLAUDE.md"
 
-    def test_parse_user_memory_with_surrounding_text(self):
+    def test_create_user_memory_message_with_surrounding_text(self):
         """Test memory tag extraction from mixed content."""
         text = "Some prefix <user-memory-input>The actual memory</user-memory-input> suffix"
 
-        result = parse_user_memory(text)
+        result = create_user_memory_message(MessageMeta.empty(), text)
 
         assert result is not None
         assert result.memory_text == "The actual memory"
 
-    def test_parse_user_memory_multiline(self):
+    def test_create_user_memory_message_multiline(self):
         """Test multiline memory content."""
         memory_content = "Line 1\nLine 2\nLine 3"
         text = f"<user-memory-input>{memory_content}</user-memory-input>"
 
-        result = parse_user_memory(text)
+        result = create_user_memory_message(MessageMeta.empty(), text)
 
         assert result is not None
         assert result.memory_text == memory_content
 
-    def test_parse_user_memory_not_detected(self):
+    def test_create_user_memory_message_not_detected(self):
         """Test that regular text without tag returns None."""
         text = "Regular text without memory tag."
 
-        result = parse_user_memory(text)
+        result = create_user_memory_message(MessageMeta.empty(), text)
 
         assert result is None
 
-    def test_parse_user_memory_strips_whitespace(self):
+    def test_create_user_memory_message_strips_whitespace(self):
         """Test that memory content whitespace is stripped."""
         text = "<user-memory-input>  \n  Content with spaces  \n  </user-memory-input>"
 
-        result = parse_user_memory(text)
+        result = create_user_memory_message(MessageMeta.empty(), text)
 
         assert result is not None
         assert result.memory_text == "Content with spaces"
 
 
 # =============================================================================
-# Content Model Tests - parse_user_message_content()
+# Content Model Tests - create_user_message()
 # =============================================================================
 
 
 class TestParseUserMessageContentCompacted:
-    """Tests for parse_user_message_content() handling compacted summaries."""
+    """Tests for create_user_message() handling compacted summaries."""
 
     def test_compacted_summary_single_text_item(self):
         """Test compacted summary with single text content item."""
         text = f"{COMPACTED_SUMMARY_PREFIX}. The conversation summary."
         content_list = [TextContent(type="text", text=text)]
 
-        content_model = parse_user_message_content(content_list)
+        content_model = create_user_message(
+            MessageMeta.empty(), content_list, extract_text_content(content_list)
+        )
 
         assert content_model is not None
-        assert isinstance(content_model, CompactedSummaryContent)
+        assert isinstance(content_model, CompactedSummaryMessage)
         assert content_model.summary_text == text
 
     def test_compacted_summary_multiple_text_items(self):
@@ -171,51 +176,59 @@ class TestParseUserMessageContentCompacted:
             TextContent(type="text", text=third_text),
         ]
 
-        content_model = parse_user_message_content(content_list)
+        content_model = create_user_message(
+            MessageMeta.empty(), content_list, extract_text_content(content_list)
+        )
 
         assert content_model is not None
-        assert isinstance(content_model, CompactedSummaryContent)
+        assert isinstance(content_model, CompactedSummaryMessage)
         # All text items should be combined with double newlines
         expected = "\n\n".join([first_text, second_text, third_text])
         assert content_model.summary_text == expected
 
 
 class TestParseUserMessageContentMemory:
-    """Tests for parse_user_message_content() handling user memory."""
+    """Tests for create_user_message() handling user memory."""
 
     def test_user_memory_detected(self):
         """Test user memory content is detected and returned."""
         text = "<user-memory-input>CLAUDE.md content here</user-memory-input>"
         content_list = [TextContent(type="text", text=text)]
 
-        content_model = parse_user_message_content(content_list)
+        content_model = create_user_message(
+            MessageMeta.empty(), content_list, extract_text_content(content_list)
+        )
 
         assert content_model is not None
-        assert isinstance(content_model, UserMemoryContent)
+        assert isinstance(content_model, UserMemoryMessage)
         assert content_model.memory_text == "CLAUDE.md content here"
 
 
 class TestParseUserMessageContentRegular:
-    """Tests for parse_user_message_content() handling regular user text."""
+    """Tests for create_user_message() handling regular user text."""
 
     def test_regular_text(self):
         """Test regular user text without special markers."""
         text = "Hello, please help me with this code."
         content_list = [TextContent(type="text", text=text)]
 
-        content_model = parse_user_message_content(content_list)
+        content_model = create_user_message(
+            MessageMeta.empty(), content_list, extract_text_content(content_list)
+        )
 
         assert content_model is not None
-        assert isinstance(content_model, UserTextContent)
+        assert isinstance(content_model, UserTextMessage)
         assert len(content_model.items) == 1
         assert isinstance(content_model.items[0], TextContent)
         assert content_model.items[0].text == text
 
     def test_empty_content_list(self):
         """Test empty content list returns None."""
-        content_list = []
+        content_list: list[ContentItem] = []
 
-        content_model = parse_user_message_content(content_list)
+        content_model = create_user_message(
+            MessageMeta.empty(), content_list, extract_text_content(content_list)
+        )
 
         assert content_model is None
 
@@ -225,12 +238,14 @@ class TestParseUserMessageContentRegular:
 # =============================================================================
 
 
-class TestFormatCompactedSummaryContent:
+class TestFormatCompactedSummaryMessage:
     """Tests for format_compacted_summary_content() formatter function."""
 
     def test_format_compacted_summary_basic(self):
         """Test basic compacted summary formatting."""
-        content = CompactedSummaryContent(summary_text="Summary:\n- Point 1\n- Point 2")
+        content = CompactedSummaryMessage(
+            MessageMeta.empty(), summary_text="Summary:\n- Point 1\n- Point 2"
+        )
 
         html = format_compacted_summary_content(content)
 
@@ -243,7 +258,9 @@ class TestFormatCompactedSummaryContent:
         """Test that long compacted summaries are collapsible."""
         # Create long content that exceeds threshold
         long_summary = "Summary:\n" + "\n".join([f"- Point {i}" for i in range(50)])
-        content = CompactedSummaryContent(summary_text=long_summary)
+        content = CompactedSummaryMessage(
+            MessageMeta.empty(), summary_text=long_summary
+        )
 
         html = format_compacted_summary_content(content)
 
@@ -257,12 +274,14 @@ class TestFormatCompactedSummaryContent:
 # =============================================================================
 
 
-class TestFormatUserMemoryContent:
+class TestFormatUserMemoryMessage:
     """Tests for format_user_memory_content() formatter function."""
 
     def test_format_user_memory_basic(self):
         """Test basic user memory formatting."""
-        content = UserMemoryContent(memory_text="CLAUDE.md content")
+        content = UserMemoryMessage(
+            MessageMeta.empty(), memory_text="CLAUDE.md content"
+        )
 
         html = format_user_memory_content(content)
 
@@ -272,7 +291,9 @@ class TestFormatUserMemoryContent:
 
     def test_format_user_memory_escapes_html(self):
         """Test that HTML characters are escaped."""
-        content = UserMemoryContent(memory_text="<script>alert('xss')</script>")
+        content = UserMemoryMessage(
+            MessageMeta.empty(), memory_text="<script>alert('xss')</script>"
+        )
 
         html = format_user_memory_content(content)
 
@@ -290,8 +311,9 @@ class TestFormatUserTextModelContent:
 
     def test_format_user_text_basic(self):
         """Test basic user text formatting."""
-        content = UserTextContent(
-            items=[TextContent(type="text", text="User question here")]
+        content = UserTextMessage(
+            MessageMeta.empty(),
+            items=[TextContent(type="text", text="User question here")],
         )
 
         html = format_user_text_model_content(content)
@@ -301,8 +323,9 @@ class TestFormatUserTextModelContent:
 
     def test_format_user_text_escapes_html(self):
         """Test that HTML characters are escaped."""
-        content = UserTextContent(
-            items=[TextContent(type="text", text='Test <b>bold</b> & "quotes"')]
+        content = UserTextMessage(
+            MessageMeta.empty(),
+            items=[TextContent(type="text", text='Test <b>bold</b> & "quotes"')],
         )
 
         html = format_user_text_model_content(content)

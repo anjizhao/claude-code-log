@@ -7,9 +7,18 @@ from pathlib import Path
 from claude_code_log.converter import load_transcript, load_directory_transcripts
 from claude_code_log.html.renderer import generate_html, generate_projects_index_html
 from claude_code_log.renderer import (
+    Renderer,
     TemplateMessage,
     TemplateProject,
     TemplateSummary,
+)
+from claude_code_log.models import (
+    MessageMeta,
+    UserTextMessage,
+    AssistantTextMessage,
+    SessionHeaderMessage,
+    ToolUseMessage,
+    ToolUseContent,
 )
 
 
@@ -18,32 +27,40 @@ class TestTemplateMessage:
 
     def test_template_message_creation(self):
         """Test creating a TemplateMessage with all fields."""
-        msg = TemplateMessage(
-            message_type="user",
-            formatted_timestamp="2025-06-14 10:00:00",
-            raw_timestamp=None,
+        meta = MessageMeta(
+            session_id="test-session",
+            timestamp="2025-06-14T10:00:00Z",
+            uuid="test-uuid",
         )
+        content = UserTextMessage(meta=meta)
+        msg = TemplateMessage(content)
+        renderer = Renderer()
 
         assert msg.type == "user"
-        assert msg.formatted_timestamp == "2025-06-14 10:00:00"
-        assert msg.message_title == "User"
+        assert msg.meta.timestamp == "2025-06-14T10:00:00Z"
+        assert renderer.title_content(msg) == "User"
 
-    def test_template_message_title_capitalization(self):
-        """Test that message_title properly capitalizes message types."""
-        test_cases = [
-            ("user", "User"),
-            ("assistant", "Assistant"),
-            ("system", "System"),
-            ("summary", "Summary"),
-        ]
+    def test_template_message_title_generation(self):
+        """Test that Renderer.title_content generates correct titles."""
+        meta = MessageMeta.empty()
+        renderer = Renderer()
 
-        for msg_type, expected_display in test_cases:
-            msg = TemplateMessage(
-                message_type=msg_type,
-                formatted_timestamp="time",
-                raw_timestamp=None,
-            )
-            assert msg.message_title == expected_display
+        # Test UserTextMessage
+        user_content = UserTextMessage(meta=meta)
+        user_msg = TemplateMessage(user_content)
+        assert renderer.title_content(user_msg) == "User"
+
+        # Test AssistantTextMessage
+        assistant_content = AssistantTextMessage(meta=meta)
+        assistant_msg = TemplateMessage(assistant_content)
+        assert renderer.title_content(assistant_msg) == "Assistant"
+
+        # Test SessionHeaderMessage - fallback to type-based title
+        session_content = SessionHeaderMessage(
+            meta=meta, title="Test Session", session_id="test-id"
+        )
+        session_msg = TemplateMessage(session_content)
+        assert renderer.title_content(session_msg) == "Session Header"
 
 
 class TestTemplateProject:
@@ -369,142 +386,65 @@ class TestErrorHandling:
 
 
 class TestTemplateMessageTree:
-    """Test TemplateMessage tree building and flatten functionality."""
+    """Test TemplateMessage tree building."""
+
+    _message_counter = 0
+
+    def setup_method(self):
+        """Reset counter before each test to avoid order-dependent tests."""
+        TestTemplateMessageTree._message_counter = 0
 
     def _create_message(
-        self, msg_type: str, msg_id: str | None = None, ancestry: list | None = None
+        self,
+        msg_type: str,
+        msg_id: str | None = None,
+        ancestry: list[int] | None = None,
     ) -> TemplateMessage:
         """Helper to create a minimal TemplateMessage for testing."""
-        msg = TemplateMessage(
-            message_type=msg_type,
-            formatted_timestamp="2025-06-14 10:00:00",
-            raw_timestamp=None,
+        # Parse int message_index from string if provided (e.g., "d-0" -> 0)
+        if msg_id and msg_id.startswith("d-"):
+            int_msg_index = int(msg_id[2:])
+        else:
+            int_msg_index = TestTemplateMessageTree._message_counter
+            TestTemplateMessageTree._message_counter += 1
+
+        meta = MessageMeta(
+            session_id="test-session",
+            timestamp="2025-06-14T10:00:00Z",
+            uuid=msg_id or "test-uuid",
         )
-        if msg_id:
-            msg.message_id = msg_id
-        if ancestry:
-            msg.ancestry = ancestry
+
+        # Create appropriate content based on message type
+        if msg_type == "user":
+            content = UserTextMessage(meta=meta)
+        elif msg_type == "assistant":
+            content = AssistantTextMessage(meta=meta)
+        elif msg_type == "tool_use":
+            content = ToolUseMessage(
+                meta=meta,
+                input=ToolUseContent(
+                    type="tool_use", id="test-id", name="TestTool", input={}
+                ),
+                tool_use_id="test-id",
+                tool_name="TestTool",
+            )
+        elif msg_type == "session":
+            content = SessionHeaderMessage(
+                meta=meta, title="Test Session", session_id="test-session"
+            )
+        else:
+            # Fallback to UserTextMessage for unknown types
+            content = UserTextMessage(meta=meta)
+
+        msg = TemplateMessage(content, ancestry=ancestry)
+        msg.message_index = int_msg_index  # Set message_index on TemplateMessage
         return msg
-
-    def test_flatten_single_message(self):
-        """Test flattening a single message with no children."""
-        msg = self._create_message("user", "m1", [])
-
-        result = msg.flatten()
-
-        assert len(result) == 1
-        assert result[0] is msg
-
-    def test_flatten_with_children(self):
-        """Test flattening a message with children."""
-        parent = self._create_message("user", "m1", [])
-        child1 = self._create_message("assistant", "m2", ["m1"])
-        child2 = self._create_message("tool_use", "m3", ["m1"])
-
-        parent.children = [child1, child2]
-
-        result = parent.flatten()
-
-        assert len(result) == 3
-        assert result[0] is parent
-        assert result[1] is child1
-        assert result[2] is child2
-
-    def test_flatten_nested_children(self):
-        """Test flattening with nested children (depth-first order)."""
-        root = self._create_message("user", "m1", [])
-        child = self._create_message("assistant", "m2", ["m1"])
-        grandchild = self._create_message("tool_use", "m3", ["m1", "m2"])
-
-        child.children = [grandchild]
-        root.children = [child]
-
-        result = root.flatten()
-
-        assert len(result) == 3
-        # Depth-first order: root, child, grandchild
-        assert result[0] is root
-        assert result[1] is child
-        assert result[2] is grandchild
-
-    def test_flatten_multiple_branches(self):
-        """Test flattening with multiple branches (depth-first order)."""
-        root = self._create_message("user", "m1", [])
-        branch1 = self._create_message("assistant", "m2", ["m1"])
-        branch2 = self._create_message("assistant", "m3", ["m1"])
-        leaf1 = self._create_message("tool_use", "m4", ["m1", "m2"])
-        leaf2 = self._create_message("tool_use", "m5", ["m1", "m3"])
-
-        branch1.children = [leaf1]
-        branch2.children = [leaf2]
-        root.children = [branch1, branch2]
-
-        result = root.flatten()
-
-        # Depth-first: root -> branch1 -> leaf1 -> branch2 -> leaf2
-        assert len(result) == 5
-        assert result[0] is root
-        assert result[1] is branch1
-        assert result[2] is leaf1
-        assert result[3] is branch2
-        assert result[4] is leaf2
-
-    def test_flatten_all_single_root(self):
-        """Test flatten_all with a single root message."""
-        root = self._create_message("user", "m1", [])
-        child = self._create_message("assistant", "m2", ["m1"])
-        root.children = [child]
-
-        result = TemplateMessage.flatten_all([root])
-
-        assert len(result) == 2
-        assert result[0] is root
-        assert result[1] is child
-
-    def test_flatten_all_multiple_roots(self):
-        """Test flatten_all with multiple root messages."""
-        root1 = self._create_message("user", "m1", [])
-        child1 = self._create_message("assistant", "m2", ["m1"])
-        root1.children = [child1]
-
-        root2 = self._create_message("user", "m3", [])
-        child2 = self._create_message("assistant", "m4", ["m3"])
-        root2.children = [child2]
-
-        result = TemplateMessage.flatten_all([root1, root2])
-
-        assert len(result) == 4
-        assert result[0] is root1
-        assert result[1] is child1
-        assert result[2] is root2
-        assert result[3] is child2
-
-    def test_flatten_all_empty_list(self):
-        """Test flatten_all with an empty list."""
-        result = TemplateMessage.flatten_all([])
-
-        assert result == []
 
     def test_children_field_default_empty(self):
         """Test that children field defaults to empty list."""
         msg = self._create_message("user")
 
         assert msg.children == []
-
-    def test_flatten_preserves_order(self):
-        """Test that flatten preserves insertion order of children."""
-        root = self._create_message("user", "m1", [])
-        children = [
-            self._create_message("assistant", f"m{i}", ["m1"]) for i in range(2, 7)
-        ]
-        root.children = children
-
-        result = root.flatten()
-
-        # First element is root, rest are children in order
-        assert result[0] is root
-        for i, child in enumerate(children):
-            assert result[i + 1] is child
 
 
 class TestTreeBuildingIntegration:
@@ -523,54 +463,6 @@ class TestTreeBuildingIntegration:
         # Note: We can't easily access the internal tree structure since
         # _build_message_tree is private. This test just verifies the
         # tree building doesn't break normal HTML generation.
-
-    def test_flatten_roundtrip_preserves_count(self):
-        """Test that flatten of built tree gives same count as input."""
-        # Create a manual tree and verify flatten returns all messages
-        root = TemplateMessage(
-            message_type="session",
-            formatted_timestamp="2025-06-14 10:00:00",
-            raw_timestamp=None,
-        )
-        root.message_id = "session-1"
-        root.ancestry = []
-
-        user = TemplateMessage(
-            message_type="user",
-            formatted_timestamp="2025-06-14 10:00:01",
-            raw_timestamp=None,
-        )
-        user.message_id = "d-1"
-        user.ancestry = ["session-1"]
-
-        assistant = TemplateMessage(
-            message_type="assistant",
-            formatted_timestamp="2025-06-14 10:00:02",
-            raw_timestamp=None,
-        )
-        assistant.message_id = "d-2"
-        assistant.ancestry = ["session-1", "d-1"]
-
-        tool = TemplateMessage(
-            message_type="tool_use",
-            formatted_timestamp="2025-06-14 10:00:03",
-            raw_timestamp=None,
-        )
-        tool.message_id = "d-3"
-        tool.ancestry = ["session-1", "d-1", "d-2"]
-
-        # Build tree manually
-        assistant.children = [tool]
-        user.children = [assistant]
-        root.children = [user]
-
-        # Flatten and verify
-        flat = TemplateMessage.flatten_all([root])
-        assert len(flat) == 4
-        assert flat[0].message_id == "session-1"
-        assert flat[1].message_id == "d-1"
-        assert flat[2].message_id == "d-2"
-        assert flat[3].message_id == "d-3"
 
 
 if __name__ == "__main__":

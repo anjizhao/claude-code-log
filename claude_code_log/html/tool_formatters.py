@@ -28,18 +28,23 @@ from .utils import (
 from ..models import (
     AskUserQuestionInput,
     AskUserQuestionItem,
+    AskUserQuestionOutput,
     BashInput,
+    BashOutput,
     EditInput,
     EditOutput,
     ExitPlanModeInput,
+    ExitPlanModeOutput,
     MultiEditInput,
     ReadInput,
     ReadOutput,
     TaskInput,
+    TaskOutput,
     TodoWriteInput,
+    ToolInput,
     ToolResultContent,
-    ToolUseContent,
     WriteInput,
+    WriteOutput,
 )
 from .ansi_colors import convert_ansi_to_html
 from .renderer_code import render_single_diff
@@ -81,7 +86,7 @@ def _render_question_item(q: AskUserQuestionItem) -> str:
     return "".join(html_parts)
 
 
-def format_askuserquestion_content(ask_input: AskUserQuestionInput) -> str:
+def format_askuserquestion_input(ask_input: AskUserQuestionInput) -> str:
     """Format AskUserQuestion tool use content with prominent question display.
 
     Args:
@@ -161,7 +166,7 @@ def format_askuserquestion_result(content: str) -> str:
 # -- ExitPlanMode Tool --------------------------------------------------------
 
 
-def format_exitplanmode_content(exit_input: ExitPlanModeInput) -> str:
+def format_exitplanmode_input(exit_input: ExitPlanModeInput) -> str:
     """Format ExitPlanMode tool use content with collapsible plan markdown.
 
     Args:
@@ -202,7 +207,7 @@ def format_exitplanmode_result(content: str) -> str:
 # -- TodoWrite Tool -----------------------------------------------------------
 
 
-def format_todowrite_content(todo_input: TodoWriteInput) -> str:
+def format_todowrite_input(todo_input: TodoWriteInput) -> str:
     """Format TodoWrite tool use content as a todo list.
 
     Args:
@@ -251,7 +256,7 @@ def format_todowrite_content(todo_input: TodoWriteInput) -> str:
 # -- File Tools (Read/Write) --------------------------------------------------
 
 
-def format_read_tool_content(read_input: ReadInput) -> str:  # noqa: ARG001
+def format_read_input(read_input: ReadInput) -> str:  # noqa: ARG001
     """Format Read tool use content showing file path.
 
     Args:
@@ -264,102 +269,11 @@ def format_read_tool_content(read_input: ReadInput) -> str:  # noqa: ARG001
     return ""
 
 
-# -- Tool Result Parsing (cat-n format) ---------------------------------------
+# -- Tool Result Formatting ---------------------------------------------------
+# Parsing (parse_read_output, parse_edit_output) is now in factories/tool_factory.py
 
 
-def _parse_cat_n_snippet(
-    lines: list[str], start_idx: int = 0
-) -> Optional[tuple[str, Optional[str], int]]:
-    """Parse cat-n formatted snippet from lines.
-
-    Args:
-        lines: List of lines to parse
-        start_idx: Index to start parsing from (default: 0)
-
-    Returns:
-        Tuple of (code_content, system_reminder, line_offset) or None if not parseable
-    """
-    code_lines: list[str] = []
-    system_reminder: Optional[str] = None
-    in_system_reminder = False
-    line_offset = 1  # Default offset
-
-    for line in lines[start_idx:]:
-        # Check for system-reminder start
-        if "<system-reminder>" in line:
-            in_system_reminder = True
-            system_reminder = ""
-            continue
-
-        # Check for system-reminder end
-        if "</system-reminder>" in line:
-            in_system_reminder = False
-            continue
-
-        # If in system reminder, accumulate reminder text
-        if in_system_reminder:
-            if system_reminder is not None:
-                system_reminder += line + "\n"
-            continue
-
-        # Parse regular code line (format: "  123→content")
-        match = re.match(r"\s+(\d+)→(.*)$", line)
-        if match:
-            line_num = int(match.group(1))
-            # Capture the first line number as offset
-            if not code_lines:
-                line_offset = line_num
-            code_lines.append(match.group(2))
-        elif line.strip() == "":  # Allow empty lines between cat-n lines
-            continue
-        else:  # Non-matching non-empty line, stop parsing
-            break
-
-    if not code_lines:
-        return None
-
-    # Join code lines and trim trailing reminder text
-    code_content = "\n".join(code_lines)
-    if system_reminder:
-        system_reminder = system_reminder.strip()
-
-    return (code_content, system_reminder, line_offset)
-
-
-def parse_read_output(content: str, file_path: str) -> Optional[ReadOutput]:
-    """Parse Read tool result into structured content.
-
-    Args:
-        content: Raw tool result string
-        file_path: Path to the file that was read
-
-    Returns:
-        ReadOutput if parsing succeeds, None otherwise
-    """
-    # Check if content matches the cat-n format pattern (line_number → content)
-    lines = content.split("\n")
-    if not lines or not re.match(r"\s+\d+→", lines[0]):
-        return None
-
-    result = _parse_cat_n_snippet(lines)
-    if result is None:
-        return None
-
-    code_content, system_reminder, line_offset = result
-    num_lines = len(code_content.split("\n"))
-
-    return ReadOutput(
-        file_path=file_path,
-        content=code_content,
-        start_line=line_offset,
-        num_lines=num_lines,
-        total_lines=num_lines,  # We don't know total from result
-        is_truncated=False,  # Can't determine from result
-        system_reminder=system_reminder,
-    )
-
-
-def format_read_tool_result(output: ReadOutput) -> str:
+def format_read_output(output: ReadOutput) -> str:
     """Format Read tool result as HTML with syntax highlighting.
 
     Args:
@@ -385,50 +299,7 @@ def format_read_tool_result(output: ReadOutput) -> str:
     )
 
 
-def parse_edit_output(content: str, file_path: str) -> Optional[EditOutput]:
-    """Parse Edit tool result into structured content.
-
-    Edit tool results typically have format:
-    "The file ... has been updated. Here's the result of running `cat -n` on a snippet..."
-    followed by cat-n formatted lines.
-
-    Args:
-        content: Raw tool result string
-        file_path: Path to the file that was edited
-
-    Returns:
-        EditOutput if parsing succeeds, None otherwise
-    """
-    # Look for the cat-n snippet after the preamble
-    # Pattern: look for first line that matches the cat-n format
-    lines = content.split("\n")
-    code_start_idx = None
-
-    for i, line in enumerate(lines):
-        if re.match(r"\s+\d+→", line):
-            code_start_idx = i
-            break
-
-    if code_start_idx is None:
-        return None
-
-    result = _parse_cat_n_snippet(lines, code_start_idx)
-    if result is None:
-        return None
-
-    code_content, _system_reminder, line_offset = result
-    # Edit tool doesn't use system_reminder
-
-    return EditOutput(
-        file_path=file_path,
-        success=True,  # If we got here, edit succeeded
-        diffs=[],  # We don't have diff info from result
-        message=code_content,
-        start_line=line_offset,
-    )
-
-
-def format_edit_tool_result(output: EditOutput) -> str:
+def format_edit_output(output: EditOutput) -> str:
     """Format Edit tool result as HTML with syntax highlighting.
 
     Args:
@@ -445,7 +316,103 @@ def format_edit_tool_result(output: EditOutput) -> str:
     )
 
 
-def format_write_tool_content(write_input: WriteInput) -> str:
+def format_write_output(output: WriteOutput) -> str:
+    """Format Write tool result as HTML.
+
+    Args:
+        output: Parsed WriteOutput with first line acknowledgment
+
+    Returns:
+        HTML string with the acknowledgment message
+    """
+    escaped_message = escape_html(output.message)
+    return f"<pre>{escaped_message} ...</pre>"
+
+
+def format_bash_output(output: BashOutput) -> str:
+    """Format Bash tool result as HTML with ANSI color support.
+
+    Args:
+        output: Parsed BashOutput with content and ANSI flag
+
+    Returns:
+        HTML string with ANSI colors converted or plain text
+    """
+    content = output.content
+    if output.has_ansi:
+        full_html = convert_ansi_to_html(content)
+    else:
+        full_html = escape_html(content)
+
+    # For short content, show directly
+    if len(content) <= 200:
+        return f"<pre>{full_html}</pre>"
+
+    # For longer content, use collapsible details
+    preview_html = escape_html(content[:200]) + "..."
+    return f"""
+    <details class="collapsible-details">
+        <summary>
+            <div class="preview-content"><pre>{preview_html}</pre></div>
+        </summary>
+        <div class="details-content">
+            <pre>{full_html}</pre>
+        </div>
+    </details>
+    """
+
+
+def format_task_output(output: TaskOutput) -> str:
+    """Format Task tool result as HTML with markdown rendering.
+
+    Args:
+        output: Parsed TaskOutput with agent's response
+
+    Returns:
+        HTML string with markdown rendered in collapsible section
+    """
+    return render_markdown_collapsible(output.result, "task-result")
+
+
+def format_askuserquestion_output(output: AskUserQuestionOutput) -> str:
+    """Format AskUserQuestion tool result with styled Q&A pairs.
+
+    Args:
+        output: Parsed AskUserQuestionOutput with Q&A pairs
+
+    Returns:
+        HTML string with styled question/answer blocks
+    """
+    html_parts: list[str] = [
+        '<div class="askuserquestion-content askuserquestion-result">'
+    ]
+
+    for qa in output.answers:
+        escaped_q = escape_html(qa.question)
+        escaped_a = escape_html(qa.answer)
+        html_parts.append('<div class="question-block answered">')
+        html_parts.append(f'<div class="question-text">❓ {escaped_q}</div>')
+        html_parts.append(f'<div class="answer-text">✅ {escaped_a}</div>')
+        html_parts.append("</div>")
+
+    html_parts.append("</div>")
+    return "".join(html_parts)
+
+
+def format_exitplanmode_output(output: ExitPlanModeOutput) -> str:
+    """Format ExitPlanMode tool result as HTML.
+
+    Args:
+        output: Parsed ExitPlanModeOutput with truncated message
+
+    Returns:
+        HTML string with the (truncated) result message
+    """
+    escaped_content = escape_html(output.message)
+    return f"<pre>{escaped_content}</pre>"
+
+
+def format_write_input(write_input: WriteInput) -> str:
     """Format Write tool use content with Pygments syntax highlighting.
 
     Args:
@@ -460,7 +427,7 @@ def format_write_tool_content(write_input: WriteInput) -> str:
 # -- Edit Tools (Edit/Multiedit) ----------------------------------------------
 
 
-def format_edit_tool_content(edit_input: EditInput) -> str:
+def format_edit_input(edit_input: EditInput) -> str:
     """Format Edit tool use content as a diff view with intra-line highlighting.
 
     Args:
@@ -481,7 +448,7 @@ def format_edit_tool_content(edit_input: EditInput) -> str:
     return "".join(html_parts)
 
 
-def format_multiedit_tool_content(multiedit_input: MultiEditInput) -> str:
+def format_multiedit_input(multiedit_input: MultiEditInput) -> str:
     """Format Multiedit tool use content showing multiple diffs.
 
     Args:
@@ -512,7 +479,7 @@ def format_multiedit_tool_content(multiedit_input: MultiEditInput) -> str:
 # -- Bash Tool ----------------------------------------------------------------
 
 
-def format_bash_tool_content(bash_input: BashInput) -> str:
+def format_bash_input(bash_input: BashInput) -> str:
     """Format Bash tool use content in VS Code extension style.
 
     Args:
@@ -531,7 +498,7 @@ def format_bash_tool_content(bash_input: BashInput) -> str:
 # -- Task Tool ----------------------------------------------------------------
 
 
-def format_task_tool_content(task_input: TaskInput) -> str:
+def format_task_input(task_input: TaskInput) -> str:
     """Format Task tool content with markdown-rendered prompt.
 
     Args:
@@ -549,14 +516,15 @@ def format_task_tool_content(task_input: TaskInput) -> str:
 # -- Tool Summary and Title ---------------------------------------------------
 
 
-def get_tool_summary(tool_use: ToolUseContent) -> Optional[str]:
-    """Extract a one-line summary from tool parameters for display in header.
+def get_tool_summary(parsed: Optional[ToolInput]) -> Optional[str]:
+    """Extract a one-line summary from parsed tool input for display in header.
 
     Returns a brief description or filename that can be shown in the message header
-    to save vertical space. Uses parsed_input for type-safe access.
-    """
-    parsed = tool_use.parsed_input
+    to save vertical space.
 
+    Args:
+        parsed: Parsed tool input, or None if parsing failed/not available
+    """
     if isinstance(parsed, BashInput):
         return parsed.description
 
@@ -566,22 +534,25 @@ def get_tool_summary(tool_use: ToolUseContent) -> Optional[str]:
     if isinstance(parsed, TaskInput):
         return parsed.description if parsed.description else None
 
-    # No summary for other tools
+    # No summary for other tools or unparsed input
     return None
 
 
-def format_tool_use_title(tool_use: ToolUseContent) -> str:
+def format_tool_use_title(tool_name: str, parsed: Optional[ToolInput]) -> str:
     """Generate the title HTML for a tool use message.
 
     Returns HTML string for the message header, with tool name, icon,
-    and optional summary/metadata. Uses parsed_input for type-safe access.
+    and optional summary/metadata.
+
+    Args:
+        tool_name: The tool name (e.g., "Bash", "Read", "Edit")
+        parsed: Parsed tool input, or None if parsing failed/not available
     """
-    escaped_name = escape_html(tool_use.name)
-    parsed = tool_use.parsed_input
-    summary = get_tool_summary(tool_use)
+    escaped_name = escape_html(tool_name)
+    summary = get_tool_summary(parsed)
 
     # TodoWrite: fixed title
-    if tool_use.name == "TodoWrite":
+    if tool_name == "TodoWrite":
         return "📝 Todo List"
 
     # Task: show subagent_type and description
@@ -695,96 +666,17 @@ def render_params_table(params: dict[str, Any]) -> str:
     return "".join(html_parts)
 
 
-# -- Tool Use Dispatcher ------------------------------------------------------
+# -- Tool Result Content Fallback Formatter -----------------------------------
 
 
-def format_tool_use_content(tool_use: ToolUseContent) -> str:
-    """Format tool use content as HTML.
+def format_tool_result_content_raw(tool_result: ToolResultContent) -> str:
+    """Format raw ToolResultContent as HTML (fallback formatter).
 
-    Uses parsed_input which handles lenient parsing at the model layer,
-    then dispatches to specialized formatters based on type.
-    """
-    parsed = tool_use.parsed_input
-
-    # Dispatch based on parsed type (lenient parsing happens in parsed_input)
-    if isinstance(parsed, TodoWriteInput):
-        return format_todowrite_content(parsed)
-
-    if isinstance(parsed, BashInput):
-        return format_bash_tool_content(parsed)
-
-    if isinstance(parsed, EditInput):
-        return format_edit_tool_content(parsed)
-
-    if isinstance(parsed, MultiEditInput):
-        return format_multiedit_tool_content(parsed)
-
-    if isinstance(parsed, WriteInput):
-        return format_write_tool_content(parsed)
-
-    if isinstance(parsed, TaskInput):
-        return format_task_tool_content(parsed)
-
-    if isinstance(parsed, ReadInput):
-        return format_read_tool_content(parsed)
-
-    if isinstance(parsed, AskUserQuestionInput):
-        return format_askuserquestion_content(parsed)
-
-    if isinstance(parsed, ExitPlanModeInput):
-        return format_exitplanmode_content(parsed)
-
-    # Default: render as key/value table using shared renderer
-    return render_params_table(tool_use.input)
-
-
-# -- Tool Result Content Formatter -------------------------------------------
-
-
-def _looks_like_bash_output(content: str) -> bool:
-    """Check if content looks like it's from a Bash tool based on common patterns."""
-    if not content:
-        return False
-
-    # Check for ANSI escape sequences
-    if "\x1b[" in content:
-        return True
-
-    # Check for common bash/terminal patterns
-    bash_indicators = [
-        "$ ",  # Shell prompt
-        "❯ ",  # Modern shell prompt
-        "> ",  # Shell continuation
-        "\n+ ",  # Bash -x output
-        "bash: ",  # Bash error messages
-        "/bin/bash",  # Bash path
-        "command not found",  # Common bash error
-        "Permission denied",  # Common bash error
-        "No such file or directory",  # Common bash error
-    ]
-
-    # Check for file path patterns that suggest command output
-    if re.search(r"/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*", content):  # Unix-style paths
-        return True
-
-    # Check for common command output patterns
-    if any(indicator in content for indicator in bash_indicators):
-        return True
-
-    return False
-
-
-def format_tool_result_content(
-    tool_result: ToolResultContent,
-    file_path: Optional[str] = None,
-    tool_name: Optional[str] = None,
-) -> str:
-    """Format tool result content as HTML, including images.
+    This handles tool results that don't have specialized output types,
+    including structured content with embedded images.
 
     Args:
-        tool_result: The tool result content
-        file_path: Optional file path for context (used for Read/Edit/Write tool rendering)
-        tool_name: Optional tool name for specialized rendering (e.g., "Write", "Read", "Edit", "Task")
+        tool_result: The raw tool result content
     """
     # Handle both string and structured content
     if isinstance(tool_result.content, str):
@@ -840,55 +732,11 @@ def format_tool_result_content(
             raw_content,
             flags=re.DOTALL,
         )
-        # Remove "String: ..." portions that echo the input (everything after "String:" to end)
+        # Remove "String: ..." portions that echo the input
         raw_content = re.sub(r"\nString:.*$", "", raw_content, flags=re.DOTALL)
 
-    # Special handling for Write tool: only show first line (acknowledgment) on success
-    if tool_name == "Write" and not tool_result.is_error and not has_images:
-        lines = raw_content.split("\n")
-        if lines:
-            # Keep only the first acknowledgment line and add ellipsis
-            first_line = lines[0]
-            escaped_html = escape_html(first_line)
-            return f"<pre>{escaped_html} ...</pre>"
-
-    # Try to parse as Read tool result if file_path is provided
-    if file_path and tool_name == "Read" and not has_images:
-        read_output = parse_read_output(raw_content, file_path)
-        if read_output:
-            return format_read_tool_result(read_output)
-
-    # Try to parse as Edit tool result if file_path is provided
-    if file_path and tool_name == "Edit" and not has_images:
-        edit_output = parse_edit_output(raw_content, file_path)
-        if edit_output:
-            return format_edit_tool_result(edit_output)
-
-    # Special handling for Task tool: render result as markdown with Pygments (agent's final message)
-    # Deduplication is now handled retroactively by replacing the sub-assistant content
-    if tool_name == "Task" and not has_images:
-        return render_markdown_collapsible(raw_content, "task-result")
-
-    # Special handling for ExitPlanMode tool: truncate redundant plan echo on success
-    if tool_name == "ExitPlanMode" and not has_images:
-        processed_content = format_exitplanmode_result(raw_content)
-        escaped_content = escape_html(processed_content)
-        return f"<pre>{escaped_content}</pre>"
-
-    # Special handling for AskUserQuestion tool: render Q&A pairs with styling
-    if tool_name == "AskUserQuestion" and not has_images:
-        styled_result = format_askuserquestion_result(raw_content)
-        if styled_result:
-            return styled_result
-        # Fall through to default handling if parsing fails
-
-    # Check if this looks like Bash tool output and process ANSI codes
-    # Bash tool results often contain ANSI escape sequences and terminal output
-    is_ansi = _looks_like_bash_output(raw_content)
-    full_html = (
-        convert_ansi_to_html(raw_content) if is_ansi else escape_html(raw_content)
-    )
-    # For preview, always use plain escaped text (don't truncate HTML with tags)
+    # Format the content
+    full_html = escape_html(raw_content)
     preview_html = (
         escape_html(raw_content[:200]) + "..."
         if len(raw_content) > 200
@@ -915,12 +763,12 @@ def format_tool_result_content(
     </details>
     """
     else:
-        # Text-only content (existing behavior)
+        # Text-only content
         # For simple content, show directly without collapsible wrapper
         if len(raw_content) <= 200:
             return f"<pre>{full_html}</pre>"
 
-        # For longer content, use collapsible details but no extra wrapper
+        # For longer content, use collapsible details
         return f"""
     <details class="collapsible-details">
         <summary>
@@ -936,36 +784,32 @@ def format_tool_result_content(
 # -- Public Exports -----------------------------------------------------------
 
 __all__ = [
-    # AskUserQuestion
-    "format_askuserquestion_content",
+    # Tool input formatters (called by HtmlRenderer.format_{InputClass})
+    "format_askuserquestion_input",
+    "format_exitplanmode_input",
+    "format_todowrite_input",
+    "format_read_input",
+    "format_write_input",
+    "format_edit_input",
+    "format_multiedit_input",
+    "format_bash_input",
+    "format_task_input",
+    # Tool output formatters (called by HtmlRenderer.format_{OutputClass})
+    "format_read_output",
+    "format_write_output",
+    "format_edit_output",
+    "format_bash_output",
+    "format_task_output",
+    "format_askuserquestion_output",
+    "format_exitplanmode_output",
+    # Fallback for ToolResultContent
+    "format_tool_result_content_raw",
+    # Legacy formatters (still used)
     "format_askuserquestion_result",
-    # ExitPlanMode
-    "format_exitplanmode_content",
     "format_exitplanmode_result",
-    # TodoWrite
-    "format_todowrite_content",
-    # File tools (input)
-    "format_read_tool_content",
-    "format_write_tool_content",
-    # File tools (output/result)
-    "parse_read_output",
-    "format_read_tool_result",
-    "parse_edit_output",
-    "format_edit_tool_result",
-    # Edit tools
-    "format_edit_tool_content",
-    "format_multiedit_tool_content",
-    # Bash
-    "format_bash_tool_content",
-    # Task
-    "format_task_tool_content",
     # Tool summary and title
     "get_tool_summary",
     "format_tool_use_title",
     # Generic
     "render_params_table",
-    # Dispatcher
-    "format_tool_use_content",
-    # Tool result
-    "format_tool_result_content",
 ]

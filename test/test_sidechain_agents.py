@@ -197,6 +197,63 @@ def test_sidechain_tool_results_rendered():
         ), "Sidechain user prompts should be skipped"
 
 
+def test_explore_agent_no_user_prompt():
+    """Test Explore-type agents that start with assistant (no user prompt).
+
+    Real-world pattern from -src-deep-manifest project: Explore agents don't have
+    a user prompt message at the start - they begin directly with assistant messages.
+    This differs from Plan-type agents (like in coderabbit) which start with a user
+    prompt that duplicates the Task input.
+
+    The cleanup should handle both patterns correctly:
+    - Plan agents: Remove first UserTextMessage (duplicate prompt)
+    - Explore agents: No UserTextMessage to remove, just process normally
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+
+        # Create main session with Task tool_use (Explore type)
+        main_file = tmpdir_path / "main.jsonl"
+        main_file.write_text(
+            # User request
+            '{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/workspace","sessionId":"test-explore","version":"2.0.46","gitBranch":"main","type":"user","message":{"role":"user","content":[{"type":"text","text":"How does the ZIP processing work?"}]},"uuid":"u-0","timestamp":"2025-01-15T15:24:45.000Z"}\n'
+            # Assistant invokes Task (Explore subagent)
+            '{"parentUuid":"u-0","isSidechain":false,"userType":"external","cwd":"/workspace","sessionId":"test-explore","version":"2.0.46","gitBranch":"main","message":{"model":"claude-sonnet-4-5-20250929","id":"msg_main","type":"message","role":"assistant","content":[{"type":"tool_use","id":"task-explore","name":"Task","input":{"prompt":"Explore ZIP processing","subagent_type":"Explore"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":50}},"requestId":"req_main","type":"assistant","uuid":"a-0","timestamp":"2025-01-15T15:24:47.000Z"}\n'
+            # Task result (triggers agent loading)
+            '{"parentUuid":"a-0","isSidechain":false,"userType":"external","cwd":"/workspace","sessionId":"test-explore","version":"2.0.46","gitBranch":"main","type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"task-explore","content":"ZIP files are processed recursively..."}]},"uuid":"u-1","timestamp":"2025-01-15T15:25:00.000Z","toolUseResult":{"agentId":"explore-agent","content":"ZIP files are processed recursively..."},"agentId":"explore-agent"}\n'
+        )
+
+        # Create Explore-type agent file: starts with ASSISTANT (no user prompt)
+        # This matches real data from -src-deep-manifest/agent-c8d9b115.jsonl
+        agent_file = tmpdir_path / "agent-explore-agent.jsonl"
+        agent_file.write_text(
+            # First message is assistant (NOT user) - Explore agents don't echo the prompt
+            '{"parentUuid":null,"isSidechain":true,"userType":"external","cwd":"/workspace","sessionId":"test-explore","version":"2.0.46","gitBranch":"main","agentId":"explore-agent","message":{"model":"claude-sonnet-4-5-20250929","id":"msg_explore_1","type":"message","role":"assistant","content":[{"type":"text","text":"Let me search for ZIP-related code."},{"type":"tool_use","id":"grep-1","name":"Grep","input":{"pattern":"zip"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":50,"output_tokens":30}},"requestId":"req_explore_1","type":"assistant","uuid":"explore-a-0","timestamp":"2025-01-15T15:24:51.000Z"}\n'
+            # User provides Grep result
+            '{"parentUuid":"explore-a-0","isSidechain":true,"userType":"external","cwd":"/workspace","sessionId":"test-explore","version":"2.0.46","gitBranch":"main","agentId":"explore-agent","type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"grep-1","content":"deep_manifest.py:42: def process_zip()"}]},"uuid":"explore-u-0","timestamp":"2025-01-15T15:24:52.000Z"}\n'
+            # Assistant continues with another tool
+            '{"parentUuid":"explore-u-0","isSidechain":true,"userType":"external","cwd":"/workspace","sessionId":"test-explore","version":"2.0.46","gitBranch":"main","agentId":"explore-agent","message":{"model":"claude-sonnet-4-5-20250929","id":"msg_explore_2","type":"message","role":"assistant","content":[{"type":"text","text":"Found it. Let me read the file."},{"type":"tool_use","id":"read-1","name":"Read","input":{"file_path":"deep_manifest.py"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":80,"output_tokens":40}},"requestId":"req_explore_2","type":"assistant","uuid":"explore-a-1","timestamp":"2025-01-15T15:24:53.000Z"}\n'
+            # User provides Read result
+            '{"parentUuid":"explore-a-1","isSidechain":true,"userType":"external","cwd":"/workspace","sessionId":"test-explore","version":"2.0.46","gitBranch":"main","agentId":"explore-agent","type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"def process_zip(path):\\n    with zipfile.ZipFile(path) as zf:\\n        ..."}]},"uuid":"explore-u-1","timestamp":"2025-01-15T15:24:54.000Z"}\n'
+            # Final assistant summary
+            '{"parentUuid":"explore-u-1","isSidechain":true,"userType":"external","cwd":"/workspace","sessionId":"test-explore","version":"2.0.46","gitBranch":"main","agentId":"explore-agent","message":{"model":"claude-sonnet-4-5-20250929","id":"msg_explore_final","type":"message","role":"assistant","content":[{"type":"text","text":"ZIP files are processed recursively..."}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":50}},"requestId":"req_explore_final","type":"assistant","uuid":"explore-a-2","timestamp":"2025-01-15T15:24:58.000Z"}\n'
+        )
+
+        messages = load_transcript(main_file)
+        html = generate_html(messages, title="Test Explore Agent")
+
+        # Verify sidechain tool results are rendered (Grep and Read results)
+        assert "deep_manifest.py:42" in html, "Grep tool result should be rendered"
+        assert "def process_zip" in html, "Read tool result should be rendered"
+
+        # Verify assistant messages are rendered
+        assert "Let me search for ZIP-related code" in html
+        assert "Found it. Let me read the file" in html
+
+        # The final assistant message matches Task result, should become dedup notice
+        # (but the intermediate messages should still be visible)
+
+
 def test_multiple_agent_invocations():
     """Test handling of multiple Task invocations in same session."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -231,3 +288,92 @@ def test_multiple_agent_invocations():
         html = generate_html(messages, title="Test")
         assert "First done" in html
         assert "Second done" in html
+
+
+def test_task_output_structured_content_markdown():
+    """Test that Task results with structured content render as markdown.
+
+    Real-world Task tool results have structured content like:
+    [{"type": "text", "text": "## Summary\n\nMarkdown content..."}]
+
+    This tests that:
+    1. Structured content is extracted and parsed into TaskOutput
+    2. has_markdown returns True for TaskOutput
+    3. HTML output includes task-result class with rendered markdown headers
+    """
+    import json
+    from claude_code_log.renderer import generate_template_messages
+    from claude_code_log.models import ToolResultMessage, TaskOutput
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+
+        # Task result with structured content containing markdown
+        markdown_content = (
+            "## Summary\n\n"
+            "This is the agent's response with **bold** and `code`.\n\n"
+            "### Section 1\n\n"
+            "Some content here."
+        )
+
+        main_file = tmpdir_path / "main.jsonl"
+        main_file.write_text(
+            # User request
+            '{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/workspace","sessionId":"test-md","version":"2.0.55","gitBranch":"main","type":"user","message":{"role":"user","content":[{"type":"text","text":"Explore the codebase"}]},"uuid":"u-0","timestamp":"2025-01-15T15:00:00.000Z"}\n'
+            # Assistant invokes Task
+            '{"parentUuid":"u-0","isSidechain":false,"userType":"external","cwd":"/workspace","sessionId":"test-md","version":"2.0.55","gitBranch":"main","message":{"model":"claude-opus-4-5-20251101","id":"msg_main","type":"message","role":"assistant","content":[{"type":"tool_use","id":"task-md","name":"Task","input":{"prompt":"Explore this","subagent_type":"Explore"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":50}},"requestId":"req_main","type":"assistant","uuid":"a-0","timestamp":"2025-01-15T15:00:05.000Z"}\n'
+            # Task result with STRUCTURED content (list of text items)
+            + '{"parentUuid":"a-0","isSidechain":false,"userType":"external","cwd":"/workspace","sessionId":"test-md","version":"2.0.55","gitBranch":"main","type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"task-md","content":'
+            + json.dumps([{"type": "text", "text": markdown_content}])
+            + '}]},"uuid":"u-1","timestamp":"2025-01-15T15:00:30.000Z"}\n'
+        )
+
+        messages = load_transcript(main_file)
+
+        # Generate template messages to check TaskOutput parsing
+        root_messages, _ = generate_template_messages(messages)
+
+        # Flatten to find all messages
+        def flatten(msg):
+            yield msg
+            for child in msg.children:
+                yield from flatten(child)
+
+        # Find the Task tool result
+        task_result = None
+        for root in root_messages:
+            for msg in flatten(root):
+                if (
+                    isinstance(msg.content, ToolResultMessage)
+                    and msg.content.tool_name == "Task"
+                ):
+                    task_result = msg.content
+                    break
+
+        assert task_result is not None, "Task tool result should be found"
+
+        # Verify it's parsed as TaskOutput (not raw ToolResultContent)
+        assert isinstance(task_result.output, TaskOutput), (
+            f"Expected TaskOutput, got {type(task_result.output).__name__}"
+        )
+
+        # Verify has_markdown returns True
+        assert task_result.has_markdown, "has_markdown should be True for TaskOutput"
+
+        # Verify the result text is preserved
+        assert "## Summary" in task_result.output.result
+        assert "### Section 1" in task_result.output.result
+
+        # Generate HTML and verify markdown rendering
+        html = generate_html(messages, title="Test Markdown")
+
+        # Should have task-result CSS class
+        assert "task-result" in html, "HTML should include task-result class"
+
+        # Should have rendered markdown headers (h2, h3)
+        assert "<h2>" in html, "Markdown ## should render as <h2>"
+        assert "<h3>" in html, "Markdown ### should render as <h3>"
+
+        # Should include the rendered content
+        assert "<strong>bold</strong>" in html or "<b>bold</b>" in html
+        assert "<code>code</code>" in html

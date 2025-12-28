@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Render Claude transcript data to HTML format."""
 
+from __future__ import annotations
+
+import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional, Tuple, cast
+from datetime import datetime
 
 if TYPE_CHECKING:
     from .cache import CacheManager
-    from .models import MessageContent
-from datetime import datetime
 
 from .models import (
+    MessageContent,
+    MessageMeta,
     MessageType,
     TranscriptEntry,
     AssistantTranscriptEntry,
@@ -21,34 +25,36 @@ from .models import (
     ContentItem,
     TextContent,
     ToolResultContent,
-    ToolResultContentModel,
     ToolUseContent,
     ThinkingContent,
-    ThinkingContentModel,
+    UsageInfo,
     # Structured content types
-    AssistantTextContent,
-    CommandOutputContent,
-    CompactedSummaryContent,
-    DedupNoticeContent,
-    HookInfo,
-    HookSummaryContent,
-    SessionHeaderContent,
-    SlashCommandContent,
-    SystemContent,
-    UnknownContent,
-    UserMemoryContent,
-    UserSlashCommandContent,
-    UserSteeringContent,
-    UserTextContent,
+    AssistantTextMessage,
+    CommandOutputMessage,
+    DedupNoticeMessage,
+    SessionHeaderMessage,
+    SlashCommandMessage,
+    SystemMessage,
+    TaskOutput,
+    ToolResultMessage,
+    ToolUseMessage,
+    UnknownMessage,
+    UserSlashCommandMessage,
+    UserSteeringMessage,
+    UserTextMessage,
 )
-from .parser import (
+from .parser import extract_text_content
+from .factories import (
     as_assistant_entry,
     as_user_entry,
-    extract_text_content,
-    is_bash_input,
-    is_bash_output,
-    is_command_message,
-    is_local_command_output,
+    create_assistant_message,
+    create_meta,
+    create_system_message,
+    create_thinking_message,
+    create_tool_result_message,
+    create_tool_use_message,
+    create_user_message,
+    ToolItemResult,
 )
 from .utils import (
     format_timestamp,
@@ -59,32 +65,226 @@ from .utils import (
     create_session_preview,
 )
 from .renderer_timings import (
-    DEBUG_TIMING,
-    report_timing_statistics,
-    set_timing_var,
     log_timing,
 )
 
-from .html import (
-    escape_html,
-    format_tool_use_title,
-    parse_bash_input,
-    parse_bash_output,
-    parse_command_output,
-    parse_slash_command,
-)
-from .parser import parse_user_message_content
+
+# -- Rendering Context --------------------------------------------------------
 
 
-# -- Content Formatters -------------------------------------------------------
-# NOTE: Content formatters have been moved to html/ submodules:
-#   - format_thinking_content -> html/assistant_formatters.py
-#   - format_assistant_text_content -> html/assistant_formatters.py
-#   - format_tool_result_content -> html/tool_formatters.py
-#   - format_tool_use_content -> html/tool_formatters.py
-#   - format_image_content -> html/assistant_formatters.py
-#   - format_user_text_model_content -> html/user_formatters.py
-#   - parse_user_message_content -> parser.py
+@dataclass
+class RenderingContext:
+    """Context for a single rendering operation.
+
+    Holds render-time state that should not pollute MessageContent.
+    This enables parallel-safe rendering where each render gets its own context.
+
+    Attributes:
+        messages: Registry of all TemplateMessage objects (message_index = index).
+        tool_use_context: Maps tool_use_id -> ToolUseContent for result rendering.
+        session_first_message: Maps session_id -> index of first message in session.
+    """
+
+    messages: list[TemplateMessage] = field(
+        default_factory=lambda: []  # type: list[TemplateMessage]
+    )
+    tool_use_context: dict[str, ToolUseContent] = field(
+        default_factory=lambda: {}  # type: dict[str, ToolUseContent]
+    )
+    session_first_message: dict[str, int] = field(
+        default_factory=lambda: {}  # type: dict[str, int]
+    )
+
+    def register(self, message: "TemplateMessage") -> int:
+        """Register a TemplateMessage and assign its message_index.
+
+        Args:
+            message: The TemplateMessage to register.
+
+        Returns:
+            The assigned message_index (= index in messages list).
+        """
+        msg_index = len(self.messages)
+        message.message_index = msg_index
+        self.messages.append(message)
+        return msg_index
+
+    def get(self, message_index: int) -> Optional["TemplateMessage"]:
+        """Get a TemplateMessage by its message_index.
+
+        Args:
+            message_index: The message_index (index) to look up.
+
+        Returns:
+            The TemplateMessage if found, None if out of range.
+        """
+        if 0 <= message_index < len(self.messages):
+            return self.messages[message_index]
+        return None
+
+
+# -- Template Classes ---------------------------------------------------------
+
+
+class TemplateMessage:
+    """Structured message data for template rendering.
+
+    This is the primary render-time object that wraps MessageContent. Each
+    MessageContent has exactly one TemplateMessage wrapper.
+
+    TemplateMessage holds all render-time state:
+    - message_index: Index in RenderingContext.messages (unique identifier)
+    - Pairing metadata: pair_first, pair_last, pair_duration
+    - Hierarchy metadata: ancestry
+    - Tree structure: children, fold/unfold counts
+
+    All identity/context fields come from meta (timestamp, session_id, etc.)
+    and content (tool_use_id, has_markdown, token_usage, etc.).
+    """
+
+    def __init__(
+        self,
+        content: "MessageContent",
+        *,  # Force keyword arguments after this
+        ancestry: Optional[list[int]] = None,
+    ):
+        # Content carries its own meta
+        self.content = content
+        self.meta = content.meta
+
+        # Unique index in RenderingContext.messages (assigned by ctx.register())
+        self.message_index: Optional[int] = None
+
+        # Pairing metadata (assigned by _mark_pair())
+        self.pair_first: Optional[int] = None  # Index of first message in pair
+        self.pair_last: Optional[int] = None  # Index of last message in pair
+        self.pair_duration: Optional[str] = None  # Duration string for pair_last
+
+        # Rendering metadata
+        self.ancestry = ancestry or []
+
+        # Fold/unfold counts
+        self.immediate_children_count = 0  # Direct children only
+        self.total_descendants_count = 0  # All descendants recursively
+        # Type-aware counting for smarter labels
+        self.immediate_children_by_type: dict[
+            str, int
+        ] = {}  # {"assistant": 2, "tool_use": 3}
+        self.total_descendants_by_type: dict[str, int] = {}  # All descendants by type
+
+        # Children for tree-based rendering
+        self.children: list["TemplateMessage"] = []
+
+    # -- Properties derived from content/meta --
+
+    @property
+    def type(self) -> str:
+        """Get message type from content."""
+        return self.content.message_type
+
+    @property
+    def is_session_header(self) -> bool:
+        """Check if this message is a session header."""
+        return isinstance(self.content, SessionHeaderMessage)
+
+    @property
+    def has_markdown(self) -> bool:
+        """Check if this message has markdown content."""
+        return self.content.has_markdown
+
+    @property
+    def has_children(self) -> bool:
+        """Check if this message has any children."""
+        return bool(self.children)
+
+    @property
+    def is_paired(self) -> bool:
+        """Check if this message is part of a pair."""
+        return self.pair_first is not None or self.pair_last is not None
+
+    @property
+    def is_first_in_pair(self) -> bool:
+        """Check if this is the first message in a pair (has pair_last set)."""
+        return self.pair_last is not None
+
+    @property
+    def is_last_in_pair(self) -> bool:
+        """Check if this is the last message in a pair (has pair_first set)."""
+        return self.pair_first is not None
+
+    @property
+    def pair_role(self) -> Optional[str]:
+        """Get the pairing role for CSS class.
+
+        Returns:
+            "pair_first" if this is the first message in a pair,
+            "pair_last" if this is the last message in a pair,
+            None if not paired.
+        """
+        if self.is_first_in_pair:
+            return "pair_first"
+        if self.is_last_in_pair:
+            return "pair_last"
+        return None
+
+    @property
+    def message_id(self) -> Optional[str]:
+        """Get formatted message ID for HTML element IDs.
+
+        Returns "d-{message_index}" for all messages, or None if not registered.
+        All messages use a unified format based on their index.
+        """
+        if self.message_index is None:
+            return None
+        return f"d-{self.message_index}"
+
+    @property
+    def session_id(self) -> str:
+        """Get session_id from meta."""
+        return self.meta.session_id
+
+    @property
+    def parent_uuid(self) -> Optional[str]:
+        """Get parent_uuid from meta."""
+        return self.meta.parent_uuid
+
+    @property
+    def agent_id(self) -> Optional[str]:
+        """Get agent_id from meta."""
+        return self.meta.agent_id
+
+    @property
+    def token_usage(self) -> Optional[str]:
+        """Get token_usage from content (if available)."""
+        return getattr(self.content, "token_usage", None)
+
+    @property
+    def is_sidechain(self) -> bool:
+        """Check if this is a sidechain message."""
+        return self.meta.is_sidechain
+
+    @property
+    def tool_use_id(self) -> Optional[str]:
+        """Get tool_use_id from content (if ToolUseMessage or ToolResultMessage)."""
+        return getattr(self.content, "tool_use_id", None)
+
+    @property
+    def title_hint(self) -> Optional[str]:
+        """Generate title hint from tool_use_id."""
+        tool_id = self.tool_use_id
+        if tool_id:
+            # Escape for HTML attribute
+            escaped = tool_id.replace("&", "&amp;").replace('"', "&quot;")
+            return f"ID: {escaped}"
+        return None
+
+    def get_immediate_children_label(self) -> str:
+        """Generate human-readable label for immediate children."""
+        return _format_type_counts(self.immediate_children_by_type)
+
+    def get_total_descendants_label(self) -> str:
+        """Generate human-readable label for all descendants."""
+        return _format_type_counts(self.total_descendants_by_type)
 
 
 def _format_type_counts(type_counts: dict[str, int]) -> str:
@@ -161,108 +361,6 @@ def _format_type_counts(type_counts: dict[str, int]) -> str:
             type_counts[t] for t in list(type_counts.keys())[:2]
         )
         return f"{parts[0]}, {parts[1]}, {remaining} more"
-
-
-# -- Template Classes ---------------------------------------------------------
-
-
-class TemplateMessage:
-    """Structured message data for template rendering."""
-
-    def __init__(
-        self,
-        message_type: str,
-        formatted_timestamp: str,
-        raw_timestamp: Optional[str] = None,
-        session_summary: Optional[str] = None,
-        session_id: Optional[str] = None,
-        is_session_header: bool = False,
-        token_usage: Optional[str] = None,
-        tool_use_id: Optional[str] = None,
-        title_hint: Optional[str] = None,
-        has_markdown: bool = False,
-        message_title: Optional[str] = None,
-        message_id: Optional[str] = None,
-        ancestry: Optional[list[str]] = None,
-        has_children: bool = False,
-        uuid: Optional[str] = None,
-        parent_uuid: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        is_sidechain: bool = False,
-        content: Optional["MessageContent"] = None,
-    ):
-        self.type = message_type
-        # Structured content for rendering
-        self.content = content
-        self.formatted_timestamp = formatted_timestamp
-        self.is_sidechain = is_sidechain
-        self.raw_timestamp = raw_timestamp
-        # Display title for message header (capitalized, with decorations)
-        self.message_title = (
-            message_title if message_title is not None else message_type.title()
-        )
-        self.session_summary = session_summary
-        self.session_id = session_id
-        self.is_session_header = is_session_header
-        self.session_subtitle: Optional[str] = None
-        self.token_usage = token_usage
-        self.tool_use_id = tool_use_id
-        self.title_hint = title_hint
-        self.message_id = message_id
-        self.ancestry = ancestry or []
-        self.has_children = has_children
-        self.has_markdown = has_markdown
-        self.uuid = uuid
-        self.parent_uuid = parent_uuid
-        self.agent_id = agent_id  # Agent ID for sidechain messages and Task results
-        # Raw text content for deduplication (sidechain assistants vs Task results)
-        self.raw_text_content: Optional[str] = None
-        # Fold/unfold counts
-        self.immediate_children_count = 0  # Direct children only
-        self.total_descendants_count = 0  # All descendants recursively
-        # Type-aware counting for smarter labels
-        self.immediate_children_by_type: dict[
-            str, int
-        ] = {}  # {"assistant": 2, "tool_use": 3}
-        self.total_descendants_by_type: dict[str, int] = {}  # All descendants by type
-        # Pairing metadata
-        self.is_paired = False
-        self.pair_role: Optional[str] = None  # "pair_first", "pair_last", "pair_middle"
-        self.pair_duration: Optional[str] = None  # Duration for pair_last messages
-        # Children for tree-based rendering (future use)
-        self.children: list["TemplateMessage"] = []
-
-    def get_immediate_children_label(self) -> str:
-        """Generate human-readable label for immediate children."""
-        return _format_type_counts(self.immediate_children_by_type)
-
-    def get_total_descendants_label(self) -> str:
-        """Generate human-readable label for all descendants."""
-        return _format_type_counts(self.total_descendants_by_type)
-
-    def flatten(self) -> list["TemplateMessage"]:
-        """Recursively flatten this message and all children into a list.
-
-        Returns a list with this message followed by all descendants in
-        depth-first order. This provides backward compatibility with the
-        flat-list template rendering approach.
-        """
-        result: list["TemplateMessage"] = [self]
-        for child in self.children:
-            result.extend(child.flatten())
-        return result
-
-    @staticmethod
-    def flatten_all(messages: list["TemplateMessage"]) -> list["TemplateMessage"]:
-        """Flatten a list of root messages into a single flat list.
-
-        Useful for converting a tree structure back to a flat list for
-        templates that expect the traditional flat message list.
-        """
-        result: list["TemplateMessage"] = []
-        for message in messages:
-            result.extend(message.flatten())
-        return result
 
 
 class TemplateProject:
@@ -450,9 +548,9 @@ def generate_template_messages(
                 if getattr(msg, "sessionId", None) not in warmup_session_ids
             ]
 
-    # Pre-process to find and attach session summaries
+    # Pre-process to find session summaries
     with log_timing("Session summary processing", t_start):
-        prepare_session_summaries(messages)
+        session_summaries = prepare_session_summaries(messages)
 
     # Filter messages (removes summaries, warmup, empty, etc.)
     with log_timing("Filter messages", t_start):
@@ -461,27 +559,23 @@ def generate_template_messages(
     # Pass 1: Collect session metadata and token tracking
     with log_timing("Collect session info", t_start):
         sessions, session_order, show_tokens_for_message = _collect_session_info(
-            filtered_messages
+            filtered_messages, session_summaries
         )
 
     # Pass 2: Render messages to TemplateMessage objects
-    with log_timing(
-        lambda: f"Render messages ({len(template_messages)} messages)", t_start
-    ):
-        template_messages = _render_messages(
-            filtered_messages, sessions, show_tokens_for_message
-        )
+    with log_timing(lambda: f"Render messages ({len(ctx.messages)} messages)", t_start):
+        ctx = _render_messages(filtered_messages, sessions, show_tokens_for_message)
 
-    # Prepare session navigation data
+    # Prepare session navigation data (uses ctx for session header indices)
     with log_timing(
         lambda: f"Session navigation building ({len(session_nav)} sessions)", t_start
     ):
-        session_nav = prepare_session_navigation(sessions, session_order)
+        session_nav = prepare_session_navigation(sessions, session_order, ctx)
 
     # Reorder messages so each session's messages follow their session header
     # This fixes interleaving that occurs when sessions are resumed
     with log_timing("Reorder session messages", t_start):
-        template_messages = _reorder_session_template_messages(template_messages)
+        template_messages = _reorder_session_template_messages(ctx.messages)
 
     # Identify and mark paired messages (command+output, tool_use+tool_result, etc.)
     with log_timing("Identify message pairs", t_start):
@@ -501,10 +595,6 @@ def generate_template_messages(
     with log_timing("Build message hierarchy", t_start):
         _build_message_hierarchy(template_messages)
 
-    # Resolve dedup notice targets (needs message_id from hierarchy)
-    with log_timing("Resolve dedup targets", t_start):
-        _resolve_dedup_targets(template_messages)
-
     # Mark messages that have children for fold/unfold controls
     with log_timing("Mark messages with children", t_start):
         _mark_messages_with_children(template_messages)
@@ -515,16 +605,23 @@ def generate_template_messages(
     with log_timing("Build message tree", t_start):
         root_messages = _build_message_tree(template_messages)
 
+    # Clean up sidechain duplicates on the tree structure
+    # - Remove first UserTextMessage (duplicate of Task input prompt)
+    # - Replace last AssistantTextMessage (duplicate of Task output) with DedupNotice
+    with log_timing("Cleanup sidechain duplicates", t_start):
+        _cleanup_sidechain_duplicates(root_messages)
+
     return root_messages, session_nav
 
 
 # -- Session Utilities --------------------------------------------------------
 
 
-def prepare_session_summaries(messages: list[TranscriptEntry]) -> None:
-    """Pre-process messages to find and attach session summaries.
+def prepare_session_summaries(messages: list[TranscriptEntry]) -> dict[str, str]:
+    """Extract session summaries from messages.
 
-    Modifies messages in place by attaching _session_summary attribute.
+    Returns:
+        Dict mapping session_id to summary text.
     """
     session_summaries: dict[str, str] = {}
     uuid_to_session: dict[str, str] = {}
@@ -555,23 +652,20 @@ def prepare_session_summaries(messages: list[TranscriptEntry]) -> None:
             ):
                 session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
 
-    # Attach summaries to messages
-    for message in messages:
-        if hasattr(message, "sessionId"):
-            session_id = getattr(message, "sessionId", "")
-            if session_id in session_summaries:
-                setattr(message, "_session_summary", session_summaries[session_id])
+    return session_summaries
 
 
 def prepare_session_navigation(
     sessions: dict[str, dict[str, Any]],
     session_order: list[str],
+    ctx: RenderingContext,
 ) -> list[dict[str, Any]]:
     """Prepare session navigation data for template rendering.
 
     Args:
         sessions: Dictionary mapping session_id to session info dict
         session_order: List of session IDs in display order
+        ctx: RenderingContext with session_first_message indices
 
     Returns:
         List of session navigation dicts for template rendering
@@ -609,9 +703,13 @@ def prepare_session_navigation(
                 token_parts.append(f"Cache Read: {total_cache_read}")
             token_summary = "Token usage – " + " | ".join(token_parts)
 
+        # Get message_index for session header (for unified d-{index} links)
+        message_index = ctx.session_first_message.get(session_id)
+
         session_nav.append(
             {
                 "id": session_id,
+                "message_index": message_index,
                 "summary": session_info["summary"],
                 "timestamp_range": timestamp_range,
                 "first_timestamp": first_ts,
@@ -625,183 +723,6 @@ def prepare_session_navigation(
         )
 
     return session_nav
-
-
-# -- Message Processing Functions ---------------------------------------------
-# Note: HTML formatting logic has been moved to html/content_formatters.py
-# as part of the refactoring to support format-neutral content models.
-
-
-# def _process_summary_message(message: SummaryTranscriptEntry) -> tuple[str, str, str]:
-#     """Process a summary message and return (css_class, content_html, message_type)."""
-#     css_class = "summary"
-#     content_html = f"<strong>Summary:</strong> {escape_html(str(message.summary))}"
-#     message_type = "summary"
-#     return css_class, content_html, message_type
-
-
-def _process_command_message(
-    text_content: str,
-) -> tuple[Optional["MessageContent"], str, str]:
-    """Process a slash command message and return (content, message_type, message_title).
-
-    These are user messages containing slash command invocations (e.g., /context, /model).
-    The JSONL type is "user", not "system".
-    """
-    # Parse to content model (formatting happens in HtmlRenderer)
-    content = parse_slash_command(text_content)
-    # If parsing fails, content will be None and caller will handle fallback
-
-    return content, "user", "Slash Command"
-
-
-def _process_local_command_output(
-    text_content: str,
-) -> tuple[Optional["MessageContent"], str, str]:
-    """Process slash command output and return (content, message_type, message_title).
-
-    These are user messages containing the output from slash commands (e.g., /context, /model).
-    The JSONL type is "user", not "system".
-    """
-    # Parse to content model (formatting happens in HtmlRenderer)
-    content = parse_command_output(text_content)
-    # If parsing fails, content will be None and caller will handle fallback
-
-    return content, "user", ""
-
-
-def _process_bash_input(
-    text_content: str,
-) -> tuple[Optional["MessageContent"], str, str]:
-    """Process bash input command and return (content, message_type, message_title)."""
-    # Parse to content model (formatting happens in HtmlRenderer)
-    content = parse_bash_input(text_content)
-    # If parsing fails, content will be None and caller will handle fallback
-
-    return content, "bash-input", "Bash command"
-
-
-def _process_bash_output(
-    text_content: str,
-) -> tuple[Optional["MessageContent"], str, str]:
-    """Process bash output and return (content, message_type, message_title)."""
-    # Parse to content model (formatting happens in HtmlRenderer)
-    content = parse_bash_output(text_content)
-    # If parsing fails, content will be None - caller/renderer handles empty output
-
-    return content, "bash-output", ""
-
-
-def _process_regular_message(
-    items: list[ContentItem],
-    message_type: str,
-    is_sidechain: bool,
-    is_meta: bool = False,
-) -> tuple[bool, Optional["MessageContent"], str, str]:
-    """Process regular message and return (is_sidechain, content_model, message_type, message_title).
-
-    Returns content_model for user messages, None for non-user messages.
-    Non-user messages (assistant) are handled by the legacy render_message_content path.
-
-    Note: Sidechain user messages (Sub-assistant prompts) are now skipped entirely
-    in the main processing loop since they duplicate the Task tool input prompt.
-
-    Args:
-        items: List of text/image content items (no tool_use, tool_result, thinking).
-        is_meta: True for slash command expanded prompts (isMeta=True in JSONL)
-    """
-    message_title = message_type.title()  # Default title
-    content_model: Optional["MessageContent"] = None
-
-    # Handle user-specific preprocessing
-    if message_type == MessageType.USER:
-        # Note: sidechain user messages are skipped before reaching this function
-        # Parse user content (is_meta triggers UserSlashCommandContent creation)
-        content_model = parse_user_message_content(items, is_slash_command=is_meta)
-
-        # Determine message_title from content type
-        if isinstance(content_model, UserSlashCommandContent):
-            message_title = "User (slash command)"
-        elif isinstance(content_model, CompactedSummaryContent):
-            message_title = "User (compacted conversation)"
-        elif isinstance(content_model, UserMemoryContent):
-            message_title = "Memory"
-
-    elif message_type == MessageType.ASSISTANT:
-        # Create AssistantTextContent directly from items
-        # (empty text already filtered by chunk_message_content)
-        if items:
-            content_model = AssistantTextContent(
-                items=items  # type: ignore[arg-type]
-            )
-
-    if is_sidechain:
-        # Update message title for display (only non-user types reach here)
-        if not isinstance(content_model, CompactedSummaryContent):
-            message_title = "Sub-assistant"
-
-    return is_sidechain, content_model, message_type, message_title
-
-
-def _process_system_message(
-    message: SystemTranscriptEntry,
-) -> Optional[TemplateMessage]:
-    """Process a system message and return a TemplateMessage, or None if it should be skipped.
-
-    Handles:
-    - Hook summaries (subtype="stop_hook_summary")
-    - Other system messages with level-specific styling (info, warning, error)
-
-    Note: Slash command messages (<command-name>, <local-command-stdout>) are user messages,
-    not system messages. They are handled by _process_command_message and
-    _process_local_command_output in the main processing loop.
-    """
-    from .models import MessageContent  # Local import to avoid circular dependency
-
-    session_id = getattr(message, "sessionId", "unknown")
-    timestamp = getattr(message, "timestamp", "")
-    formatted_timestamp = format_timestamp(timestamp) if timestamp else ""
-
-    # Build structured content based on message subtype
-    content: MessageContent
-    if message.subtype == "stop_hook_summary":
-        # Skip silent hook successes (no output, no errors)
-        if not message.hasOutput and not message.hookErrors:
-            return None
-        # Create structured hook summary content
-        hook_infos = [
-            HookInfo(command=info.get("command", "unknown"))
-            for info in (message.hookInfos or [])
-        ]
-        content = HookSummaryContent(
-            has_output=bool(message.hasOutput),
-            hook_errors=message.hookErrors or [],
-            hook_infos=hook_infos,
-        )
-        level = "hook"
-    elif not message.content:
-        # Skip system messages without content (shouldn't happen normally)
-        return None
-    else:
-        # Create structured system content
-        level = getattr(message, "level", "info")
-        content = SystemContent(level=level, text=message.content)
-
-    # Store parent UUID for hierarchy rebuild (handled by _build_message_hierarchy)
-    parent_uuid = getattr(message, "parentUuid", None)
-
-    return TemplateMessage(
-        message_type="system",
-        formatted_timestamp=formatted_timestamp,
-        raw_timestamp=timestamp,
-        session_id=session_id,
-        message_title=f"System {level.title()}",
-        message_id=None,  # Will be assigned by _build_message_hierarchy
-        ancestry=[],  # Will be assigned by _build_message_hierarchy
-        uuid=message.uuid,
-        parent_uuid=parent_uuid,
-        content=content,  # Level info is in SystemContent
-    )
 
 
 # Type alias for chunk output: either a list of regular items or a single special item
@@ -870,162 +791,6 @@ def chunk_message_content(content: list[ContentItem]) -> list[ContentChunk]:
     return chunks
 
 
-@dataclass
-class ToolItemResult:
-    """Result of processing a single tool/thinking/image item."""
-
-    message_type: str
-    message_title: str
-    content: Optional["MessageContent"] = None  # Structured content for rendering
-    tool_use_id: Optional[str] = None
-    title_hint: Optional[str] = None
-    pending_dedup: Optional[str] = None  # For Task result deduplication
-    is_error: bool = False  # For tool_result error state
-
-
-def _process_tool_use_item(
-    tool_item: ContentItem,
-    tool_use_context: dict[str, ToolUseContent],
-) -> Optional[ToolItemResult]:
-    """Process a tool_use content item.
-
-    Args:
-        tool_item: The tool use content item
-        tool_use_context: Dict to populate with tool_use_id -> ToolUseContent mapping
-
-    Returns:
-        ToolItemResult with tool_use content model, or None if item should be skipped
-    """
-    # Convert Anthropic type to our format if necessary
-    if not isinstance(tool_item, ToolUseContent):
-        tool_use = ToolUseContent(
-            type="tool_use",
-            id=getattr(tool_item, "id", ""),
-            name=getattr(tool_item, "name", ""),
-            input=getattr(tool_item, "input", {}),
-        )
-    else:
-        tool_use = tool_item
-
-    # Title is computed here but content formatting happens in HtmlRenderer
-    tool_message_title = format_tool_use_title(tool_use)
-    escaped_id = escape_html(tool_use.id)
-    item_tool_use_id = tool_use.id
-    tool_title_hint = f"ID: {escaped_id}"
-
-    # Populate tool_use_context for later use when processing tool results
-    tool_use_context[item_tool_use_id] = tool_use
-
-    return ToolItemResult(
-        message_type="tool_use",
-        message_title=tool_message_title,
-        content=tool_use,  # ToolUseContent is the model
-        tool_use_id=item_tool_use_id,
-        title_hint=tool_title_hint,
-    )
-
-
-def _process_tool_result_item(
-    tool_item: ContentItem,
-    tool_use_context: dict[str, ToolUseContent],
-) -> Optional[ToolItemResult]:
-    """Process a tool_result content item.
-
-    Args:
-        tool_item: The tool result content item
-        tool_use_context: Dict with tool_use_id -> ToolUseContent mapping
-
-    Returns:
-        ToolItemResult with tool_result content model, or None if item should be skipped
-    """
-    # Convert Anthropic type to our format if necessary
-    if not isinstance(tool_item, ToolResultContent):
-        tool_result = ToolResultContent(
-            type="tool_result",
-            tool_use_id=getattr(tool_item, "tool_use_id", ""),
-            content=getattr(tool_item, "content", ""),
-            is_error=getattr(tool_item, "is_error", False),
-        )
-    else:
-        tool_result = tool_item
-
-    # Get file_path and tool_name from tool_use context for specialized rendering
-    result_file_path: Optional[str] = None
-    result_tool_name: Optional[str] = None
-    if tool_result.tool_use_id in tool_use_context:
-        tool_use_from_ctx = tool_use_context[tool_result.tool_use_id]
-        result_tool_name = tool_use_from_ctx.name
-        if (
-            result_tool_name in ("Read", "Edit", "Write")
-            and "file_path" in tool_use_from_ctx.input
-        ):
-            result_file_path = tool_use_from_ctx.input["file_path"]
-
-    # Create content model with rendering context
-    content_model = ToolResultContentModel(
-        tool_use_id=tool_result.tool_use_id,
-        content=tool_result.content,
-        is_error=tool_result.is_error or False,
-        tool_name=result_tool_name,
-        file_path=result_file_path,
-    )
-
-    # Retroactive deduplication: if Task result, extract content for later matching
-    pending_dedup: Optional[str] = None
-    if result_tool_name == "Task":
-        # Extract text content from tool result
-        # Note: tool_result.content can be str or list[dict[str, Any]]
-        if isinstance(tool_result.content, str):
-            task_result_content = tool_result.content.strip()
-        else:
-            # Handle list of dicts (tool result format)
-            content_parts: list[str] = []
-            for item in tool_result.content:
-                text_val = item.get("text", "")
-                if isinstance(text_val, str):
-                    content_parts.append(text_val)
-            task_result_content = "\n".join(content_parts).strip()
-        pending_dedup = task_result_content if task_result_content else None
-
-    escaped_id = escape_html(tool_result.tool_use_id)
-    tool_title_hint = f"ID: {escaped_id}"
-    tool_message_title = "Error" if tool_result.is_error else ""
-
-    return ToolItemResult(
-        message_type="tool_result",
-        message_title=tool_message_title,
-        content=content_model,
-        tool_use_id=tool_result.tool_use_id,
-        title_hint=tool_title_hint,
-        pending_dedup=pending_dedup,
-        is_error=tool_result.is_error or False,
-    )
-
-
-def _process_thinking_item(tool_item: ContentItem) -> Optional[ToolItemResult]:
-    """Process a thinking content item.
-
-    Returns:
-        ToolItemResult with thinking content model
-    """
-    # Extract thinking text from the content item
-    if isinstance(tool_item, ThinkingContent):
-        thinking_text = tool_item.thinking.strip()
-        signature = getattr(tool_item, "signature", None)
-    else:
-        thinking_text = getattr(tool_item, "thinking", str(tool_item)).strip()
-        signature = None
-
-    # Create the content model (formatting happens in HtmlRenderer)
-    thinking_model = ThinkingContentModel(thinking=thinking_text, signature=signature)
-
-    return ToolItemResult(
-        message_type="thinking",
-        message_title="Thinking",
-        content=thinking_model,
-    )
-
-
 # -- Message Pairing ----------------------------------------------------------
 
 
@@ -1034,46 +799,48 @@ class PairingIndices:
     """Indices for efficient message pairing lookups.
 
     All indices are built in a single pass for efficiency.
+    Stores message references directly (not list positions).
     """
 
-    # (session_id, tool_use_id) -> message index for tool_use messages
-    tool_use: dict[tuple[str, str], int]
-    # (session_id, tool_use_id) -> message index for tool_result messages
-    tool_result: dict[tuple[str, str], int]
-    # uuid -> message index for system messages (parent-child pairing)
-    uuid: dict[str, int]
-    # parent_uuid -> message index for slash-command messages
-    slash_command_by_parent: dict[str, int]
+    # (session_id, tool_use_id) -> TemplateMessage for tool_use messages
+    tool_use: dict[tuple[str, str], TemplateMessage]
+    # (session_id, tool_use_id) -> TemplateMessage for tool_result messages
+    tool_result: dict[tuple[str, str], TemplateMessage]
+    # uuid -> TemplateMessage for system messages (parent-child pairing)
+    uuid: dict[str, TemplateMessage]
+    # parent_uuid -> TemplateMessage for slash-command messages
+    slash_command_by_parent: dict[str, TemplateMessage]
 
 
 def _build_pairing_indices(messages: list[TemplateMessage]) -> PairingIndices:
     """Build indices for efficient message pairing lookups.
 
     Single pass through messages to build all indices needed for pairing.
+    Stores message references directly for robust lookup after reordering.
     """
-    tool_use_index: dict[tuple[str, str], int] = {}
-    tool_result_index: dict[tuple[str, str], int] = {}
-    uuid_index: dict[str, int] = {}
-    slash_command_by_parent: dict[str, int] = {}
+    tool_use_index: dict[tuple[str, str], TemplateMessage] = {}
+    tool_result_index: dict[tuple[str, str], TemplateMessage] = {}
+    uuid_index: dict[str, TemplateMessage] = {}
+    slash_command_by_parent: dict[str, TemplateMessage] = {}
 
-    for i, msg in enumerate(messages):
+    for msg in messages:
         # Index tool_use and tool_result by (session_id, tool_use_id)
         if msg.tool_use_id and msg.session_id:
             key = (msg.session_id, msg.tool_use_id)
             if msg.type == "tool_use":
-                tool_use_index[key] = i
+                tool_use_index[key] = msg
             elif msg.type == "tool_result":
-                tool_result_index[key] = i
+                tool_result_index[key] = msg
 
         # Index system messages by UUID for parent-child pairing
-        if msg.uuid and msg.type == "system":
-            uuid_index[msg.uuid] = i
+        if msg.meta.uuid and msg.type == "system":
+            uuid_index[msg.meta.uuid] = msg
 
         # Index slash-command user messages by parent_uuid
         if msg.parent_uuid and isinstance(
-            msg.content, (SlashCommandContent, UserSlashCommandContent)
+            msg.content, (SlashCommandMessage, UserSlashCommandMessage)
         ):
-            slash_command_by_parent[msg.parent_uuid] = i
+            slash_command_by_parent[msg.parent_uuid] = msg
 
     return PairingIndices(
         tool_use=tool_use_index,
@@ -1084,11 +851,12 @@ def _build_pairing_indices(messages: list[TemplateMessage]) -> PairingIndices:
 
 
 def _mark_pair(first: TemplateMessage, last: TemplateMessage) -> None:
-    """Mark two messages as a pair."""
-    first.is_paired = True
-    first.pair_role = "pair_first"
-    last.is_paired = True
-    last.pair_role = "pair_last"
+    """Mark two messages as a pair by setting their pair indices."""
+    first_index = first.message_index
+    last_index = last.message_index
+    if first_index is not None and last_index is not None:
+        first.pair_last = last_index
+        last.pair_first = first_index
 
 
 def _try_pair_adjacent(
@@ -1106,8 +874,8 @@ def _try_pair_adjacent(
     """
     # Slash command + command output (both are user messages)
     if isinstance(
-        current.content, (SlashCommandContent, UserSlashCommandContent)
-    ) and isinstance(next_msg.content, CommandOutputContent):
+        current.content, (SlashCommandMessage, UserSlashCommandMessage)
+    ) and isinstance(next_msg.content, CommandOutputMessage):
         _mark_pair(current, next_msg)
         return True
 
@@ -1126,7 +894,6 @@ def _try_pair_adjacent(
 
 def _try_pair_by_index(
     current: TemplateMessage,
-    messages: list[TemplateMessage],
     indices: PairingIndices,
 ) -> None:
     """Try to pair current message with another using index lookups.
@@ -1140,20 +907,19 @@ def _try_pair_by_index(
     if current.type == "tool_use" and current.tool_use_id and current.session_id:
         key = (current.session_id, current.tool_use_id)
         if key in indices.tool_result:
-            result_msg = messages[indices.tool_result[key]]
-            _mark_pair(current, result_msg)
+            _mark_pair(current, indices.tool_result[key])
 
     # System child message finding its parent (by parent_uuid)
     if current.type == "system" and current.parent_uuid:
         if current.parent_uuid in indices.uuid:
-            parent_msg = messages[indices.uuid[current.parent_uuid]]
-            _mark_pair(parent_msg, current)
+            _mark_pair(indices.uuid[current.parent_uuid], current)
 
     # System command finding its slash-command child (by uuid -> parent_uuid)
-    if current.type == "system" and current.uuid:
-        if current.uuid in indices.slash_command_by_parent:
-            slash_msg = messages[indices.slash_command_by_parent[current.uuid]]
-            _mark_pair(current, slash_msg)
+    if (
+        current.type == "system"
+        and current.meta.uuid in indices.slash_command_by_parent
+    ):
+        _mark_pair(current, indices.slash_command_by_parent[current.meta.uuid])
 
 
 def _identify_message_pairs(messages: list[TemplateMessage]) -> None:
@@ -1190,7 +956,7 @@ def _identify_message_pairs(messages: list[TemplateMessage]) -> None:
                 continue
 
         # Try index-based pairing (doesn't skip, continues to next message)
-        _try_pair_by_index(current, messages, indices)
+        _try_pair_by_index(current, indices)
 
         i += 1
 
@@ -1211,77 +977,70 @@ def _reorder_paired_messages(messages: list[TemplateMessage]) -> list[TemplateMe
 
     # Build index of pair_last messages by (session_id, tool_use_id)
     # Session ID is included to prevent cross-session pairing when sessions are resumed
-    pair_last_index: dict[
-        tuple[str, str], int
-    ] = {}  # (session_id, tool_use_id) -> message index
+    # Stores message references directly (not list positions)
+    pair_last_index: dict[tuple[str, str], TemplateMessage] = {}
     # Index slash-command pair_last messages by parent_uuid
-    slash_command_pair_index: dict[str, int] = {}  # parent_uuid -> message index
+    slash_command_pair_index: dict[str, TemplateMessage] = {}
 
-    for i, msg in enumerate(messages):
-        if (
-            msg.is_paired
-            and msg.pair_role == "pair_last"
-            and msg.tool_use_id
-            and msg.session_id
-        ):
+    for msg in messages:
+        if msg.is_last_in_pair and msg.tool_use_id and msg.session_id:
             key = (msg.session_id, msg.tool_use_id)
-            pair_last_index[key] = i
+            pair_last_index[key] = msg
         # Index slash-command messages by parent_uuid
         if (
-            msg.is_paired
-            and msg.pair_role == "pair_last"
+            msg.is_last_in_pair
             and msg.parent_uuid
-            and isinstance(msg.content, (SlashCommandContent, UserSlashCommandContent))
+            and isinstance(msg.content, (SlashCommandMessage, UserSlashCommandMessage))
         ):
-            slash_command_pair_index[msg.parent_uuid] = i
+            slash_command_pair_index[msg.parent_uuid] = msg
 
     # Create reordered list
     reordered: list[TemplateMessage] = []
-    skip_indices: set[int] = set()
+    already_added: set[int] = set()  # Track by message_index (unique per message)
 
-    for i, msg in enumerate(messages):
-        if i in skip_indices:
+    for msg in messages:
+        msg_index = msg.message_index
+        if msg_index in already_added:
             continue
 
         reordered.append(msg)
+        if msg_index is not None:
+            already_added.add(msg_index)
 
         # If this is the first message in a pair, immediately add its pair_last
         # Key includes session_id to prevent cross-session pairing on resume
-        if msg.is_paired and msg.pair_role == "pair_first":
-            pair_last = None
-            last_idx = None
+        if msg.is_first_in_pair:
+            pair_last: Optional[TemplateMessage] = None
 
             # Check for tool_use_id based pairs
             if msg.tool_use_id and msg.session_id:
                 key = (msg.session_id, msg.tool_use_id)
                 if key in pair_last_index:
-                    last_idx = pair_last_index[key]
-                    pair_last = messages[last_idx]
+                    pair_last = pair_last_index[key]
 
             # Check for system + slash-command pairs (via uuid -> parent_uuid)
-            if pair_last is None and msg.uuid and msg.uuid in slash_command_pair_index:
-                last_idx = slash_command_pair_index[msg.uuid]
-                pair_last = messages[last_idx]
+            if pair_last is None and msg.meta.uuid in slash_command_pair_index:
+                pair_last = slash_command_pair_index[msg.meta.uuid]
 
             # Only append if we haven't already added this pair_last
             # (handles case where multiple pair_firsts match the same pair_last)
-            if (
-                pair_last is not None
-                and last_idx is not None
-                and last_idx not in skip_indices
-            ):
-                reordered.append(pair_last)
-                skip_indices.add(last_idx)
+            if pair_last is not None:
+                last_msg_index = pair_last.message_index
+                if last_msg_index is not None and last_msg_index not in already_added:
+                    reordered.append(pair_last)
+                    already_added.add(last_msg_index)
 
                 # Calculate duration between pair messages
                 try:
-                    if msg.raw_timestamp and pair_last.raw_timestamp:
+                    first_ts = msg.meta.timestamp if msg.meta else None
+                    last_ts = pair_last.meta.timestamp if pair_last.meta else None
+                    if first_ts and last_ts:
                         # Parse ISO timestamps
                         first_time = datetime.fromisoformat(
-                            msg.raw_timestamp.replace("Z", "+00:00")
+                            first_ts.replace("Z", "+00:00")
                         )
                         last_time = datetime.fromisoformat(
-                            pair_last.raw_timestamp.replace("Z", "+00:00")
+                            last_ts.replace("Z", "+00:00")
                         )
                         duration = last_time - first_time
 
@@ -1315,11 +1074,12 @@ def _get_message_hierarchy_level(msg: TemplateMessage) -> int:
     - Level 1: User messages
     - Level 2: System commands/errors, Assistant, Thinking
     - Level 3: Tool use/result, System info/warning (nested under assistant)
-    - Level 4: Sidechain assistant/thinking (nested under Task tool result)
+    - Level 4: Sidechain user/assistant/thinking (nested under Task tool result)
     - Level 5: Sidechain tools (nested under sidechain assistant)
 
-    Note: Sidechain user messages (Sub-assistant prompts) are now skipped entirely
-    since they duplicate the Task tool input prompt.
+    Note: Sidechain user messages (duplicate of Task input prompt) and the last
+    sidechain assistant (duplicate of Task output) are cleaned up from the tree
+    by _cleanup_sidechain_duplicates after tree building.
 
     Returns:
         Integer hierarchy level (1-5, session headers are 0)
@@ -1327,14 +1087,13 @@ def _get_message_hierarchy_level(msg: TemplateMessage) -> int:
     msg_type = msg.type
     is_sidechain = msg.is_sidechain
 
-    # User messages at level 1 (under session)
-    # Note: sidechain user messages are skipped before reaching this function
-    if msg_type == "user" and not is_sidechain:
-        return 1
+    # User messages at level 1 (under session), level 4 for sidechain
+    if msg_type == "user":
+        return 4 if is_sidechain else 1
 
     # System info/warning at level 3 (tool-related, e.g., hook notifications)
-    # Get level from SystemContent if available
-    system_level = msg.content.level if isinstance(msg.content, SystemContent) else None
+    # Get level from SystemMessage if available
+    system_level = msg.content.level if isinstance(msg.content, SystemMessage) else None
     if (
         msg_type == "system"
         and system_level in ("info", "warning")
@@ -1367,7 +1126,7 @@ def _get_message_hierarchy_level(msg: TemplateMessage) -> int:
 
 
 def _build_message_hierarchy(messages: list[TemplateMessage]) -> None:
-    """Build message_id and ancestry for all messages based on their current order.
+    """Build ancestry for all messages based on their current order.
 
     This should be called after all reordering operations (pair reordering, sidechain
     reordering) to ensure the hierarchy reflects the final display order.
@@ -1375,11 +1134,13 @@ def _build_message_hierarchy(messages: list[TemplateMessage]) -> None:
     The hierarchy is determined by message type using _get_message_hierarchy_level(),
     and a stack-based approach builds proper parent-child relationships.
 
+    Ancestry stores message_index integers. Templates prefix with "d-" for CSS classes.
+
     Args:
         messages: List of template messages in their final order (modified in place)
     """
-    hierarchy_stack: list[tuple[int, str]] = []
-    message_id_counter = 0
+    # Stack of (level, message_index) tuples
+    hierarchy_stack: list[tuple[int, int]] = []
 
     for message in messages:
         # Session headers are level 0
@@ -1393,30 +1154,21 @@ def _build_message_hierarchy(messages: list[TemplateMessage]) -> None:
         while hierarchy_stack and hierarchy_stack[-1][0] >= current_level:
             hierarchy_stack.pop()
 
-        # Build ancestry from remaining stack
-        ancestry = [msg_id for _, msg_id in hierarchy_stack]
-
-        # Generate new message ID
-        # Session headers use session-{session_id} format for navigation links
-        if message.is_session_header and message.session_id:
-            message_id = f"session-{message.session_id}"
-        else:
-            message_id = f"d-{message_id_counter}"
-            message_id_counter += 1
+        # Build ancestry from remaining stack (list of message_index integers)
+        ancestry = [msg_index for _, msg_index in hierarchy_stack]
 
         # Push current message onto stack
-        hierarchy_stack.append((current_level, message_id))
+        if message.message_index is not None:
+            hierarchy_stack.append((current_level, message.message_index))
 
-        # Update the message
-        message.message_id = message_id
+        # Update the message ancestry
         message.ancestry = ancestry
 
 
 def _mark_messages_with_children(messages: list[TemplateMessage]) -> None:
-    """Mark messages that have children and calculate descendant counts.
+    """Calculate child and descendant counts for messages.
 
     Efficiently calculates:
-    - has_children: Whether message has any children
     - immediate_children_count: Count of direct children only
     - total_descendants_count: Count of all descendants recursively
 
@@ -1425,11 +1177,11 @@ def _mark_messages_with_children(messages: list[TemplateMessage]) -> None:
     Args:
         messages: List of template messages to process
     """
-    # Build index of messages by ID for O(1) lookup
-    message_by_id: dict[str, TemplateMessage] = {}
+    # Build index of messages by message_index for O(1) lookup
+    message_by_index: dict[int, TemplateMessage] = {}
     for message in messages:
-        if message.message_id:
-            message_by_id[message.message_id] = message
+        if message.message_index is not None:
+            message_by_index[message.message_index] = message
 
     # Process each message and update counts for ancestors
     for message in messages:
@@ -1438,29 +1190,28 @@ def _mark_messages_with_children(messages: list[TemplateMessage]) -> None:
 
         # Skip counting pair_last messages (second in a pair)
         # Pairs are visually presented as a single unit, so we only count the first
-        if message.is_paired and message.pair_role == "pair_last":
+        if message.is_last_in_pair:
             continue
 
         # Get immediate parent (last in ancestry list)
-        immediate_parent_id = message.ancestry[-1]
+        immediate_parent_index = message.ancestry[-1]
 
         # Get message type for categorization
         msg_type = message.type
 
         # Increment immediate parent's child count
-        if immediate_parent_id in message_by_id:
-            parent = message_by_id[immediate_parent_id]
+        if immediate_parent_index in message_by_index:
+            parent = message_by_index[immediate_parent_index]
             parent.immediate_children_count += 1
-            parent.has_children = True
             # Track by type
             parent.immediate_children_by_type[msg_type] = (
                 parent.immediate_children_by_type.get(msg_type, 0) + 1
             )
 
         # Increment descendant count for ALL ancestors
-        for ancestor_id in message.ancestry:
-            if ancestor_id in message_by_id:
-                ancestor = message_by_id[ancestor_id]
+        for ancestor_index in message.ancestry:
+            if ancestor_index in message_by_index:
+                ancestor = message_by_index[ancestor_index]
                 ancestor.total_descendants_count += 1
                 # Track by type
                 ancestor.total_descendants_by_type[msg_type] = (
@@ -1471,7 +1222,7 @@ def _mark_messages_with_children(messages: list[TemplateMessage]) -> None:
 def _build_message_tree(messages: list[TemplateMessage]) -> list[TemplateMessage]:
     """Build tree structure by populating children fields based on ancestry.
 
-    This function takes a flat list of messages (with message_id and ancestry
+    This function takes a flat list of messages (with message_index and ancestry
     already set by _build_message_hierarchy) and populates the children field
     of each message to form an explicit tree structure.
 
@@ -1481,17 +1232,17 @@ def _build_message_tree(messages: list[TemplateMessage]) -> list[TemplateMessage
     - More natural parent-child traversal
 
     Args:
-        messages: List of template messages with message_id and ancestry set
+        messages: List of template messages with message_index and ancestry set
 
     Returns:
         List of root messages (those with empty ancestry). Each message's
         children field is populated with its direct children.
     """
-    # Build index of messages by ID for O(1) lookup
-    message_by_id: dict[str, TemplateMessage] = {}
+    # Build index of messages by message_index for O(1) lookup
+    message_by_index: dict[int, TemplateMessage] = {}
     for message in messages:
-        if message.message_id:
-            message_by_id[message.message_id] = message
+        if message.message_index is not None:
+            message_by_index[message.message_index] = message
 
     # Clear any existing children (in case of re-processing)
     for message in messages:
@@ -1507,12 +1258,150 @@ def _build_message_tree(messages: list[TemplateMessage]) -> list[TemplateMessage
             root_messages.append(message)
         else:
             # Has a parent - add to parent's children
-            immediate_parent_id = message.ancestry[-1]
-            if immediate_parent_id in message_by_id:
-                parent = message_by_id[immediate_parent_id]
+            immediate_parent_index = message.ancestry[-1]
+            if immediate_parent_index in message_by_index:
+                parent = message_by_index[immediate_parent_index]
                 parent.children.append(message)
 
     return root_messages
+
+
+# Pattern to match agentId lines added to Task results for resume functionality
+# e.g., "agentId: a7c9965 (for resuming to continue this agent's work if needed)"
+_AGENT_ID_LINE_PATTERN = re.compile(r"\n*agentId:\s*\w+\s*\([^)]*\)\s*$", re.IGNORECASE)
+
+
+def _normalize_for_dedup(text: str) -> str:
+    """Normalize text for deduplication matching.
+
+    Strips trailing agentId lines that may be added to Task results
+    but not present in the sidechain assistant's final message.
+    """
+    return _AGENT_ID_LINE_PATTERN.sub("", text).strip()
+
+
+def _extract_task_result_text(tool_result_message: ToolResultMessage) -> Optional[str]:
+    """Extract text content from a Task tool result for deduplication matching.
+
+    Args:
+        tool_result_message: The ToolResultMessage containing Task output
+
+    Returns:
+        The extracted text content (normalized), or None if extraction fails
+    """
+    output = tool_result_message.output
+
+    # Handle parsed TaskOutput (preferred - has structured result field)
+    if isinstance(output, TaskOutput):
+        text = output.result.strip() if output.result else None
+        return _normalize_for_dedup(text) if text else None
+
+    # Handle raw ToolResultContent (fallback for unparsed results)
+    if not isinstance(output, ToolResultContent):
+        return None
+
+    content = output.content
+    if isinstance(content, str):
+        text = content.strip() if content else None
+        return _normalize_for_dedup(text) if text else None
+
+    # Handle list of dicts (tool result format)
+    content_parts: list[str] = []
+    for item in content:
+        text_val = item.get("text", "")
+        if isinstance(text_val, str):
+            content_parts.append(text_val)
+    result = "\n".join(content_parts).strip()
+    return _normalize_for_dedup(result) if result else None
+
+
+def _cleanup_sidechain_duplicates(root_messages: list[TemplateMessage]) -> None:
+    """Clean up duplicate content in sidechains after tree is built.
+
+    For each Task tool_use or tool_result with sidechain children:
+    - Remove the first UserTextMessage (duplicate of Task input prompt)
+    - For tool_result: Replace last AssistantTextMessage matching result with DedupNotice
+
+    Sidechain messages can be children of either tool_use or tool_result depending
+    on timestamp order - tool_use during execution, tool_result after completion.
+
+    Args:
+        root_messages: List of root messages with children populated
+    """
+
+    def process_message(message: TemplateMessage) -> None:
+        """Recursively process a message and its children."""
+        # Recursively process children first (depth-first)
+        for child in message.children:
+            process_message(child)
+
+        # Check if this is a Task tool_use or tool_result with sidechain children
+        is_task_tool_use = (
+            message.type == "tool_use"
+            and isinstance(message.content, ToolUseMessage)
+            and message.content.tool_name == "Task"
+        )
+        is_task_tool_result = (
+            message.type == "tool_result"
+            and isinstance(message.content, ToolResultMessage)
+            and message.content.tool_name == "Task"
+        )
+
+        if not ((is_task_tool_use or is_task_tool_result) and message.children):
+            return
+
+        children = message.children
+
+        # Remove first sidechain UserTextMessage (duplicate of Task input prompt)
+        # Must be specifically UserTextMessage, not ToolResultMessage or other user types
+        # When removing, adopt its children to preserve sidechain tool messages
+        if (
+            children
+            and children[0].is_sidechain
+            and isinstance(children[0].content, UserTextMessage)
+        ):
+            removed = children.pop(0)
+            # Adopt orphaned children (tool_use/tool_result from sidechain)
+            if removed.children:
+                # Insert at beginning to maintain order
+                children[:0] = removed.children
+
+        # For tool_result only: replace last matching AssistantTextMessage with dedup
+        if not is_task_tool_result:
+            return
+
+        task_result_text = _extract_task_result_text(
+            cast(ToolResultMessage, message.content)
+        )
+        if not task_result_text:
+            return
+
+        for i in range(len(children) - 1, -1, -1):
+            child = children[i]
+            child_content = child.content
+            # Get raw_text_content from content (UserTextMessage/AssistantTextMessage)
+            child_raw = getattr(child_content, "raw_text_content", None)
+            child_text = _normalize_for_dedup(child_raw) if child_raw else None
+            if (
+                child.type == "assistant"
+                and child.is_sidechain
+                and isinstance(child_content, AssistantTextMessage)
+                and child_text
+                and child_text == task_result_text
+            ):
+                # Replace with dedup notice pointing to the Task result
+                # Preserve original meta (sidechain/session flags) and original message
+                child.content = DedupNoticeMessage(
+                    child_content.meta,
+                    notice_text="Task summary — see result above",
+                    target_message_id=message.message_id,
+                    original_text=child_text,
+                    original=child_content,
+                )
+                break
+
+    for root in root_messages:
+        process_message(root)
 
 
 # -- Message Reordering -------------------------------------------------------
@@ -1589,9 +1478,9 @@ def _reorder_sidechain_template_messages(
     order based on when each agent finishes. This function reorders messages so that
     each sidechain's messages appear right after the Task result that references them.
 
-    This function also handles deduplication: the last sidechain assistant message
-    typically contains the same content as the Task result, so we replace it with
-    a forward link to avoid showing the same content twice.
+    Note: Deduplication of sidechain content (first user message = Task input,
+    last assistant message = Task output) is handled later by _cleanup_sidechain_duplicates
+    after the tree structure is built.
 
     This must be called AFTER _reorder_paired_messages, since that function moves
     tool_results next to their tool_uses, which changes where the agentId-bearing
@@ -1624,7 +1513,6 @@ def _reorder_sidechain_template_messages(
         return messages
 
     # Second pass: insert sidechains after their Task result messages
-    # Also perform deduplication of sidechain assistants vs Task results
     result: list[TemplateMessage] = []
     used_agents: set[str] = set()
 
@@ -1644,39 +1532,9 @@ def _reorder_sidechain_template_messages(
             and agent_id in sidechain_map
             and agent_id not in used_agents
         ):
-            sidechain_msgs = sidechain_map[agent_id]
-
-            # Deduplicate: find the last sidechain assistant with text content
-            # that matches the Task result content
-            task_result_content = (
-                message.raw_text_content.strip() if message.raw_text_content else None
-            )
-            if task_result_content and message.type == MessageType.TOOL_RESULT:
-                # Find the last assistant message in this sidechain
-                for sidechain_msg in reversed(sidechain_msgs):
-                    sidechain_text = (
-                        sidechain_msg.raw_text_content.strip()
-                        if sidechain_msg.raw_text_content
-                        else None
-                    )
-                    if (
-                        sidechain_msg.type == MessageType.ASSISTANT
-                        and sidechain_text
-                        and sidechain_text == task_result_content
-                    ):
-                        # Replace with note pointing to the Task result
-                        sidechain_msg.content = DedupNoticeContent(
-                            notice_text="Task summary — see result above",
-                            target_uuid=message.uuid,
-                            original_text=sidechain_text,
-                        )
-                        # Mark as deduplicated for potential debugging
-                        sidechain_msg.raw_text_content = None
-                        break
-
             # Insert the sidechain messages for this agent right after this message
             # Note: ancestry will be rebuilt by _build_message_hierarchy() later
-            result.extend(sidechain_msgs)
+            result.extend(sidechain_map[agent_id])
             used_agents.add(agent_id)
 
     # Append any sidechains that weren't matched (shouldn't happen normally)
@@ -1687,23 +1545,6 @@ def _reorder_sidechain_template_messages(
     return result
 
 
-def _resolve_dedup_targets(messages: list[TemplateMessage]) -> None:
-    """Resolve dedup notice target UUIDs to message IDs for anchor links.
-
-    Must be called after _build_message_hierarchy assigns message_id values.
-    """
-    # Build uuid -> message_id mapping
-    uuid_to_id: dict[str, str] = {}
-    for msg in messages:
-        if msg.uuid and msg.message_id:
-            uuid_to_id[msg.uuid] = msg.message_id
-
-    # Resolve dedup notice targets
-    for msg in messages:
-        if isinstance(msg.content, DedupNoticeContent) and msg.content.target_uuid:
-            msg.content.target_message_id = uuid_to_id.get(msg.content.target_uuid)
-
-
 def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
     """Filter messages to those that should be rendered.
 
@@ -1712,9 +1553,11 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
     - Queue operations except 'remove' (steering messages)
     - Messages with no meaningful content (no text and no tool items)
     - Messages matching should_skip_message() (warmup, etc.)
-    - Sidechain user messages without tool results (prompts duplicate Task result)
 
     System messages are included as they need special processing in _render_messages.
+
+    Note: Sidechain user prompts (duplicates of Task input) are removed later
+    by _cleanup_sidechain_duplicates after tree building.
 
     Args:
         messages: List of transcript entries to filter
@@ -1725,8 +1568,6 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
     filtered: list[TranscriptEntry] = []
 
     for message in messages:
-        message_type = message.type
-
         # Skip summary messages
         if isinstance(message, SummaryTranscriptEntry):
             continue
@@ -1767,16 +1608,6 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
         if should_skip_message(text_content):
             continue
 
-        # Skip sidechain user messages that are just prompts (no tool results)
-        if message_type == MessageType.USER and getattr(message, "isSidechain", False):
-            has_tool_results = any(
-                getattr(item, "type", None) == "tool_result"
-                or isinstance(item, ToolResultContent)
-                for item in message_content
-            )
-            if not has_tool_results:
-                continue
-
         # Message passes all filters
         filtered.append(message)
 
@@ -1785,6 +1616,7 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
 
 def _collect_session_info(
     messages: list[TranscriptEntry],
+    session_summaries: dict[str, str],
 ) -> tuple[
     dict[str, dict[str, Any]],  # sessions
     list[str],  # session_order
@@ -1802,6 +1634,7 @@ def _collect_session_info(
 
     Args:
         messages: Pre-filtered list of transcript entries
+        session_summaries: Dict mapping session_id to summary text
 
     Returns:
         Tuple containing:
@@ -1835,7 +1668,7 @@ def _collect_session_info(
 
         # Initialize session if new
         if session_id not in sessions:
-            current_session_summary = getattr(message, "_session_summary", None)
+            current_session_summary = session_summaries.get(session_id)
 
             # Get first user message content for preview
             first_user_message = ""
@@ -1906,7 +1739,7 @@ def _render_messages(
     messages: list[TranscriptEntry],
     sessions: dict[str, dict[str, Any]],
     show_tokens_for_message: set[str],
-) -> list[TemplateMessage]:
+) -> RenderingContext:
     """Pass 2: Render pre-filtered messages to TemplateMessage objects.
 
     This pass creates the actual TemplateMessage objects for rendering:
@@ -1924,58 +1757,44 @@ def _render_messages(
         show_tokens_for_message: Set of message UUIDs that should display tokens
 
     Returns:
-        List of TemplateMessage objects ready for template rendering
+        RenderingContext with all TemplateMessage objects registered
     """
+    # Create rendering context for this operation
+    ctx = RenderingContext()
+
     # Track which sessions have had headers added
     seen_sessions: set[str] = set()
 
-    # Build mapping of tool_use_id to ToolUseContent for specialized tool result rendering
-    tool_use_context: dict[str, ToolUseContent] = {}
-
-    # Process messages into template-friendly format
-    template_messages: list[TemplateMessage] = []
-
-    # Per-message timing tracking
-    message_timings: list[
-        tuple[float, str, int, str]
-    ] = []  # (duration, message_type, index, uuid)
-
-    # Track expensive operations
-    markdown_timings: list[tuple[float, str]] = []  # (duration, context_uuid)
-    pygments_timings: list[tuple[float, str]] = []  # (duration, context_uuid)
-
-    # Initialize timing tracking
-    set_timing_var("_markdown_timings", markdown_timings)
-    set_timing_var("_pygments_timings", pygments_timings)
-    set_timing_var("_current_msg_uuid", "")
-
-    for msg_idx, message in enumerate(messages):
-        msg_start_time = time.time() if DEBUG_TIMING else 0.0
+    for message in messages:
         message_type = message.type
-        msg_uuid = getattr(message, "uuid", f"no-uuid-{msg_idx}")
 
-        # Update current message UUID for timing tracking
-        set_timing_var("_current_msg_uuid", msg_uuid)
-
-        # Handle system messages separately (already filtered in pass 1)
+        # Handle system messages (already filtered in pass 1)
         if isinstance(message, SystemTranscriptEntry):
-            system_template_message = _process_system_message(message)
-            if system_template_message:
-                template_messages.append(system_template_message)
+            system_content = create_system_message(message)
+            if system_content:
+                system_msg = TemplateMessage(system_content)
+                ctx.register(system_msg)
+            continue
+
+        # Skip summary messages (should be filtered in pass 1, but be defensive)
+        if isinstance(message, SummaryTranscriptEntry):
             continue
 
         # Handle queue-operation 'remove' messages as user messages
         if isinstance(message, QueueOperationTranscriptEntry):
             message_content = message.content if message.content else []
             message_type = MessageType.QUEUE_OPERATION
+            # QueueOperationTranscriptEntry has limited fields (no uuid, agentId, etc.)
+            meta = MessageMeta(
+                session_id=message.sessionId,
+                timestamp=message.timestamp,
+                uuid="",
+            )
+            effective_type = "user"
         else:
             message_content = message.message.content  # type: ignore
-
-        # Track sidechain status for user messages
-        # (sidechain user text is skipped to avoid duplicate Task prompts)
-        is_sidechain_user = message_type == MessageType.USER and getattr(
-            message, "isSidechain", False
-        )
+            meta = create_meta(message)
+            effective_type = message_type
 
         # Chunk content: regular items (text/image) accumulate, special items (tool/thinking) separate
         if isinstance(message_content, list):
@@ -1995,267 +1814,136 @@ def _render_messages(
             continue
 
         # Get session info
-        session_id = getattr(message, "sessionId", "unknown")
-        session_summary = getattr(message, "_session_summary", None)
+        session_id = meta.session_id or "unknown"
+        session_summary = sessions.get(session_id, {}).get("summary")
 
         # Add session header if this is a new session
         if session_id not in seen_sessions:
             seen_sessions.add(session_id)
-            current_session_summary = sessions.get(session_id, {}).get("summary")
+            current_session_summary = session_summary
             session_title = (
                 f"{current_session_summary} • {session_id[:8]}"
                 if current_session_summary
                 else session_id[:8]
             )
 
-            session_header = TemplateMessage(
-                message_type="session_header",
-                formatted_timestamp="",
-                raw_timestamp=None,
-                session_summary=current_session_summary,
+            # Create meta with session_id for the session header
+            session_header_meta = MessageMeta(
                 session_id=session_id,
-                is_session_header=True,
-                message_id=None,
-                ancestry=[],
-                content=SessionHeaderContent(
-                    title=session_title,
-                    session_id=session_id,
-                    summary=current_session_summary,
-                ),
+                timestamp="",
+                uuid="",
             )
-            template_messages.append(session_header)
-
-        # Get timestamp (only for non-summary messages)
-        timestamp = getattr(message, "timestamp", "")
-        formatted_timestamp = format_timestamp(timestamp) if timestamp else ""
+            session_header_content = SessionHeaderMessage(
+                session_header_meta,
+                title=session_title,
+                session_id=session_id,
+                summary=current_session_summary,
+            )
+            # Register and track session's first message
+            session_header = TemplateMessage(session_header_content)
+            msg_index = ctx.register(session_header)
+            ctx.session_first_message[session_id] = msg_index
 
         # Extract token usage for assistant messages
         # Only show token usage for the first message with each requestId to avoid duplicates
-        token_usage_str: Optional[str] = None
+        usage_to_show: Optional[UsageInfo] = None
         if assistant_entry := as_assistant_entry(message):
             assistant_message = assistant_entry.message
             message_uuid = assistant_entry.uuid
-
             if assistant_message.usage and message_uuid in show_tokens_for_message:
-                # Only show token usage for messages marked as first occurrence of requestId
-                usage = assistant_message.usage
-                token_parts = [
-                    f"Input: {usage.input_tokens}",
-                    f"Output: {usage.output_tokens}",
-                ]
-                if usage.cache_creation_input_tokens:
-                    token_parts.append(
-                        f"Cache Creation: {usage.cache_creation_input_tokens}"
-                    )
-                if usage.cache_read_input_tokens:
-                    token_parts.append(f"Cache Read: {usage.cache_read_input_tokens}")
-                token_usage_str = " | ".join(token_parts)
+                usage_to_show = assistant_message.usage
 
-        # Track whether we've shown token usage (only show on first content chunk)
-        token_shown = False
+        # Track whether we've used the usage (only use on first content chunk)
+        usage_used = False
 
         # Process each chunk - regular chunks (list) become text/image messages,
         # special chunks (single item) become tool/thinking messages
-        for chunk_idx, chunk in enumerate(chunks):
+        for chunk in chunks:
+            # Each chunk needs its own meta copy to preserve original values
+            chunk_meta = replace(meta)
+
             # Regular chunk: list of text/image items
             if isinstance(chunk, list):
-                # Skip text chunks for sidechain user messages
-                # (prompts duplicate Task result; filtering already done in pass 1)
-                if is_sidechain_user:
-                    continue
-
                 # Extract text for pattern detection
                 chunk_text = extract_text_content(chunk)
 
-                # Check for special message patterns
-                is_command = is_command_message(chunk_text)
-                is_local_output = is_local_command_output(chunk_text)
-                is_bash_cmd = is_bash_input(chunk_text)
-                is_bash_result = is_bash_output(chunk_text)
-
-                # Determine is_sidechain and content based on message type
+                # Dispatch to user or assistant parser based on effective_type
                 content_model: Optional[MessageContent] = None
-                chunk_message_type = message_type
-                chunk_is_sidechain = getattr(message, "isSidechain", False)
-
-                if is_command:
-                    content_model, chunk_message_type, message_title = (
-                        _process_command_message(chunk_text)
-                    )
-                elif is_local_output:
-                    content_model, chunk_message_type, message_title = (
-                        _process_local_command_output(chunk_text)
-                    )
-                elif is_bash_cmd:
-                    content_model, chunk_message_type, message_title = (
-                        _process_bash_input(chunk_text)
-                    )
-                elif is_bash_result:
-                    content_model, chunk_message_type, message_title = (
-                        _process_bash_output(chunk_text)
-                    )
-                else:
-                    # For queue-operation messages, treat them as user messages
-                    if isinstance(message, QueueOperationTranscriptEntry):
-                        effective_type = "user"
-                    else:
-                        effective_type = message_type
-
-                    (
-                        chunk_is_sidechain,
-                        content_model,
-                        chunk_message_type,
-                        message_title,
-                    ) = _process_regular_message(
+                # (user message parsing handles all type detection internally)
+                if effective_type == "user":
+                    content_model = create_user_message(
+                        chunk_meta,
                         chunk,  # Pass the chunk items
-                        effective_type,
-                        chunk_is_sidechain,
-                        getattr(message, "isMeta", False),
+                        chunk_text,  # Pre-extracted text for pattern detection
+                        is_slash_command=chunk_meta.is_meta,
+                    )
+                elif effective_type == "assistant":
+                    # Pass usage only on first chunk
+                    chunk_usage = usage_to_show if not usage_used else None
+                    usage_used = True
+                    content_model = create_assistant_message(
+                        chunk_meta, chunk, chunk_usage
                     )
 
-                    # Convert to UserSteeringContent for queue-operation 'remove' messages
-                    if (
-                        isinstance(message, QueueOperationTranscriptEntry)
-                        and message.operation == "remove"
-                        and isinstance(content_model, UserTextContent)
-                    ):
-                        content_model = UserSteeringContent(items=content_model.items)
-                        message_title = "User (steering)"
+                # Convert to UserSteeringMessage for queue-operation 'remove' messages
+                if (
+                    isinstance(message, QueueOperationTranscriptEntry)
+                    and message.operation == "remove"
+                    and isinstance(content_model, UserTextMessage)
+                ):
+                    content_model = UserSteeringMessage(
+                        items=content_model.items, meta=chunk_meta
+                    )
 
-                # Skip empty chunks
-                if not chunk:
+                # Skip empty chunks or when no content model was created
+                if not chunk or content_model is None:
                     continue
 
-                # Only show token usage on first chunk
-                chunk_token_usage = token_usage_str if not token_shown else None
-                token_shown = True
-
-                # Generate UUID for this chunk (append index if multiple chunks)
-                chunk_uuid = getattr(message, "uuid", None)
-                if chunk_uuid and len(chunks) > 1:
-                    chunk_uuid = f"{chunk_uuid}-chunk-{chunk_idx}"
-
-                # Markdown rendering for assistant, thinking, and compacted content
-                has_markdown = isinstance(
-                    content_model,
-                    (
-                        AssistantTextContent,
-                        ThinkingContentModel,
-                        CompactedSummaryContent,
-                    ),
-                )
-
-                template_message = TemplateMessage(
-                    message_type=chunk_message_type,
-                    formatted_timestamp=formatted_timestamp,
-                    raw_timestamp=timestamp,
-                    session_summary=session_summary,
-                    session_id=session_id,
-                    token_usage=chunk_token_usage,
-                    message_title=message_title,
-                    message_id=None,  # Will be assigned by _build_message_hierarchy
-                    ancestry=[],  # Will be assigned by _build_message_hierarchy
-                    agent_id=getattr(message, "agentId", None),
-                    uuid=chunk_uuid,
-                    parent_uuid=getattr(message, "parentUuid", None),
-                    is_sidechain=chunk_is_sidechain,
-                    content=content_model,
-                    has_markdown=has_markdown,
-                )
-
-                # Store raw text content for potential future use
-                template_message.raw_text_content = chunk_text
-
-                template_messages.append(template_message)
+                chunk_msg = TemplateMessage(content_model)
+                ctx.register(chunk_msg)
 
             else:
                 # Special chunk: single tool_use/tool_result/thinking item
                 tool_item = chunk
-                tool_timestamp = getattr(message, "timestamp", "")
-                tool_formatted_timestamp = (
-                    format_timestamp(tool_timestamp) if tool_timestamp else ""
-                )
-
-                # Handle both custom types and Anthropic types
-                item_type = getattr(tool_item, "type", None)
 
                 # Dispatch to appropriate handler based on item type
-                tool_result: Optional[ToolItemResult] = None
-                if isinstance(tool_item, ToolUseContent) or item_type == "tool_use":
-                    tool_result = _process_tool_use_item(tool_item, tool_use_context)
-                elif (
-                    isinstance(tool_item, ToolResultContent)
-                    or item_type == "tool_result"
-                ):
-                    tool_result = _process_tool_result_item(tool_item, tool_use_context)
-                elif isinstance(tool_item, ThinkingContent) or item_type == "thinking":
-                    tool_result = _process_thinking_item(tool_item)
+                tool_result: ToolItemResult
+                if isinstance(tool_item, ToolUseContent):
+                    tool_result = create_tool_use_message(
+                        chunk_meta, tool_item, ctx.tool_use_context
+                    )
+                elif isinstance(tool_item, ToolResultContent):
+                    tool_result = create_tool_result_message(
+                        chunk_meta, tool_item, ctx.tool_use_context
+                    )
+                elif isinstance(tool_item, ThinkingContent):
+                    # Pass usage only if not yet used
+                    chunk_usage = usage_to_show if not usage_used else None
+                    usage_used = True
+                    content = create_thinking_message(
+                        chunk_meta, tool_item, chunk_usage
+                    )
+                    tool_result = ToolItemResult(
+                        message_type=content.message_type,
+                        content=content,
+                    )
                 else:
                     # Handle unknown content types
                     tool_result = ToolItemResult(
                         message_type="unknown",
-                        content=UnknownContent(type_name=str(type(tool_item))),
-                        message_title="Unknown Content",
+                        content=UnknownMessage(
+                            chunk_meta, type_name=str(type(tool_item))
+                        ),
                     )
 
-                # Skip if handler returned None (e.g., unsupported image types)
-                if tool_result is None:
+                # Skip if no content (shouldn't happen, but be safe)
+                if tool_result.content is None:
                     continue
 
-                # Preserve sidechain context for tool/thinking content
-                tool_is_sidechain = getattr(message, "isSidechain", False)
+                tool_msg = TemplateMessage(tool_result.content)
+                ctx.register(tool_msg)
 
-                # Generate unique UUID for this tool message
-                # Use tool_use_id if available, otherwise fall back to msg UUID + index
-                tool_uuid = (
-                    tool_result.tool_use_id
-                    if tool_result.tool_use_id
-                    else f"{msg_uuid}-tool-{len(template_messages)}"
-                )
-
-                # Thinking content uses markdown
-                tool_has_markdown = isinstance(
-                    tool_result.content, ThinkingContentModel
-                )
-
-                tool_template_message = TemplateMessage(
-                    message_type=tool_result.message_type,
-                    formatted_timestamp=tool_formatted_timestamp,
-                    raw_timestamp=tool_timestamp,
-                    session_summary=session_summary,
-                    session_id=session_id,
-                    tool_use_id=tool_result.tool_use_id,
-                    title_hint=tool_result.title_hint,
-                    message_title=tool_result.message_title,
-                    message_id=None,  # Will be assigned by _build_message_hierarchy
-                    ancestry=[],  # Will be assigned by _build_message_hierarchy
-                    agent_id=getattr(message, "agentId", None),
-                    uuid=tool_uuid,
-                    is_sidechain=tool_is_sidechain,
-                    content=tool_result.content,  # Structured content model
-                    has_markdown=tool_has_markdown,
-                )
-
-                # Store raw text for Task result deduplication
-                # (handled later in _reorder_sidechain_template_messages)
-                if tool_result.pending_dedup is not None:
-                    tool_template_message.raw_text_content = tool_result.pending_dedup
-
-                template_messages.append(tool_template_message)
-
-        # Track message timing
-        if DEBUG_TIMING:
-            msg_duration = time.time() - msg_start_time
-            message_timings.append((msg_duration, message_type, msg_idx, msg_uuid))
-
-    # Report loop statistics
-    if DEBUG_TIMING:
-        report_timing_statistics(
-            message_timings,
-            [("Markdown", markdown_timings), ("Pygments", pygments_timings)],
-        )
-
-    return template_messages
+    return ctx
 
 
 # -- Project Index Generation -------------------------------------------------
@@ -2368,34 +2056,36 @@ class Renderer:
 
     Subclasses implement format-specific rendering (HTML, Markdown, etc.).
 
-    The dispatcher pattern enables automatic content formatting based on type:
-    - Subclasses override _build_dispatcher() to map content types to formatters
-    - format_content() walks the MRO to find the most specific handler
-    - Fallback to parent class handlers if no specific handler exists
+    The method-based dispatcher pattern:
+    - Base class defines format_xyz_message() methods for each content type
+    - Each method documents its fallback chain (which method it delegates to)
+    - format_content() walks the MRO to find the most specific method
+    - Subclasses override methods to implement format-specific rendering
     """
 
-    def __init__(self):
-        self._dispatcher = self._build_dispatcher()
+    def _dispatch_format(self, obj: Any) -> str:
+        """Dispatch to format_{ClassName} method based on object type."""
+        for cls in type(obj).__mro__:
+            if cls is object:
+                break
+            if method := getattr(self, f"format_{cls.__name__}", None):
+                return method(obj)
+        return ""
 
-    def _build_dispatcher(
-        self,
-    ) -> dict[type, Callable[..., str]]:
-        """Build the content type to formatter mapping.
-
-        Override in subclasses to register format-specific handlers.
-        The dict maps MessageContent subclasses to formatter functions.
-        Each formatter receives the content directly (cast to the matched type).
-
-        Returns:
-            Dict mapping content types to formatter functions.
-        """
-        return {}
+    def _dispatch_title(self, obj: Any, message: "TemplateMessage") -> Optional[str]:
+        """Dispatch to title_{ClassName} method based on object type."""
+        for cls in type(obj).__mro__:
+            if cls is object:
+                break
+            if method := getattr(self, f"title_{cls.__name__}", None):
+                return method(message)
+        return None
 
     def format_content(self, message: "TemplateMessage") -> str:
-        """Format message content by dispatching to type-specific handler.
+        """Format message content by dispatching to type-specific method.
 
-        Walks the content type's MRO to find the most specific registered
-        handler. This allows handlers for parent classes to serve as fallbacks.
+        Looks for a method named format_{ClassName} (e.g., format_SystemMessage).
+        Walks the content type's MRO to find the most specific format method.
 
         Args:
             message: TemplateMessage with content to format.
@@ -2403,14 +2093,164 @@ class Renderer:
         Returns:
             Formatted string (e.g., HTML), or empty string if no handler found.
         """
-        if message.content is None:
-            return ""
+        return self._dispatch_format(message.content)
+
+    def title_content(self, message: "TemplateMessage") -> str:
+        """Get message title by dispatching to type-specific title method.
+
+        Looks for a method named title_{ClassName} (e.g., title_ToolUseMessage).
+        Falls back to type-based title derived from message_type.
+
+        Args:
+            message: TemplateMessage to get title for.
+
+        Returns:
+            Title string for the message header.
+        """
+        # Try title_{ClassName} dispatch
         for cls in type(message.content).__mro__:
             if cls is object:
                 break
-            if fmt := self._dispatcher.get(cls):
-                return fmt(message.content)
-        return ""
+            if method := getattr(self, f"title_{cls.__name__}", None):
+                return method(message)
+        # Fallback: convert message_type to title case
+        return message.content.message_type.replace("_", " ").replace("-", " ").title()
+
+    # -------------------------------------------------------------------------
+    # Title Methods (return title strings for message headers)
+    # -------------------------------------------------------------------------
+    # These methods return title strings for specific content types.
+    # Override in subclasses for format-specific titles (e.g., HTML with icons).
+
+    def title_SystemMessage(self, message: "TemplateMessage") -> str:
+        content = cast("SystemMessage", message.content)
+        return f"System {content.level.title()}"
+
+    def title_HookSummaryMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "System Hook"
+
+    def title_SlashCommandMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "Slash Command"
+
+    def title_CommandOutputMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return ""  # Empty title for command output
+
+    def title_BashInputMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "Bash command"
+
+    def title_BashOutputMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return ""  # Empty title for bash output
+
+    def title_CompactedSummaryMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "User (compacted conversation)"
+
+    def title_UserMemoryMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "Memory"
+
+    def title_UserSlashCommandMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "User (slash command)"
+
+    def title_UserTextMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "User"
+
+    def title_UserSteeringMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "User (steering)"
+
+    def title_AssistantTextMessage(self, message: "TemplateMessage") -> str:
+        # Sidechain assistant messages get special title
+        if message.meta.is_sidechain:
+            return "Sub-assistant"
+        return "Assistant"
+
+    def title_ThinkingMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "Thinking"
+
+    def title_UnknownMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+        return "Unknown Content"
+
+    # Tool title methods (dispatch to input/output title methods)
+    def title_ToolUseMessage(self, message: "TemplateMessage") -> str:
+        content = cast("ToolUseMessage", message.content)
+        if title := self._dispatch_title(content.input, message):
+            return title
+        return content.tool_name  # Default to tool name
+
+    def title_ToolResultMessage(self, message: "TemplateMessage") -> str:
+        content = cast("ToolResultMessage", message.content)
+        if content.is_error:
+            return "Error"
+        if title := self._dispatch_title(content.output, message):
+            return title
+        return ""  # Tool results typically don't need a title
+
+    # Tool input title stubs (override in subclasses for custom titles)
+    # def title_BashInput(self, message: "TemplateMessage") -> str: ...
+    # def title_ReadInput(self, message: "TemplateMessage") -> str: ...
+    # def title_EditInput(self, message: "TemplateMessage") -> str: ...
+    # def title_TaskInput(self, message: "TemplateMessage") -> str: ...
+    # def title_TodoWriteInput(self, message: "TemplateMessage") -> str: ...
+
+    # -------------------------------------------------------------------------
+    # Format Method Stubs (override in subclasses)
+    # -------------------------------------------------------------------------
+    # System content formatters
+    # def format_SystemMessage(self, message: "SystemMessage") -> str: return ""
+    # def format_HookSummaryMessage(self, message: "HookSummaryMessage") -> str: ...
+    # def format_SessionHeaderMessage(self, message: "SessionHeaderMessage") -> str: ...
+    # def format_DedupNoticeMessage(self, message: "DedupNoticeMessage") -> str: ...
+
+    # User content formatters
+    # def format_UserTextMessage(self, message: "UserTextMessage") -> str: ...
+    # def format_UserSteeringMessage(self, message: "UserSteeringMessage") -> str: ...
+    # def format_UserSlashCommandMessage(self, message: "UserSlashCommandMessage") -> str: ...
+    # def format_SlashCommandMessage(self, message: "SlashCommandMessage") -> str: ...
+    # def format_CommandOutputMessage(self, message: "CommandOutputMessage") -> str: ...
+    # def format_BashInputMessage(self, message: "BashInputMessage") -> str: ...
+    # def format_BashOutputMessage(self, message: "BashOutputMessage") -> str: ...
+    # def format_CompactedSummaryMessage(self, message: "CompactedSummaryMessage") -> str: ...
+    # def format_UserMemoryMessage(self, message: "UserMemoryMessage") -> str: ...
+
+    # Assistant content formatters
+    # def format_AssistantTextMessage(self, message: "AssistantTextMessage") -> str: ...
+    # def format_ThinkingMessage(self, message: "ThinkingMessage") -> str: ...
+    # def format_UnknownMessage(self, message: "UnknownMessage") -> str: ...
+
+    # Tool content formatters (dispatch to input/output formatters)
+    def format_ToolUseMessage(self, message: "ToolUseMessage") -> str:
+        """Dispatch to format_{InputClass} based on message.input type."""
+        return self._dispatch_format(message.input)
+
+    def format_ToolResultMessage(self, message: "ToolResultMessage") -> str:
+        """Dispatch to format_{OutputClass} based on message.output type."""
+        return self._dispatch_format(message.output)
+
+    # Tool input formatters
+    # def format_BashInput(self, input: "BashInput") -> str: ...
+    # def format_ReadInput(self, input: "ReadInput") -> str: ...
+    # def format_WriteInput(self, input: "WriteInput") -> str: ...
+    # def format_EditInput(self, input: "EditInput") -> str: ...
+    # def format_MultiEditInput(self, input: "MultiEditInput") -> str: ...
+    # def format_GlobInput(self, input: "GlobInput") -> str: ...
+    # def format_GrepInput(self, input: "GrepInput") -> str: ...
+    # def format_TaskInput(self, input: "TaskInput") -> str: ...
+    # def format_TodoWriteInput(self, input: "TodoWriteInput") -> str: ...
+    # def format_AskUserQuestionInput(self, input: "AskUserQuestionInput") -> str: ...
+    # def format_ExitPlanModeInput(self, input: "ExitPlanModeInput") -> str: ...
+    # def format_ToolUseContent(self, input: "ToolUseContent") -> str: ...  # fallback
+
+    # Tool output formatters
+    # def format_ReadOutput(self, output: "ReadOutput") -> str: ...
+    # def format_WriteOutput(self, output: "WriteOutput") -> str: ...
+    # def format_EditOutput(self, output: "EditOutput") -> str: ...
+    # def format_BashOutput(self, output: "BashOutput") -> str: ...
+    # def format_TaskOutput(self, output: "TaskOutput") -> str: ...
+    # def format_AskUserQuestionOutput(self, output: "AskUserQuestionOutput") -> str: ...
+    # def format_ExitPlanModeOutput(self, output: "ExitPlanModeOutput") -> str: ...
+    # def format_ToolResultContent(self, output: "ToolResultContent") -> str: ...  # fallback
+
+    # -------------------------------------------------------------------------
+    # Rendering Entry Points
+    # -------------------------------------------------------------------------
 
     def generate(
         self,

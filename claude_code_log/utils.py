@@ -8,7 +8,7 @@ from typing import Optional
 
 from claude_code_log.cache import SessionCacheData
 from .models import ContentItem, TextContent, TranscriptEntry, UserTranscriptEntry
-from .parser import (
+from .factories import (
     IDE_DIAGNOSTICS_PATTERN,
     IDE_OPENED_FILE_PATTERN,
     IDE_SELECTION_PATTERN,
