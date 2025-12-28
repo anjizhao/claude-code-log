@@ -27,6 +27,7 @@ from ..models import (
     BashInput,
     EditInput,
     ExitPlanModeInput,
+    GlobInput,
     MultiEditInput,
     ReadInput,
     TaskInput,
@@ -147,15 +148,19 @@ class HtmlRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def format_SystemMessage(self, message: SystemMessage) -> str:
+        """Format → <div class='system-content'>...</div>."""
         return format_system_content(message)
 
     def format_HookSummaryMessage(self, message: HookSummaryMessage) -> str:
+        """Format → <details class='hook-summary'>...</details>."""
         return format_hook_summary_content(message)
 
     def format_SessionHeaderMessage(self, message: SessionHeaderMessage) -> str:
+        """Format → <details class='session-header'>...</details>."""
         return format_session_header_content(message)
 
     def format_DedupNoticeMessage(self, message: DedupNoticeMessage) -> str:
+        """Format → <span class='muted'>...</span>."""
         return format_dedup_notice_content(message)
 
     # -------------------------------------------------------------------------
@@ -163,27 +168,35 @@ class HtmlRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def format_UserTextMessage(self, message: UserTextMessage) -> str:
+        """Format → rendered markdown HTML."""
         return format_user_text_model_content(message)
 
     def format_UserSlashCommandMessage(self, message: UserSlashCommandMessage) -> str:
+        """Format → <span class='slash-command'>/cmd</span>."""
         return format_user_slash_command_content(message)
 
     def format_SlashCommandMessage(self, message: SlashCommandMessage) -> str:
+        """Format → <span class='slash-command'>/cmd arg</span>."""
         return format_slash_command_content(message)
 
     def format_CommandOutputMessage(self, message: CommandOutputMessage) -> str:
+        """Format → <pre class='command-output'>...</pre>."""
         return format_command_output_content(message)
 
     def format_BashInputMessage(self, message: BashInputMessage) -> str:
+        """Format → <pre class='bash-input'>$ cmd</pre>."""
         return format_bash_input_content(message)
 
     def format_BashOutputMessage(self, message: BashOutputMessage) -> str:
+        """Format → <pre class='bash-output'>...</pre>."""
         return format_bash_output_content(message)
 
     def format_CompactedSummaryMessage(self, message: CompactedSummaryMessage) -> str:
+        """Format → <details class='compacted-summary'>...</details>."""
         return format_compacted_summary_content(message)
 
     def format_UserMemoryMessage(self, message: UserMemoryMessage) -> str:
+        """Format → <details class='user-memory'>...</details>."""
         return format_user_memory_content(message)
 
     # -------------------------------------------------------------------------
@@ -191,12 +204,15 @@ class HtmlRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def format_AssistantTextMessage(self, message: AssistantTextMessage) -> str:
+        """Format → rendered markdown HTML."""
         return format_assistant_text_content(message)
 
     def format_ThinkingMessage(self, message: ThinkingMessage) -> str:
+        """Format → <details class='thinking'>...</details> (foldable if >10 lines)."""
         return format_thinking_content(message, line_threshold=10)
 
     def format_UnknownMessage(self, message: UnknownMessage) -> str:
+        """Format → <pre class='unknown'>JSON dump</pre>."""
         return format_unknown_content(message)
 
     # -------------------------------------------------------------------------
@@ -204,33 +220,43 @@ class HtmlRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def format_BashInput(self, input: BashInput) -> str:
+        """Format → <pre>$ command</pre>."""
         return format_bash_input(input)
 
     def format_ReadInput(self, input: ReadInput) -> str:
+        """Format → <table class='params'>file_path | ...</table>."""
         return format_read_input(input)
 
     def format_WriteInput(self, input: WriteInput) -> str:
+        """Format → file path + syntax-highlighted content preview."""
         return format_write_input(input)
 
     def format_EditInput(self, input: EditInput) -> str:
+        """Format → file path + diff of old_string/new_string."""
         return format_edit_input(input)
 
     def format_MultiEditInput(self, input: MultiEditInput) -> str:
+        """Format → file path + multiple diffs."""
         return format_multiedit_input(input)
 
     def format_TaskInput(self, input: TaskInput) -> str:
+        """Format → <div class='task-prompt'>prompt text</div>."""
         return format_task_input(input)
 
     def format_TodoWriteInput(self, input: TodoWriteInput) -> str:
+        """Format → <ul class='todo-list'>...</ul>."""
         return format_todowrite_input(input)
 
     def format_AskUserQuestionInput(self, input: AskUserQuestionInput) -> str:
+        """Format → questions as definition list."""
         return format_askuserquestion_input(input)
 
     def format_ExitPlanModeInput(self, input: ExitPlanModeInput) -> str:
+        """Format → empty string (no content)."""
         return format_exitplanmode_input(input)
 
     def format_ToolUseContent(self, content: ToolUseContent) -> str:
+        """Format → <table class='params'>key | value rows</table>."""
         return render_params_table(content.input)
 
     # -------------------------------------------------------------------------
@@ -238,27 +264,35 @@ class HtmlRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def format_ReadOutput(self, output: ReadOutput) -> str:
+        """Format → syntax-highlighted file content."""
         return format_read_output(output)
 
     def format_WriteOutput(self, output: WriteOutput) -> str:
+        """Format → status message (e.g. 'Wrote 42 bytes')."""
         return format_write_output(output)
 
     def format_EditOutput(self, output: EditOutput) -> str:
+        """Format → status message (e.g. 'Applied edit')."""
         return format_edit_output(output)
 
     def format_BashOutput(self, output: BashOutput) -> str:
+        """Format → <pre>stdout/stderr</pre>."""
         return format_bash_output(output)
 
     def format_TaskOutput(self, output: TaskOutput) -> str:
+        """Format → rendered markdown of task result."""
         return format_task_output(output)
 
     def format_AskUserQuestionOutput(self, output: AskUserQuestionOutput) -> str:
+        """Format → user's answers as definition list."""
         return format_askuserquestion_output(output)
 
     def format_ExitPlanModeOutput(self, output: ExitPlanModeOutput) -> str:
+        """Format → status message."""
         return format_exitplanmode_output(output)
 
     def format_ToolResultContent(self, output: ToolResultContent) -> str:
+        """Format → <pre>raw content</pre> (fallback for unknown tools)."""
         return format_tool_result_content_raw(output)
 
     # -------------------------------------------------------------------------
@@ -278,9 +312,15 @@ class HtmlRenderer(Renderer):
         return f"{prefix}{escaped_name}"
 
     def title_TodoWriteInput(self, message: TemplateMessage) -> str:  # noqa: ARG002
+        """Title → '📝 Todo List'."""
         return "📝 Todo List"
 
+    def title_AskUserQuestionInput(self, message: TemplateMessage) -> str:  # noqa: ARG002
+        """Title → '❓ Asking questions...'."""
+        return "❓ Asking questions..."
+
     def title_TaskInput(self, message: TemplateMessage) -> str:
+        """Title → '🔧 Task <desc> (subagent_type)'."""
         content = cast(ToolUseMessage, message.content)
         input = cast(TaskInput, content.input)
         escaped_name = escape_html(content.tool_name)
@@ -297,18 +337,38 @@ class HtmlRenderer(Renderer):
         return f"🔧 {escaped_name}"
 
     def title_EditInput(self, message: TemplateMessage) -> str:
+        """Title → '📝 Edit <file_path>'."""
         input = cast(EditInput, cast(ToolUseMessage, message.content).input)
         return self._tool_title(message, "📝", input.file_path)
 
     def title_WriteInput(self, message: TemplateMessage) -> str:
+        """Title → '📝 Write <file_path>'."""
         input = cast(WriteInput, cast(ToolUseMessage, message.content).input)
         return self._tool_title(message, "📝", input.file_path)
 
     def title_ReadInput(self, message: TemplateMessage) -> str:
+        """Title → '📄 Read <file_path>[, lines N-M]'."""
         input = cast(ReadInput, cast(ToolUseMessage, message.content).input)
-        return self._tool_title(message, "📄", input.file_path)
+        summary = input.file_path
+        # Add line range info if available
+        if input.limit is not None:
+            offset = input.offset or 0
+            if input.limit == 1:
+                summary = f"{summary}, line {offset + 1}"
+            else:
+                summary = f"{summary}, lines {offset + 1}-{offset + input.limit}"
+        return self._tool_title(message, "📄", summary)
+
+    def title_GlobInput(self, message: TemplateMessage) -> str:
+        """Title → '🔍 Glob <pattern>[ in path]'."""
+        input = cast(GlobInput, cast(ToolUseMessage, message.content).input)
+        summary = input.pattern
+        if input.path:
+            summary = f"{summary} in {input.path}"
+        return self._tool_title(message, "🔍", summary)
 
     def title_BashInput(self, message: TemplateMessage) -> str:
+        """Title → '💻 Bash <description>'."""
         input = cast(BashInput, cast(ToolUseMessage, message.content).input)
         return self._tool_title(message, "💻", input.description)
 

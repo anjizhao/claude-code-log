@@ -54,7 +54,7 @@
       --question-accent: #f5a623;
       --question-bg: #fffbf0;
       --answer-accent: #4caf50;
-      --answer-bg: #f0fff4;
+      --answer-bg: #fffbf0;
   
       /* Priority palette (purple intensity - darker = more urgent) */
       --priority-600: #7c3aed;
@@ -78,6 +78,7 @@
       --text-primary: #333;
       --text-muted: #666;
       --text-secondary: #495057;
+      --fold-color: #888;
   
       /* Border colors */
       --border-light: #e0e0e0;
@@ -1904,7 +1905,7 @@
       --question-accent: #f5a623;
       --question-bg: #fffbf0;
       --answer-accent: #4caf50;
-      --answer-bg: #f0fff4;
+      --answer-bg: #fffbf0;
   
       /* Priority palette (purple intensity - darker = more urgent) */
       --priority-600: #7c3aed;
@@ -1928,6 +1929,7 @@
       --text-primary: #333;
       --text-muted: #666;
       --text-secondary: #495057;
+      --fold-color: #888;
   
       /* Border colors */
       --border-light: #e0e0e0;
@@ -2123,22 +2125,22 @@
       flex: 1;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-end;
       gap: 0.4em;
       cursor: pointer;
       user-select: none;
       font-size: 0.9em;
       font-weight: 500;
-      padding: 0.4em;
+      padding: 0.4em 0.8em 0.4em 0.4em;
       transition: all 0.2s ease;
-      border-bottom: 2px solid transparent;
+      border-bottom: 1px solid transparent;
       background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
   }
   
   /* Show border only when folded (content is hidden) */
   .fold-bar-section.folded {
       border-bottom-style: solid;
-      border-bottom-width: 2px;
+      border-bottom-width: 1px;
   }
   
   .fold-bar-section:hover {
@@ -2164,6 +2166,7 @@
   .fold-icon {
       font-size: 1.1em;
       line-height: 1;
+      color: var(--fold-color);
   }
   
   .fold-count {
@@ -2173,7 +2176,7 @@
   }
   
   .fold-label {
-      color: var(--text-muted);
+      color: var(--fold-color);
       font-size: 0.9em;
   }
   
@@ -2630,11 +2633,6 @@
   }
   
   .thinking {
-      border-left-color: var(--assistant-dimmed);
-  }
-  
-  /* Full purple when thinking is paired (as pair_first) */
-  .thinking.pair_first {
       border-left-color: var(--assistant-color);
   }
   
@@ -3364,7 +3362,7 @@
   }
   
   .todo-item.medium {
-      border-left: 3px solid var(--priority-medium);
+      border-left: 3px solid transparent;
   }
   
   .todo-item.low {
@@ -3391,17 +3389,17 @@
       padding: 12px;
       background-color: var(--question-bg);
       border-radius: 6px;
-      border-left: 3px solid var(--question-accent);
+      border-left: 3px solid var(--assistant-color);
   }
   
   .question-block:last-child {
       margin-bottom: 0;
   }
   
-  /* Answered questions in result (lighter, success-tinted) */
+  /* Answered questions in result */
   .question-block.answered {
       background-color: var(--answer-bg);
-      border-left-color: var(--answer-accent);
+      border-left-color: var(--user-color);
   }
   
   .question-header {
@@ -3424,9 +3422,13 @@
   .answer-text {
       font-size: 1.05em;
       font-weight: 600;
-      color: var(--answer-accent);
+      color: var(--text-primary);
       line-height: 1.4;
-      padding-left: 4px;
+  }
+  
+  /* Q: and A: labels */
+  .qa-label {
+      font-weight: 700;
   }
   
   .question-options-hint {
@@ -6704,7 +6706,7 @@
       --question-accent: #f5a623;
       --question-bg: #fffbf0;
       --answer-accent: #4caf50;
-      --answer-bg: #f0fff4;
+      --answer-bg: #fffbf0;
   
       /* Priority palette (purple intensity - darker = more urgent) */
       --priority-600: #7c3aed;
@@ -6728,6 +6730,7 @@
       --text-primary: #333;
       --text-muted: #666;
       --text-secondary: #495057;
+      --fold-color: #888;
   
       /* Border colors */
       --border-light: #e0e0e0;
@@ -6923,22 +6926,22 @@
       flex: 1;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-end;
       gap: 0.4em;
       cursor: pointer;
       user-select: none;
       font-size: 0.9em;
       font-weight: 500;
-      padding: 0.4em;
+      padding: 0.4em 0.8em 0.4em 0.4em;
       transition: all 0.2s ease;
-      border-bottom: 2px solid transparent;
+      border-bottom: 1px solid transparent;
       background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
   }
   
   /* Show border only when folded (content is hidden) */
   .fold-bar-section.folded {
       border-bottom-style: solid;
-      border-bottom-width: 2px;
+      border-bottom-width: 1px;
   }
   
   .fold-bar-section:hover {
@@ -6964,6 +6967,7 @@
   .fold-icon {
       font-size: 1.1em;
       line-height: 1;
+      color: var(--fold-color);
   }
   
   .fold-count {
@@ -6973,7 +6977,7 @@
   }
   
   .fold-label {
-      color: var(--text-muted);
+      color: var(--fold-color);
       font-size: 0.9em;
   }
   
@@ -7430,11 +7434,6 @@
   }
   
   .thinking {
-      border-left-color: var(--assistant-dimmed);
-  }
-  
-  /* Full purple when thinking is paired (as pair_first) */
-  .thinking.pair_first {
       border-left-color: var(--assistant-color);
   }
   
@@ -8164,7 +8163,7 @@
   }
   
   .todo-item.medium {
-      border-left: 3px solid var(--priority-medium);
+      border-left: 3px solid transparent;
   }
   
   .todo-item.low {
@@ -8191,17 +8190,17 @@
       padding: 12px;
       background-color: var(--question-bg);
       border-radius: 6px;
-      border-left: 3px solid var(--question-accent);
+      border-left: 3px solid var(--assistant-color);
   }
   
   .question-block:last-child {
       margin-bottom: 0;
   }
   
-  /* Answered questions in result (lighter, success-tinted) */
+  /* Answered questions in result */
   .question-block.answered {
       background-color: var(--answer-bg);
-      border-left-color: var(--answer-accent);
+      border-left-color: var(--user-color);
   }
   
   .question-header {
@@ -8224,9 +8223,13 @@
   .answer-text {
       font-size: 1.05em;
       font-weight: 600;
-      color: var(--answer-accent);
+      color: var(--text-primary);
       line-height: 1.4;
-      padding-left: 4px;
+  }
+  
+  /* Q: and A: labels */
+  .qa-label {
+      font-weight: 700;
   }
   
   .question-options-hint {
@@ -11593,7 +11596,7 @@
       --question-accent: #f5a623;
       --question-bg: #fffbf0;
       --answer-accent: #4caf50;
-      --answer-bg: #f0fff4;
+      --answer-bg: #fffbf0;
   
       /* Priority palette (purple intensity - darker = more urgent) */
       --priority-600: #7c3aed;
@@ -11617,6 +11620,7 @@
       --text-primary: #333;
       --text-muted: #666;
       --text-secondary: #495057;
+      --fold-color: #888;
   
       /* Border colors */
       --border-light: #e0e0e0;
@@ -11812,22 +11816,22 @@
       flex: 1;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-end;
       gap: 0.4em;
       cursor: pointer;
       user-select: none;
       font-size: 0.9em;
       font-weight: 500;
-      padding: 0.4em;
+      padding: 0.4em 0.8em 0.4em 0.4em;
       transition: all 0.2s ease;
-      border-bottom: 2px solid transparent;
+      border-bottom: 1px solid transparent;
       background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
   }
   
   /* Show border only when folded (content is hidden) */
   .fold-bar-section.folded {
       border-bottom-style: solid;
-      border-bottom-width: 2px;
+      border-bottom-width: 1px;
   }
   
   .fold-bar-section:hover {
@@ -11853,6 +11857,7 @@
   .fold-icon {
       font-size: 1.1em;
       line-height: 1;
+      color: var(--fold-color);
   }
   
   .fold-count {
@@ -11862,7 +11867,7 @@
   }
   
   .fold-label {
-      color: var(--text-muted);
+      color: var(--fold-color);
       font-size: 0.9em;
   }
   
@@ -12319,11 +12324,6 @@
   }
   
   .thinking {
-      border-left-color: var(--assistant-dimmed);
-  }
-  
-  /* Full purple when thinking is paired (as pair_first) */
-  .thinking.pair_first {
       border-left-color: var(--assistant-color);
   }
   
@@ -13053,7 +13053,7 @@
   }
   
   .todo-item.medium {
-      border-left: 3px solid var(--priority-medium);
+      border-left: 3px solid transparent;
   }
   
   .todo-item.low {
@@ -13080,17 +13080,17 @@
       padding: 12px;
       background-color: var(--question-bg);
       border-radius: 6px;
-      border-left: 3px solid var(--question-accent);
+      border-left: 3px solid var(--assistant-color);
   }
   
   .question-block:last-child {
       margin-bottom: 0;
   }
   
-  /* Answered questions in result (lighter, success-tinted) */
+  /* Answered questions in result */
   .question-block.answered {
       background-color: var(--answer-bg);
-      border-left-color: var(--answer-accent);
+      border-left-color: var(--user-color);
   }
   
   .question-header {
@@ -13113,9 +13113,13 @@
   .answer-text {
       font-size: 1.05em;
       font-weight: 600;
-      color: var(--answer-accent);
+      color: var(--text-primary);
       line-height: 1.4;
-      padding-left: 4px;
+  }
+  
+  /* Q: and A: labels */
+  .qa-label {
+      font-weight: 700;
   }
   
   .question-options-hint {
@@ -16530,7 +16534,7 @@
       --question-accent: #f5a623;
       --question-bg: #fffbf0;
       --answer-accent: #4caf50;
-      --answer-bg: #f0fff4;
+      --answer-bg: #fffbf0;
   
       /* Priority palette (purple intensity - darker = more urgent) */
       --priority-600: #7c3aed;
@@ -16554,6 +16558,7 @@
       --text-primary: #333;
       --text-muted: #666;
       --text-secondary: #495057;
+      --fold-color: #888;
   
       /* Border colors */
       --border-light: #e0e0e0;
@@ -16749,22 +16754,22 @@
       flex: 1;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-end;
       gap: 0.4em;
       cursor: pointer;
       user-select: none;
       font-size: 0.9em;
       font-weight: 500;
-      padding: 0.4em;
+      padding: 0.4em 0.8em 0.4em 0.4em;
       transition: all 0.2s ease;
-      border-bottom: 2px solid transparent;
+      border-bottom: 1px solid transparent;
       background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
   }
   
   /* Show border only when folded (content is hidden) */
   .fold-bar-section.folded {
       border-bottom-style: solid;
-      border-bottom-width: 2px;
+      border-bottom-width: 1px;
   }
   
   .fold-bar-section:hover {
@@ -16790,6 +16795,7 @@
   .fold-icon {
       font-size: 1.1em;
       line-height: 1;
+      color: var(--fold-color);
   }
   
   .fold-count {
@@ -16799,7 +16805,7 @@
   }
   
   .fold-label {
-      color: var(--text-muted);
+      color: var(--fold-color);
       font-size: 0.9em;
   }
   
@@ -17256,11 +17262,6 @@
   }
   
   .thinking {
-      border-left-color: var(--assistant-dimmed);
-  }
-  
-  /* Full purple when thinking is paired (as pair_first) */
-  .thinking.pair_first {
       border-left-color: var(--assistant-color);
   }
   
@@ -17990,7 +17991,7 @@
   }
   
   .todo-item.medium {
-      border-left: 3px solid var(--priority-medium);
+      border-left: 3px solid transparent;
   }
   
   .todo-item.low {
@@ -18017,17 +18018,17 @@
       padding: 12px;
       background-color: var(--question-bg);
       border-radius: 6px;
-      border-left: 3px solid var(--question-accent);
+      border-left: 3px solid var(--assistant-color);
   }
   
   .question-block:last-child {
       margin-bottom: 0;
   }
   
-  /* Answered questions in result (lighter, success-tinted) */
+  /* Answered questions in result */
   .question-block.answered {
       background-color: var(--answer-bg);
-      border-left-color: var(--answer-accent);
+      border-left-color: var(--user-color);
   }
   
   .question-header {
@@ -18050,9 +18051,13 @@
   .answer-text {
       font-size: 1.05em;
       font-weight: 600;
-      color: var(--answer-accent);
+      color: var(--text-primary);
       line-height: 1.4;
-      padding-left: 4px;
+  }
+  
+  /* Q: and A: labels */
+  .qa-label {
+      font-weight: 700;
   }
   
   .question-options-hint {
