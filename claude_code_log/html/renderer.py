@@ -143,6 +143,16 @@ def check_html_version(html_file_path: Path) -> Optional[str]:
 class HtmlRenderer(Renderer):
     """HTML renderer for Claude Code transcripts."""
 
+    def __init__(self, image_export_mode: str = "embedded"):
+        """Initialize the HTML renderer.
+
+        Args:
+            image_export_mode: Image export mode - "placeholder", "embedded", or "referenced".
+                Currently only "embedded" is fully supported for HTML.
+        """
+        super().__init__()
+        self.image_export_mode = image_export_mode
+
     # -------------------------------------------------------------------------
     # System Content Formatters
     # -------------------------------------------------------------------------
@@ -428,6 +438,7 @@ class HtmlRenderer(Renderer):
         messages: list[TranscriptEntry],
         title: Optional[str] = None,
         combined_transcript_link: Optional[str] = None,
+        output_dir: Optional[Path] = None,  # noqa: ARG002
     ) -> str:
         """Generate HTML from transcript messages."""
         import time
@@ -438,7 +449,7 @@ class HtmlRenderer(Renderer):
             title = "Claude Transcript"
 
         # Get root messages (tree) and session navigation from format-neutral renderer
-        root_messages, session_nav = generate_template_messages(messages)
+        root_messages, session_nav, _ = generate_template_messages(messages)
 
         # Flatten tree via pre-order traversal, formatting content along the way
         with log_timing("Content formatting (pre-order)", t_start):
@@ -477,6 +488,7 @@ class HtmlRenderer(Renderer):
         session_id: str,
         title: Optional[str] = None,
         cache_manager: Optional["CacheManager"] = None,
+        output_dir: Optional[Path] = None,  # noqa: ARG002
     ) -> str:
         """Generate HTML for a single session."""
         # Filter messages for this session (SummaryTranscriptEntry.sessionId is always None)

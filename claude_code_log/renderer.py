@@ -98,6 +98,9 @@ class RenderingContext:
     def register(self, message: "TemplateMessage") -> int:
         """Register a TemplateMessage and assign its message_index.
 
+        Sets message_index on both the TemplateMessage and its content,
+        enabling content→TemplateMessage lookups during rendering.
+
         Args:
             message: The TemplateMessage to register.
 
@@ -106,6 +109,7 @@ class RenderingContext:
         """
         msg_index = len(self.messages)
         message.message_index = msg_index
+        message.content.message_index = msg_index  # Enable content→message lookup
         self.messages.append(message)
         return msg_index
 
@@ -519,8 +523,8 @@ class TemplateSummary:
 
 def generate_template_messages(
     messages: list[TranscriptEntry],
-) -> Tuple[list[TemplateMessage], list[dict[str, Any]]]:
-    """Generate template messages and session navigation from transcript messages.
+) -> Tuple[list[TemplateMessage], list[dict[str, Any]], RenderingContext]:
+    """Generate root messages and session navigation from transcript messages.
 
     This is the format-neutral rendering step that produces data structures
     ready for template rendering by any format-specific renderer.
@@ -529,9 +533,10 @@ def generate_template_messages(
         messages: List of transcript entries to process.
 
     Returns:
-        A tuple of (template_messages, session_nav) where:
-        - template_messages: Processed messages ready for template rendering
+        A tuple of (root_messages, session_nav, context) where:
+        - root_messages: Tree of TemplateMessages (session headers with children)
         - session_nav: Session navigation data with summaries and metadata
+        - context: RenderingContext with message registry for index lookups
     """
     from .utils import get_warmup_session_ids
 
@@ -611,7 +616,7 @@ def generate_template_messages(
     with log_timing("Cleanup sidechain duplicates", t_start):
         _cleanup_sidechain_duplicates(root_messages)
 
-    return root_messages, session_nav
+    return root_messages, session_nav, ctx
 
 
 # -- Session Utilities --------------------------------------------------------
@@ -2257,8 +2262,15 @@ class Renderer:
         messages: list[TranscriptEntry],
         title: Optional[str] = None,
         combined_transcript_link: Optional[str] = None,
+        output_dir: Optional[Path] = None,
     ) -> Optional[str]:
         """Generate output from transcript messages.
+
+        Args:
+            messages: List of transcript entries to render.
+            title: Optional title for the output.
+            combined_transcript_link: Optional link to combined transcript.
+            output_dir: Optional output directory for referenced images.
 
         Returns None by default; subclasses override to return formatted output.
         """
@@ -2270,8 +2282,16 @@ class Renderer:
         session_id: str,
         title: Optional[str] = None,
         cache_manager: Optional["CacheManager"] = None,
+        output_dir: Optional[Path] = None,
     ) -> Optional[str]:
         """Generate output for a single session.
+
+        Args:
+            messages: List of transcript entries.
+            session_id: Session ID to generate output for.
+            title: Optional title for the output.
+            cache_manager: Optional cache manager.
+            output_dir: Optional output directory for referenced images.
 
         Returns None by default; subclasses override to return formatted output.
         """
@@ -2297,11 +2317,13 @@ class Renderer:
         return None
 
 
-def get_renderer(format: str) -> Renderer:
+def get_renderer(format: str, image_export_mode: Optional[str] = None) -> Renderer:
     """Get a renderer instance for the specified format.
 
     Args:
-        format: The output format (currently only "html" is supported).
+        format: The output format ("html", "md", or "markdown").
+        image_export_mode: Image export mode ("placeholder", "embedded", "referenced").
+            If None, defaults to "embedded" for HTML and "referenced" for Markdown.
 
     Returns:
         A Renderer instance for the specified format.
@@ -2312,5 +2334,13 @@ def get_renderer(format: str) -> Renderer:
     if format == "html":
         from .html.renderer import HtmlRenderer
 
-        return HtmlRenderer()
+        # For HTML, default to embedded mode (current behavior)
+        mode = image_export_mode or "embedded"
+        return HtmlRenderer(image_export_mode=mode)
+    elif format in ("md", "markdown"):
+        from .markdown.renderer import MarkdownRenderer
+
+        # For Markdown, default to referenced mode
+        mode = image_export_mode or "referenced"
+        return MarkdownRenderer(image_export_mode=mode)
     raise ValueError(f"Unsupported format: {format}")

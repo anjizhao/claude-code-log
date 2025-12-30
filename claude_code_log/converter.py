@@ -34,6 +34,14 @@ from .models import (
 from .renderer import get_renderer
 
 
+def get_file_extension(format: str) -> str:
+    """Get the file extension for a format.
+
+    Normalizes 'markdown' to 'md' for consistent file extensions.
+    """
+    return "md" if format in ("md", "markdown") else format
+
+
 # =============================================================================
 # Transcript Loading Functions
 # =============================================================================
@@ -429,8 +437,22 @@ def convert_jsonl_to(
     generate_individual_sessions: bool = True,
     use_cache: bool = True,
     silent: bool = False,
+    image_export_mode: Optional[str] = None,
 ) -> Path:
-    """Convert JSONL transcript(s) to the specified format."""
+    """Convert JSONL transcript(s) to the specified format.
+
+    Args:
+        format: Output format ("html", "md", or "markdown").
+        input_path: Path to JSONL file or directory.
+        output_path: Optional output path.
+        from_date: Optional start date filter.
+        to_date: Optional end date filter.
+        generate_individual_sessions: Whether to generate individual session files.
+        use_cache: Whether to use caching.
+        silent: Whether to suppress output.
+        image_export_mode: Image export mode ("placeholder", "embedded", "referenced").
+            If None, uses format default (embedded for HTML, referenced for Markdown).
+    """
     if not input_path.exists():
         raise FileNotFoundError(f"Input path not found: {input_path}")
 
@@ -443,17 +465,18 @@ def convert_jsonl_to(
         except Exception as e:
             print(f"Warning: Failed to initialize cache manager: {e}")
 
+    ext = get_file_extension(format)
     if input_path.is_file():
         # Single file mode - cache only available for directory mode
         if output_path is None:
-            output_path = input_path.with_suffix(f".{format}")
+            output_path = input_path.with_suffix(f".{ext}")
         messages = load_transcript(input_path, silent=silent)
         title = f"Claude Transcript - {input_path.stem}"
         cache_was_updated = False  # No cache in single file mode
     else:
         # Directory mode - Cache-First Approach
         if output_path is None:
-            output_path = input_path / f"combined_transcripts.{format}"
+            output_path = input_path / f"combined_transcripts.{ext}"
 
         # Phase 1: Ensure cache is fresh and populated
         cache_was_updated = ensure_fresh_cache(
@@ -489,7 +512,7 @@ def convert_jsonl_to(
 
     # Generate combined output file (check if regeneration needed)
     assert output_path is not None
-    renderer = get_renderer(format)
+    renderer = get_renderer(format, image_export_mode)
     should_regenerate = (
         renderer.is_outdated(output_path)
         or from_date is not None
@@ -501,7 +524,9 @@ def convert_jsonl_to(
     )
 
     if should_regenerate:
-        content = renderer.generate(messages, title)
+        # For referenced images, pass the output directory
+        output_dir = output_path.parent if output_path else input_path
+        content = renderer.generate(messages, title, output_dir=output_dir)
         assert content is not None
         output_path.write_text(content, encoding="utf-8")
     else:
@@ -519,6 +544,7 @@ def convert_jsonl_to(
             to_date,
             cache_manager,
             cache_was_updated,
+            image_export_mode,
         )
 
     return output_path
@@ -847,8 +873,10 @@ def _generate_individual_session_files(
     to_date: Optional[str] = None,
     cache_manager: Optional["CacheManager"] = None,
     cache_was_updated: bool = False,
+    image_export_mode: Optional[str] = None,
 ) -> None:
     """Generate individual files for each session in the specified format."""
+    ext = get_file_extension(format)
     # Pre-compute warmup sessions to exclude them
     warmup_session_ids = get_warmup_session_ids(messages)
 
@@ -874,7 +902,7 @@ def _generate_individual_session_files(
     project_title = get_project_display_name(output_dir.name, working_directories)
 
     # Get renderer once outside the loop
-    renderer = get_renderer(format)
+    renderer = get_renderer(format, image_export_mode)
 
     # Generate HTML file for each session
     for session_id in session_ids:
@@ -908,7 +936,7 @@ def _generate_individual_session_files(
             session_title += f" ({date_range_str})"
 
         # Check if session file needs regeneration
-        session_file_path = output_dir / f"session-{session_id}.{format}"
+        session_file_path = output_dir / f"session-{session_id}.{ext}"
 
         # Only regenerate if outdated, doesn't exist, or date filtering is active
         should_regenerate_session = (
@@ -922,7 +950,7 @@ def _generate_individual_session_files(
         if should_regenerate_session:
             # Generate session content
             session_content = renderer.generate_session(
-                messages, session_id, session_title, cache_manager
+                messages, session_id, session_title, cache_manager, output_dir
             )
             assert session_content is not None
             # Write session file
@@ -939,8 +967,10 @@ def process_projects_hierarchy(
     to_date: Optional[str] = None,
     use_cache: bool = True,
     generate_individual_sessions: bool = True,
+    output_format: str = "html",
+    image_export_mode: Optional[str] = None,
 ) -> Path:
-    """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files."""
+    """Process the entire ~/.claude/projects/ hierarchy and create linked output files."""
     if not projects_path.exists():
         raise FileNotFoundError(f"Projects path not found: {projects_path}")
 
@@ -978,14 +1008,16 @@ def process_projects_hierarchy(
             if cache_was_updated:
                 any_cache_updated = True
 
-            # Phase 2: Generate HTML for this project (optionally individual session files)
-            output_path = convert_jsonl_to_html(
+            # Phase 2: Generate output for this project (optionally individual session files)
+            output_path = convert_jsonl_to(
+                output_format,
                 project_dir,
                 None,
                 from_date,
                 to_date,
                 generate_individual_sessions,
                 use_cache,
+                image_export_mode=image_export_mode,
             )
 
             # Get project info for index - use cached data if available
@@ -1126,23 +1158,25 @@ def process_projects_hierarchy(
                 }
             )
         except Exception as e:
+            prev_project = project_summaries[-1] if project_summaries else "(none)"
             print(
                 f"Warning: Failed to process {project_dir}: {e}\n"
-                f"Previous (in alphabetical order) file before error: {project_summaries[-1]}"
+                f"Previous (in alphabetical order) project before error: {prev_project}"
                 f"\n{traceback.format_exc()}"
             )
             continue
 
-    # Generate index HTML (always regenerate if outdated)
-    index_path = projects_path / "index.html"
-    renderer = get_renderer("html")
+    # Generate index (always regenerate if outdated)
+    ext = "md" if output_format in ("md", "markdown") else "html"
+    index_path = projects_path / f"index.{ext}"
+    renderer = get_renderer(output_format, image_export_mode)
     if renderer.is_outdated(index_path) or from_date or to_date or any_cache_updated:
-        index_html = renderer.generate_projects_index(
+        index_content = renderer.generate_projects_index(
             project_summaries, from_date, to_date
         )
-        assert index_html is not None
-        index_path.write_text(index_html, encoding="utf-8")
+        assert index_content is not None
+        index_path.write_text(index_content, encoding="utf-8")
     else:
-        print("Index HTML is current, skipping regeneration")
+        print(f"Index {ext.upper()} is current, skipping regeneration")
 
     return index_path
