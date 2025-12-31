@@ -73,8 +73,8 @@ class TemplateMessage:
 
     # Display
     message_title: str         # Display title (e.g., "User", "Assistant")
-    is_sidechain: bool         # Sub-agent message flag
-    has_markdown: bool         # Content should be rendered as markdown
+    is_sidechain: bool         # Sub-agent message flag (via content.meta)
+    # Note: has_markdown is accessed via content.has_markdown
     # Note: CSS classes are derived from content type via CSS_CLASS_REGISTRY
 
     # Metadata
@@ -263,6 +263,18 @@ class UserSteeringMessage(UserTextMessage):
 
 Steering messages represent user interrupts that cancel queued operations.
 
+### User Memory
+
+- **Condition**: Contains `<user-memory-input>` tags
+- **Content Model**: `UserMemoryMessage`
+- **CSS Class**: `user`
+
+```python
+@dataclass
+class UserMemoryMessage(MessageContent):
+    memory_text: str  # The memory content from the tag
+```
+
 ### Sidechain User (Sub-agent)
 
 - **Condition**: `isSidechain: true`
@@ -390,7 +402,7 @@ Tool results are wrapped in `ToolResultMessage` for rendering, which provides ad
 @dataclass
 class ToolResultMessage(MessageContent):
     tool_use_id: str
-    output: ToolOutput  # Specialized (ReadOutput, EditOutput) or ToolResultContent
+    output: ToolOutput  # Specialized output or ToolResultContent fallback
     is_error: bool = False
     tool_name: Optional[str] = None   # Name of the tool
     file_path: Optional[str] = None   # File path for Read/Edit/Write
@@ -398,7 +410,12 @@ class ToolResultMessage(MessageContent):
 # ToolOutput is a union type for tool results
 ToolOutput = Union[
     ReadOutput,
+    WriteOutput,
     EditOutput,
+    BashOutput,
+    TaskOutput,
+    AskUserQuestionOutput,
+    ExitPlanModeOutput,
     ToolResultContent,  # Generic fallback for unparsed results
 ]
 ```
@@ -460,6 +477,7 @@ Assistant messages contain `ContentItem` instances that are:
 @dataclass
 class AssistantTextMessage(MessageContent):
     items: list[TextContent | ImageContent]  # Interleaved text and images
+    token_usage: Optional[str]               # Formatted token usage string
 ```
 
 ### Sidechain Assistant
@@ -480,6 +498,7 @@ class AssistantTextMessage(MessageContent):
 class ThinkingMessage(MessageContent):
     thinking: str              # The thinking text
     signature: Optional[str]   # Thinking block signature
+    token_usage: Optional[str] # Formatted token usage string
 ```
 
 ```json
@@ -527,8 +546,8 @@ The original `ToolUseContent` (Pydantic model) provides:
 | MultiEdit | `MultiEditInput` | file_path, edits[] |
 | Bash | `BashInput` | command, description, timeout, run_in_background |
 | Glob | `GlobInput` | pattern, path |
-| Grep | `GrepInput` | pattern, path, glob, type, output_mode |
-| Task | `TaskInput` | prompt, subagent_type, description, model |
+| Grep | `GrepInput` | pattern, path, glob, type, output_mode, multiline, head_limit, offset |
+| Task | `TaskInput` | prompt, subagent_type, description, model, run_in_background, resume |
 | TodoWrite | `TodoWriteInput` | todos[] |
 | AskUserQuestion | `AskUserQuestionInput` | questions[], question |
 | ExitPlanMode | `ExitPlanModeInput` | plan, launchSwarm, teammateCount |
@@ -685,18 +704,6 @@ class SessionHeaderMessage(MessageContent):
     summary: Optional[str] = None  # Session summary if available
 ```
 
-## 5.2 DedupNoticeMessage
-
-Deduplication notices are shown when content is deduplicated (e.g., sidechain assistant text that duplicates the Task tool result):
-
-```python
-@dataclass
-class DedupNoticeMessage(MessageContent):
-    notice_text: str  # e.g., "Content omitted (duplicates Task result)"
-    target_uuid: Optional[str] = None  # UUID of target message
-    target_message_id: Optional[str] = None  # Resolved message ID for anchor link
-```
-
 ---
 
 # Part 6: Infrastructure Models
@@ -766,6 +773,7 @@ class BaseTranscriptEntry(BaseModel):
     timestamp: str             # ISO 8601 timestamp
     isMeta: Optional[bool] = None   # Slash command marker
     agentId: Optional[str] = None   # Sub-agent ID
+    gitBranch: Optional[str] = None # Git branch name when available
 ```
 
 ---
@@ -876,6 +884,5 @@ Sub-agent messages (from `Task` tool):
   - [tool_factory.py](../claude_code_log/factories/tool_factory.py) - `create_tool_use_message()`, `create_tool_result_message()`
   - [system_factory.py](../claude_code_log/factories/system_factory.py) - `create_system_message()`
   - [meta_factory.py](../claude_code_log/factories/meta_factory.py) - `create_meta()`
-- [TEMPLATE_MESSAGE_CHILDREN.md](TEMPLATE_MESSAGE_CHILDREN.md) - Tree architecture exploration
-- [MESSAGE_REFACTORING.md](MESSAGE_REFACTORING.md) - Refactoring plan (Phase 1)
-- [MESSAGE_REFACTORING2.md](MESSAGE_REFACTORING2.md) - Refactoring plan (Phase 2)
+- [rendering-architecture.md](rendering-architecture.md) - Rendering pipeline and Renderer class hierarchy
+- [rendering-next.md](rendering-next.md) - Future rendering improvements

@@ -12,7 +12,6 @@ from ..models import (
     AssistantTextMessage,
     ContentItem,
     MessageMeta,
-    TextContent,
     ThinkingContent,
     ThinkingMessage,
     UsageInfo,
@@ -69,14 +68,9 @@ def create_assistant_message(
     # Create AssistantTextMessage directly from items
     # (empty text already filtered by chunk_message_content)
     if items:
-        # Extract text content from items for dedup matching and simple renderers
-        text_content = "\n".join(
-            item.text for item in items if isinstance(item, TextContent)
-        )
         return AssistantTextMessage(
             meta,
             items=items,  # type: ignore[arg-type]
-            raw_text_content=text_content if text_content else None,
             token_usage=format_token_usage(usage) if usage else None,
         )
     return None
@@ -84,31 +78,22 @@ def create_assistant_message(
 
 def create_thinking_message(
     meta: MessageMeta,
-    tool_item: ContentItem,
+    thinking: ThinkingContent,
     usage: Optional[UsageInfo] = None,
 ) -> ThinkingMessage:
-    """Create ThinkingMessage from a thinking content item.
+    """Create ThinkingMessage from ThinkingContent.
 
     Args:
         meta: Message metadata.
-        tool_item: ThinkingContent or compatible object with 'thinking' attribute
+        thinking: ThinkingContent with thinking text and optional signature.
         usage: Optional token usage info to format and attach.
 
     Returns:
         ThinkingMessage containing the thinking text and optional signature.
     """
-    # Extract thinking text from the content item
-    if isinstance(tool_item, ThinkingContent):
-        thinking_text = tool_item.thinking.strip()
-        signature = getattr(tool_item, "signature", None)
-    else:
-        thinking_text = getattr(tool_item, "thinking", str(tool_item)).strip()
-        signature = None
-
-    # Create the content model (formatting happens in HtmlRenderer)
     return ThinkingMessage(
         meta,
-        thinking=thinking_text,
-        signature=signature,
+        thinking=thinking.thinking.strip(),
+        signature=thinking.signature,
         token_usage=format_token_usage(usage) if usage else None,
     )

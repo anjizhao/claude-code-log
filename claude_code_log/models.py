@@ -544,9 +544,6 @@ class UserTextMessage(MessageContent):
         TextContent | ImageContent | IdeNotificationContent
     ] = field(default_factory=list)
 
-    # Cached raw text extracted from items (for dedup matching, simple renderers)
-    raw_text_content: Optional[str] = None
-
     @property
     def message_type(self) -> str:
         return "user"
@@ -588,9 +585,6 @@ class AssistantTextMessage(MessageContent):
     items: list[  # pyright: ignore[reportUnknownVariableType]
         TextContent | ImageContent
     ] = field(default_factory=list)
-
-    # Cached raw text extracted from items (for dedup matching, simple renderers)
-    raw_text_content: Optional[str] = None
 
     # Token usage string (formatted from UsageInfo when available)
     token_usage: Optional[str] = None
@@ -673,28 +667,6 @@ class SessionHeaderMessage(MessageContent):
         return "session_header"
 
 
-@dataclass
-class DedupNoticeMessage(MessageContent):
-    """Content for deduplication notices.
-
-    Displayed when content is deduplicated (e.g., sidechain assistant
-    text that duplicates the Task tool result). Styled as assistant message
-    since it replaces sidechain assistant content.
-
-    The `original` field preserves the original AssistantTextMessage so renderers
-    can optionally show the full content instead of the link.
-    """
-
-    notice_text: str
-    target_message_id: Optional[str] = None  # Message ID for anchor link
-    original_text: Optional[str] = None  # Original duplicated content (for debugging)
-    original: Optional["AssistantTextMessage"] = None  # Original message for renderers
-
-    @property
-    def message_type(self) -> str:
-        return "assistant"  # Styled as assistant (replaces sidechain assistant)
-
-
 # =============================================================================
 # Tool Message Models
 # =============================================================================
@@ -748,7 +720,7 @@ class ToolUseMessage(MessageContent):
 # =============================================================================
 # Tool Input Models
 # =============================================================================
-# Typed models for tool inputs (Phase 11 of MESSAGE_REFACTORING.md)
+# Typed models for tool inputs.
 # These provide type safety and IDE autocompletion for tool parameters.
 
 

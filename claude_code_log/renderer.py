@@ -30,15 +30,20 @@ from .models import (
     UsageInfo,
     # Structured content types
     AssistantTextMessage,
+    BashInputMessage,
+    BashOutputMessage,
     CommandOutputMessage,
-    DedupNoticeMessage,
+    CompactedSummaryMessage,
+    HookSummaryMessage,
     SessionHeaderMessage,
     SlashCommandMessage,
     SystemMessage,
     TaskOutput,
+    ThinkingMessage,
     ToolResultMessage,
     ToolUseMessage,
     UnknownMessage,
+    UserMemoryMessage,
     UserSlashCommandMessage,
     UserSteeringMessage,
     UserTextMessage,
@@ -190,11 +195,6 @@ class TemplateMessage:
     def is_session_header(self) -> bool:
         """Check if this message is a session header."""
         return isinstance(self.content, SessionHeaderMessage)
-
-    @property
-    def has_markdown(self) -> bool:
-        """Check if this message has markdown content."""
-        return self.content.has_markdown
 
     @property
     def has_children(self) -> bool:
@@ -612,7 +612,7 @@ def generate_template_messages(
 
     # Clean up sidechain duplicates on the tree structure
     # - Remove first UserTextMessage (duplicate of Task input prompt)
-    # - Replace last AssistantTextMessage (duplicate of Task output) with DedupNotice
+    # - Remove last AssistantTextMessage (duplicate of Task output)
     with log_timing("Cleanup sidechain duplicates", t_start):
         _cleanup_sidechain_duplicates(root_messages)
 
@@ -813,8 +813,6 @@ class PairingIndices:
     tool_result: dict[tuple[str, str], TemplateMessage]
     # uuid -> TemplateMessage for system messages (parent-child pairing)
     uuid: dict[str, TemplateMessage]
-    # parent_uuid -> TemplateMessage for slash-command messages
-    slash_command_by_parent: dict[str, TemplateMessage]
 
 
 def _build_pairing_indices(messages: list[TemplateMessage]) -> PairingIndices:
@@ -826,7 +824,6 @@ def _build_pairing_indices(messages: list[TemplateMessage]) -> PairingIndices:
     tool_use_index: dict[tuple[str, str], TemplateMessage] = {}
     tool_result_index: dict[tuple[str, str], TemplateMessage] = {}
     uuid_index: dict[str, TemplateMessage] = {}
-    slash_command_by_parent: dict[str, TemplateMessage] = {}
 
     for msg in messages:
         # Index tool_use and tool_result by (session_id, tool_use_id)
@@ -841,17 +838,10 @@ def _build_pairing_indices(messages: list[TemplateMessage]) -> PairingIndices:
         if msg.meta.uuid and msg.type == "system":
             uuid_index[msg.meta.uuid] = msg
 
-        # Index slash-command user messages by parent_uuid
-        if msg.parent_uuid and isinstance(
-            msg.content, (SlashCommandMessage, UserSlashCommandMessage)
-        ):
-            slash_command_by_parent[msg.parent_uuid] = msg
-
     return PairingIndices(
         tool_use=tool_use_index,
         tool_result=tool_result_index,
         uuid=uuid_index,
-        slash_command_by_parent=slash_command_by_parent,
     )
 
 
@@ -906,7 +896,6 @@ def _try_pair_by_index(
     Index-based pairing rules (can be any distance apart):
     - tool_use + tool_result (by tool_use_id within same session)
     - system parent + system child (by uuid/parent_uuid)
-    - system + slash-command (by uuid -> parent_uuid)
     """
     # Tool use + tool result (by tool_use_id within same session)
     if current.type == "tool_use" and current.tool_use_id and current.session_id:
@@ -918,13 +907,6 @@ def _try_pair_by_index(
     if current.type == "system" and current.parent_uuid:
         if current.parent_uuid in indices.uuid:
             _mark_pair(indices.uuid[current.parent_uuid], current)
-
-    # System command finding its slash-command child (by uuid -> parent_uuid)
-    if (
-        current.type == "system"
-        and current.meta.uuid in indices.slash_command_by_parent
-    ):
-        _mark_pair(current, indices.slash_command_by_parent[current.meta.uuid])
 
 
 def _identify_message_pairs(messages: list[TemplateMessage]) -> None:
@@ -975,8 +957,7 @@ def _reorder_paired_messages(messages: list[TemplateMessage]) -> list[TemplateMe
 
     Uses dictionary-based approach to find pairs efficiently:
     1. Build index of all pair_last messages by tool_use_id
-    2. Build index of slash-command pair_last messages by parent_uuid
-    3. Single pass through messages, inserting pair_last immediately after pair_first
+    2. Single pass through messages, inserting pair_last immediately after pair_first
     """
     from datetime import datetime
 
@@ -984,20 +965,11 @@ def _reorder_paired_messages(messages: list[TemplateMessage]) -> list[TemplateMe
     # Session ID is included to prevent cross-session pairing when sessions are resumed
     # Stores message references directly (not list positions)
     pair_last_index: dict[tuple[str, str], TemplateMessage] = {}
-    # Index slash-command pair_last messages by parent_uuid
-    slash_command_pair_index: dict[str, TemplateMessage] = {}
 
     for msg in messages:
         if msg.is_last_in_pair and msg.tool_use_id and msg.session_id:
             key = (msg.session_id, msg.tool_use_id)
             pair_last_index[key] = msg
-        # Index slash-command messages by parent_uuid
-        if (
-            msg.is_last_in_pair
-            and msg.parent_uuid
-            and isinstance(msg.content, (SlashCommandMessage, UserSlashCommandMessage))
-        ):
-            slash_command_pair_index[msg.parent_uuid] = msg
 
     # Create reordered list
     reordered: list[TemplateMessage] = []
@@ -1022,10 +994,6 @@ def _reorder_paired_messages(messages: list[TemplateMessage]) -> list[TemplateMe
                 key = (msg.session_id, msg.tool_use_id)
                 if key in pair_last_index:
                     pair_last = pair_last_index[key]
-
-            # Check for system + slash-command pairs (via uuid -> parent_uuid)
-            if pair_last is None and msg.meta.uuid in slash_command_pair_index:
-                pair_last = slash_command_pair_index[msg.meta.uuid]
 
             # Only append if we haven't already added this pair_last
             # (handles case where multiple pair_firsts match the same pair_last)
@@ -1285,47 +1253,12 @@ def _normalize_for_dedup(text: str) -> str:
     return _AGENT_ID_LINE_PATTERN.sub("", text).strip()
 
 
-def _extract_task_result_text(tool_result_message: ToolResultMessage) -> Optional[str]:
-    """Extract text content from a Task tool result for deduplication matching.
-
-    Args:
-        tool_result_message: The ToolResultMessage containing Task output
-
-    Returns:
-        The extracted text content (normalized), or None if extraction fails
-    """
-    output = tool_result_message.output
-
-    # Handle parsed TaskOutput (preferred - has structured result field)
-    if isinstance(output, TaskOutput):
-        text = output.result.strip() if output.result else None
-        return _normalize_for_dedup(text) if text else None
-
-    # Handle raw ToolResultContent (fallback for unparsed results)
-    if not isinstance(output, ToolResultContent):
-        return None
-
-    content = output.content
-    if isinstance(content, str):
-        text = content.strip() if content else None
-        return _normalize_for_dedup(text) if text else None
-
-    # Handle list of dicts (tool result format)
-    content_parts: list[str] = []
-    for item in content:
-        text_val = item.get("text", "")
-        if isinstance(text_val, str):
-            content_parts.append(text_val)
-    result = "\n".join(content_parts).strip()
-    return _normalize_for_dedup(result) if result else None
-
-
 def _cleanup_sidechain_duplicates(root_messages: list[TemplateMessage]) -> None:
     """Clean up duplicate content in sidechains after tree is built.
 
     For each Task tool_use or tool_result with sidechain children:
     - Remove the first UserTextMessage (duplicate of Task input prompt)
-    - For tool_result: Replace last AssistantTextMessage matching result with DedupNotice
+    - For tool_result: Remove last AssistantTextMessage if it matches the result
 
     Sidechain messages can be children of either tool_use or tool_result depending
     on timestamp order - tool_use during execution, tool_result after completion.
@@ -1375,34 +1308,35 @@ def _cleanup_sidechain_duplicates(root_messages: list[TemplateMessage]) -> None:
         if not is_task_tool_result:
             return
 
-        task_result_text = _extract_task_result_text(
-            cast(ToolResultMessage, message.content)
-        )
-        if not task_result_text:
+        # Extract task result text from parsed TaskOutput
+        tool_result_msg = cast(ToolResultMessage, message.content)
+        if not isinstance(task_output := tool_result_msg.output, TaskOutput):
+            return
+        if not (result := task_output.result):
+            return
+        if not (task_result_text := _normalize_for_dedup(result.strip())):
             return
 
         for i in range(len(children) - 1, -1, -1):
             child = children[i]
             child_content = child.content
-            # Get raw_text_content from content (UserTextMessage/AssistantTextMessage)
-            child_raw = getattr(child_content, "raw_text_content", None)
-            child_text = _normalize_for_dedup(child_raw) if child_raw else None
             if (
                 child.type == "assistant"
                 and child.is_sidechain
                 and isinstance(child_content, AssistantTextMessage)
-                and child_text
-                and child_text == task_result_text
             ):
-                # Replace with dedup notice pointing to the Task result
-                # Preserve original meta (sidechain/session flags) and original message
-                child.content = DedupNoticeMessage(
-                    child_content.meta,
-                    notice_text="Task summary — see result above",
-                    target_message_id=message.message_id,
-                    original_text=child_text,
-                    original=child_content,
+                # Extract text on-demand for dedup check (only for sidechain assistant)
+                child_raw = "\n".join(
+                    item.text
+                    for item in child_content.items
+                    if isinstance(item, TextContent)
                 )
+                child_text = _normalize_for_dedup(child_raw) if child_raw else None
+            else:
+                child_text = None
+            if child_text and child_text == task_result_text:
+                # Drop duplicate sidechain assistant message
+                del children[i]
                 break
 
     for root in root_messages:
@@ -2068,25 +2002,25 @@ class Renderer:
     - Subclasses override methods to implement format-specific rendering
     """
 
-    def _dispatch_format(self, obj: Any) -> str:
-        """Dispatch to format_{ClassName} method based on object type."""
+    def _dispatch_format(self, obj: Any, message: TemplateMessage) -> str:
+        """Dispatch to format_{ClassName}(obj, message) based on object type."""
         for cls in type(obj).__mro__:
             if cls is object:
                 break
             if method := getattr(self, f"format_{cls.__name__}", None):
-                return method(obj)
+                return method(obj, message)
         return ""
 
-    def _dispatch_title(self, obj: Any, message: "TemplateMessage") -> Optional[str]:
-        """Dispatch to title_{ClassName} method based on object type."""
+    def _dispatch_title(self, obj: Any, message: TemplateMessage) -> Optional[str]:
+        """Dispatch to title_{ClassName}(obj, message) based on object type."""
         for cls in type(obj).__mro__:
             if cls is object:
                 break
             if method := getattr(self, f"title_{cls.__name__}", None):
-                return method(message)
+                return method(obj, message)
         return None
 
-    def format_content(self, message: "TemplateMessage") -> str:
+    def format_content(self, message: TemplateMessage) -> str:
         """Format message content by dispatching to type-specific method.
 
         Looks for a method named format_{ClassName} (e.g., format_SystemMessage).
@@ -2098,9 +2032,9 @@ class Renderer:
         Returns:
             Formatted string (e.g., HTML), or empty string if no handler found.
         """
-        return self._dispatch_format(message.content)
+        return self._dispatch_format(message.content, message)
 
-    def title_content(self, message: "TemplateMessage") -> str:
+    def title_content(self, message: TemplateMessage) -> str:
         """Get message title by dispatching to type-specific title method.
 
         Looks for a method named title_{ClassName} (e.g., title_ToolUseMessage).
@@ -2117,7 +2051,7 @@ class Renderer:
             if cls is object:
                 break
             if method := getattr(self, f"title_{cls.__name__}", None):
-                return method(message)
+                return method(message.content, message)
         # Fallback: convert message_type to title case
         return message.content.message_type.replace("_", " ").replace("-", " ").title()
 
@@ -2127,61 +2061,86 @@ class Renderer:
     # These methods return title strings for specific content types.
     # Override in subclasses for format-specific titles (e.g., HTML with icons).
 
-    def title_SystemMessage(self, message: "TemplateMessage") -> str:
-        content = cast("SystemMessage", message.content)
+    def title_SystemMessage(self, content: SystemMessage, _: TemplateMessage) -> str:
         return f"System {content.level.title()}"
 
-    def title_HookSummaryMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_HookSummaryMessage(
+        self, _content: HookSummaryMessage, _: TemplateMessage
+    ) -> str:
         return "System Hook"
 
-    def title_SlashCommandMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_SlashCommandMessage(
+        self, content: SlashCommandMessage, _message: TemplateMessage
+    ) -> str:
         return "Slash Command"
 
-    def title_CommandOutputMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_CommandOutputMessage(
+        self, _content: CommandOutputMessage, _: TemplateMessage
+    ) -> str:
         return ""  # Empty title for command output
 
-    def title_BashInputMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_BashInputMessage(
+        self, _content: BashInputMessage, _: TemplateMessage
+    ) -> str:
         return "Bash command"
 
-    def title_BashOutputMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_BashOutputMessage(
+        self, _content: BashOutputMessage, _: TemplateMessage
+    ) -> str:
         return ""  # Empty title for bash output
 
-    def title_CompactedSummaryMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_CompactedSummaryMessage(
+        self, _content: CompactedSummaryMessage, _: TemplateMessage
+    ) -> str:
         return "User (compacted conversation)"
 
-    def title_UserMemoryMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_UserMemoryMessage(
+        self, _content: UserMemoryMessage, _: TemplateMessage
+    ) -> str:
         return "Memory"
 
-    def title_UserSlashCommandMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_UserSlashCommandMessage(
+        self, _content: UserSlashCommandMessage, _: TemplateMessage
+    ) -> str:
         return "User (slash command)"
 
-    def title_UserTextMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_UserTextMessage(
+        self, _content: UserTextMessage, _message: TemplateMessage
+    ) -> str:
         return "User"
 
-    def title_UserSteeringMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_UserSteeringMessage(
+        self, _content: UserSteeringMessage, _: TemplateMessage
+    ) -> str:
         return "User (steering)"
 
-    def title_AssistantTextMessage(self, message: "TemplateMessage") -> str:
+    def title_AssistantTextMessage(
+        self, _content: AssistantTextMessage, message: TemplateMessage
+    ) -> str:
         # Sidechain assistant messages get special title
         if message.meta.is_sidechain:
             return "Sub-assistant"
         return "Assistant"
 
-    def title_ThinkingMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_ThinkingMessage(
+        self, _content: ThinkingMessage, _message: TemplateMessage
+    ) -> str:
         return "Thinking"
 
-    def title_UnknownMessage(self, message: "TemplateMessage") -> str:  # noqa: ARG002
+    def title_UnknownMessage(self, _content: UnknownMessage, _: TemplateMessage) -> str:
         return "Unknown Content"
 
     # Tool title methods (dispatch to input/output title methods)
-    def title_ToolUseMessage(self, message: "TemplateMessage") -> str:
-        content = cast("ToolUseMessage", message.content)
+    def title_ToolUseMessage(
+        self, content: ToolUseMessage, message: TemplateMessage
+    ) -> str:
         if title := self._dispatch_title(content.input, message):
             return title
         return content.tool_name  # Default to tool name
 
-    def title_ToolResultMessage(self, message: "TemplateMessage") -> str:
-        content = cast("ToolResultMessage", message.content)
+    def title_ToolResultMessage(
+        self, content: ToolResultMessage, message: TemplateMessage
+    ) -> str:
         if content.is_error:
             return "Error"
         if title := self._dispatch_title(content.output, message):
@@ -2189,48 +2148,44 @@ class Renderer:
         return ""  # Tool results typically don't need a title
 
     # Tool input title stubs (override in subclasses for custom titles)
-    # def title_BashInput(self, message: "TemplateMessage") -> str: ...
-    # def title_ReadInput(self, message: "TemplateMessage") -> str: ...
-    # def title_EditInput(self, message: "TemplateMessage") -> str: ...
-    # def title_TaskInput(self, message: "TemplateMessage") -> str: ...
-    # def title_TodoWriteInput(self, message: "TemplateMessage") -> str: ...
+    # def title_BashInput(self, input: "BashInput", message: "TemplateMessage") -> str: ...
+    # def title_ReadInput(self, input: "ReadInput", message: "TemplateMessage") -> str: ...
+    # def title_EditInput(self, input: "EditInput", message: "TemplateMessage") -> str: ...
+    # def title_TaskInput(self, input: "TaskInput", message: "TemplateMessage") -> str: ...
+    # def title_TodoWriteInput(self, input: "TodoWriteInput", message: "TemplateMessage") -> str: ...
 
     # -------------------------------------------------------------------------
     # Format Method Stubs (override in subclasses)
     # -------------------------------------------------------------------------
     # System content formatters
-    # def format_SystemMessage(self, message: "SystemMessage") -> str: return ""
-    # def format_HookSummaryMessage(self, message: "HookSummaryMessage") -> str: ...
-    # def format_SessionHeaderMessage(self, message: "SessionHeaderMessage") -> str: ...
-    # def format_DedupNoticeMessage(self, message: "DedupNoticeMessage") -> str: ...
+    # def format_SystemMessage(self, content: "SystemMessage", message: "TemplateMessage") -> str: ...
+    # def format_HookSummaryMessage(self, content: "HookSummaryMessage", _: "TemplateMessage") -> str: ...
+    # def format_SessionHeaderMessage(self, content: "SessionHeaderMessage", _: "TemplateMessage") -> str: ...
 
     # User content formatters
-    # def format_UserTextMessage(self, message: "UserTextMessage") -> str: ...
-    # def format_UserSteeringMessage(self, message: "UserSteeringMessage") -> str: ...
-    # def format_UserSlashCommandMessage(self, message: "UserSlashCommandMessage") -> str: ...
-    # def format_SlashCommandMessage(self, message: "SlashCommandMessage") -> str: ...
-    # def format_CommandOutputMessage(self, message: "CommandOutputMessage") -> str: ...
-    # def format_BashInputMessage(self, message: "BashInputMessage") -> str: ...
-    # def format_BashOutputMessage(self, message: "BashOutputMessage") -> str: ...
-    # def format_CompactedSummaryMessage(self, message: "CompactedSummaryMessage") -> str: ...
-    # def format_UserMemoryMessage(self, message: "UserMemoryMessage") -> str: ...
+    # def format_UserTextMessage(self, content: "UserTextMessage", _: "TemplateMessage") -> str: ...
+    # ...
 
     # Assistant content formatters
-    # def format_AssistantTextMessage(self, message: "AssistantTextMessage") -> str: ...
-    # def format_ThinkingMessage(self, message: "ThinkingMessage") -> str: ...
-    # def format_UnknownMessage(self, message: "UnknownMessage") -> str: ...
+    # def format_AssistantTextMessage(self, content: "AssistantTextMessage", _: "TemplateMessage") -> str: ...
+    # def format_ThinkingMessage(self, content: "ThinkingMessage", _: "TemplateMessage") -> str: ...
+    # def format_UnknownMessage(self, content: "UnknownMessage", _: "TemplateMessage") -> str: ...
 
     # Tool content formatters (dispatch to input/output formatters)
-    def format_ToolUseMessage(self, message: "ToolUseMessage") -> str:
-        """Dispatch to format_{InputClass} based on message.input type."""
-        return self._dispatch_format(message.input)
+    def format_ToolUseMessage(
+        self, content: ToolUseMessage, message: TemplateMessage
+    ) -> str:
+        """Dispatch to format_{InputClass} based on content.input type."""
+        return self._dispatch_format(content.input, message)
 
-    def format_ToolResultMessage(self, message: "ToolResultMessage") -> str:
-        """Dispatch to format_{OutputClass} based on message.output type."""
-        return self._dispatch_format(message.output)
+    def format_ToolResultMessage(
+        self, content: ToolResultMessage, message: TemplateMessage
+    ) -> str:
+        """Dispatch to format_{OutputClass} based on content.output type."""
+        return self._dispatch_format(content.output, message)
 
     # Tool input formatters
-    # def format_BashInput(self, input: "BashInput") -> str: ...
+    # def format_BashInput(self, input: "BashInput", _: "TemplateMessage") -> str: ...
     # def format_ReadInput(self, input: "ReadInput") -> str: ...
     # def format_WriteInput(self, input: "WriteInput") -> str: ...
     # def format_EditInput(self, input: "EditInput") -> str: ...
