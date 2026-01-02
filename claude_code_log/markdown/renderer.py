@@ -250,6 +250,7 @@ class MarkdownRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def format_SystemMessage(self, content: SystemMessage, _: TemplateMessage) -> str:
+        """Format → 'ℹ️ message text'."""
         level_prefix = {"info": "ℹ️", "warning": "⚠️", "error": "❌"}.get(
             content.level, ""
         )
@@ -258,6 +259,7 @@ class MarkdownRenderer(Renderer):
     def format_HookSummaryMessage(
         self, content: HookSummaryMessage, _: TemplateMessage
     ) -> str:
+        """Format → 'Hook produced output\\n❌ Error: ...'."""
         parts: list[str] = []
         if content.has_output:
             parts.append("Hook produced output")
@@ -272,6 +274,7 @@ class MarkdownRenderer(Renderer):
     def format_SessionHeaderMessage(
         self, content: SessionHeaderMessage, _: TemplateMessage
     ) -> str:
+        """Format → '<a id="session-abc12345"></a>'."""
         # Return just the anchor - it will be placed before the heading
         session_short = content.session_id[:8]
         return f'<a id="session-{session_short}"></a>'
@@ -279,6 +282,7 @@ class MarkdownRenderer(Renderer):
     def title_SessionHeaderMessage(
         self, content: SessionHeaderMessage, _: TemplateMessage
     ) -> str:
+        """Title → '📋 Session `abc12345`: summary'."""
         # Return the title with session ID and optional summary
         session_short = content.session_id[:8]
         if content.summary:
@@ -292,6 +296,7 @@ class MarkdownRenderer(Renderer):
     def format_UserTextMessage(
         self, content: UserTextMessage, _: TemplateMessage
     ) -> str:
+        """Format → fenced code block(s) with user text."""
         parts: list[str] = []
         for item in content.items:
             if isinstance(item, ImageContent):
@@ -305,6 +310,7 @@ class MarkdownRenderer(Renderer):
     def title_UserTextMessage(
         self, _content: UserTextMessage, _message: TemplateMessage
     ) -> str:
+        """Title → '🤷 User: *excerpt...*'."""
         if excerpt := self._excerpt(self._get_message_text(_message)):
             return f"🤷 User: *{self._escape_stars(excerpt)}*"
         return "🤷 User"
@@ -312,12 +318,14 @@ class MarkdownRenderer(Renderer):
     def format_UserSlashCommandMessage(
         self, content: UserSlashCommandMessage, _: TemplateMessage
     ) -> str:
+        """Format → blockquoted text."""
         # UserSlashCommandMessage has a text attribute (markdown), quote to protect it
         return self._quote(content.text) if content.text.strip() else ""
 
     def format_SlashCommandMessage(
         self, content: SlashCommandMessage, _: TemplateMessage
     ) -> str:
+        """Format → '**Args:** `args`' + fenced contents."""
         parts: list[str] = []
         # Command name is in the title, only include args and contents here
         if content.command_args:
@@ -329,12 +337,14 @@ class MarkdownRenderer(Renderer):
     def title_SlashCommandMessage(
         self, content: SlashCommandMessage, _message: TemplateMessage
     ) -> str:
+        """Title → '🤷 Command `/cmd`'."""
         # command_name already includes the leading slash
         return f"🤷 Command `{content.command_name}`"
 
     def format_CommandOutputMessage(
         self, content: CommandOutputMessage, _: TemplateMessage
     ) -> str:
+        """Format → blockquote (markdown) or fenced code block."""
         if content.is_markdown:
             # Quote markdown output to protect it
             return self._quote(content.stdout)
@@ -343,11 +353,13 @@ class MarkdownRenderer(Renderer):
     def format_BashInputMessage(
         self, content: BashInputMessage, _: TemplateMessage
     ) -> str:
+        """Format → '```bash\\n$ command\\n```'."""
         return self._code_fence(f"$ {content.command}", "bash")
 
     def format_BashOutputMessage(
         self, content: BashOutputMessage, _: TemplateMessage
     ) -> str:
+        """Format → fenced code block (ANSI stripped)."""
         # Combine stdout and stderr, strip ANSI codes for markdown output
         parts: list[str] = []
         if content.stdout:
@@ -361,12 +373,14 @@ class MarkdownRenderer(Renderer):
     def format_CompactedSummaryMessage(
         self, content: CompactedSummaryMessage, _: TemplateMessage
     ) -> str:
+        """Format → blockquoted summary."""
         # Quote to protect embedded markdown
         return self._quote(content.summary_text)
 
     def format_UserMemoryMessage(
         self, content: UserMemoryMessage, _: TemplateMessage
     ) -> str:
+        """Format → fenced code block."""
         return self._code_fence(content.memory_text)
 
     # -------------------------------------------------------------------------
@@ -376,6 +390,7 @@ class MarkdownRenderer(Renderer):
     def format_AssistantTextMessage(
         self, content: AssistantTextMessage, _: TemplateMessage
     ) -> str:
+        """Format → blockquoted text."""
         parts: list[str] = []
         for item in content.items:
             if isinstance(item, ImageContent):
@@ -389,10 +404,12 @@ class MarkdownRenderer(Renderer):
     def format_ThinkingMessage(
         self, content: ThinkingMessage, _: TemplateMessage
     ) -> str:
+        """Format → <details><summary>Thinking...</summary>blockquote</details>."""
         quoted = self._quote(content.thinking)
         return self._collapsible("Thinking...", quoted)
 
     def format_UnknownMessage(self, content: UnknownMessage, _: TemplateMessage) -> str:
+        """Format → '*Unknown content type: ...*'."""
         return f"*Unknown content type: {content.type_name}*"
 
     # -------------------------------------------------------------------------
@@ -400,10 +417,12 @@ class MarkdownRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def format_BashInput(self, input: BashInput, _: TemplateMessage) -> str:
+        """Format → '```bash\\n$ command\\n```'."""
         # Description is in the title, just show the command with $ prefix
         return self._code_fence(f"$ {input.command}", "bash")
 
     def format_ReadInput(self, input: ReadInput, _: TemplateMessage) -> str:
+        """Format → '*(lines N–M)*' or empty."""
         # File path goes in the collapsible summary of ReadOutput
         # Just show line range hint here if applicable
         if input.offset or input.limit:
@@ -413,16 +432,19 @@ class MarkdownRenderer(Renderer):
         return ""
 
     def format_WriteInput(self, input: WriteInput, _: TemplateMessage) -> str:
+        """Format → collapsible with file path + fenced content."""
         summary = f"<code>{input.file_path}</code>"
         content = self._code_fence(input.content, self._lang_from_path(input.file_path))
         return self._collapsible(summary, content)
 
     def format_EditInput(self, input: EditInput, _: TemplateMessage) -> str:
+        """Format → '```diff\\n...\\n```'."""
         # Diff is visible; result goes in collapsible in format_EditOutput
         diff_text = generate_unified_diff(input.old_string, input.new_string)
         return self._code_fence(diff_text, "diff")
 
     def format_MultiEditInput(self, input: MultiEditInput, _: TemplateMessage) -> str:
+        """Format → multiple '**Edit N:**' + diff blocks."""
         # All diffs visible; result goes in collapsible in format_EditOutput
         parts: list[str] = []
         for i, edit in enumerate(input.edits, 1):
@@ -432,16 +454,19 @@ class MarkdownRenderer(Renderer):
         return "\n\n".join(parts)
 
     def format_GlobInput(self, _input: GlobInput, _: TemplateMessage) -> str:
+        """Format → '' (pattern in title)."""
         # Pattern and path are in the title
         return ""
 
     def format_GrepInput(self, input: GrepInput, _: TemplateMessage) -> str:
+        """Format → 'Glob: `pattern`' or empty."""
         # Pattern and path are in the title, only show glob filter if present
         if input.glob:
             return f"Glob: `{input.glob}`"
         return ""
 
     def format_TaskInput(self, input: TaskInput, _: TemplateMessage) -> str:
+        """Format → collapsible 'Instructions' with prompt."""
         # Description is now in the title, just show prompt as collapsible
         return (
             self._collapsible("Instructions", self._quote(input.prompt))
@@ -450,6 +475,7 @@ class MarkdownRenderer(Renderer):
         )
 
     def format_TodoWriteInput(self, input: TodoWriteInput, _: TemplateMessage) -> str:
+        """Format → '- ⬜ task1\\n- ✅ task2'."""
         parts: list[str] = []
         for todo in input.todos:
             status_icon = {"pending": "⬜", "in_progress": "🔄", "completed": "✅"}.get(
@@ -461,12 +487,14 @@ class MarkdownRenderer(Renderer):
     def format_AskUserQuestionInput(
         self, _input: AskUserQuestionInput, _: TemplateMessage
     ) -> str:
+        """Format → '' (rendered with output)."""
         # Input is rendered together with output in format_AskUserQuestionOutput
         return ""
 
     def format_ExitPlanModeInput(
         self, _input: ExitPlanModeInput, _: TemplateMessage
     ) -> str:
+        """Format → '' (title only)."""
         # Title contains "Exiting plan mode", body is empty
         return ""
 
@@ -500,21 +528,25 @@ class MarkdownRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def format_ReadOutput(self, output: ReadOutput, _: TemplateMessage) -> str:
+        """Format → collapsible with file path + syntax-highlighted content."""
         summary = f"<code>{output.file_path}</code>" if output.file_path else "Content"
         lang = self._lang_from_path(output.file_path or "")
         content = self._code_fence(output.content, lang)
         return self._collapsible(summary, content)
 
     def format_WriteOutput(self, output: WriteOutput, _: TemplateMessage) -> str:
+        """Format → '✓ Wrote N bytes'."""
         return f"✓ {output.message}"
 
     def format_EditOutput(self, output: EditOutput, _: TemplateMessage) -> str:
+        """Format → collapsible with result or '✓ Edited'."""
         if msg := output.message:
             content = self._code_fence(msg, self._lang_from_path(output.file_path))
             return self._collapsible(f"<code>{output.file_path}</code>", content)
         return "✓ Edited"
 
     def format_BashOutput(self, output: BashOutput, _: TemplateMessage) -> str:
+        """Format → fenced code block (ANSI stripped, diff detected)."""
         # Strip ANSI codes for markdown output
         text = re.sub(r"\x1b\[[0-9;]*m", "", output.content)
         # Detect git diff output
@@ -522,6 +554,7 @@ class MarkdownRenderer(Renderer):
         return self._code_fence(text, lang)
 
     def format_GlobOutput(self, output: GlobOutput, _: TemplateMessage) -> str:
+        """Format → '- `file1`\\n- `file2`' or '*No files found*'."""
         if not output.files:
             return "*No files found*"
         return "\n".join(f"- `{f}`" for f in output.files)
@@ -563,12 +596,14 @@ class MarkdownRenderer(Renderer):
         return "\n\n".join(parts).rstrip()
 
     def format_TaskOutput(self, output: TaskOutput, _: TemplateMessage) -> str:
+        """Format → collapsible 'Report' with blockquoted result."""
         # TaskOutput contains markdown, wrap in collapsible Report
         return self._collapsible("Report", self._quote(output.result))
 
     def format_ExitPlanModeOutput(
         self, output: ExitPlanModeOutput, _: TemplateMessage
     ) -> str:
+        """Format → '✓ Approved' or '✗ Not approved'."""
         status = "✓ Approved" if output.approved else "✗ Not approved"
         if output.message:
             return f"{status}\n\n{output.message}"
@@ -595,62 +630,80 @@ class MarkdownRenderer(Renderer):
     # -------------------------------------------------------------------------
 
     def title_BashInput(self, input: BashInput, _: TemplateMessage) -> str:
+        """Title → '💻 Bash: *description*'."""
         if desc := input.description:
             return f"💻 Bash: *{self._escape_stars(desc)}*"
         return "💻 Bash"
 
     def title_ReadInput(self, input: ReadInput, _: TemplateMessage) -> str:
+        """Title → '👀 Read `filename`'."""
         return f"👀 Read `{Path(input.file_path).name}`"
 
     def title_WriteInput(self, input: WriteInput, _: TemplateMessage) -> str:
-        return f"✍️ Write `{Path(input.file_path).name}`"
+        """Title → '✍️  Write `filename`'."""
+        return f"✍️  Write `{Path(input.file_path).name}`"
 
     def title_EditInput(self, input: EditInput, _: TemplateMessage) -> str:
-        return f"✏️ Edit `{Path(input.file_path).name}`"
+        """Title → '✏️  Edit `filename`'."""
+        return f"✏️  Edit `{Path(input.file_path).name}`"
 
     def title_MultiEditInput(self, input: MultiEditInput, _: TemplateMessage) -> str:
-        return f"✏️ MultiEdit `{Path(input.file_path).name}`"
+        """Title → '✏️  MultiEdit `filename`'."""
+        return f"✏️  MultiEdit `{Path(input.file_path).name}`"
 
     def title_GlobInput(self, input: GlobInput, _: TemplateMessage) -> str:
+        """Title → '📂 Glob `pattern`[ in `path`]'."""
         title = f"📂 Glob `{input.pattern}`"
         return f"{title} in `{input.path}`" if input.path else title
 
     def title_GrepInput(self, input: GrepInput, _: TemplateMessage) -> str:
+        """Title → '🔎 Grep `pattern`[ in `path`]'."""
         base = f"🔎 Grep `{input.pattern}`"
         return f"{base} in `{input.path}`" if input.path else base
 
     def title_TaskInput(self, input: TaskInput, _: TemplateMessage) -> str:
+        """Title → '🤖 Task (subagent): *description*'."""
         subagent = f" ({input.subagent_type})" if input.subagent_type else ""
         if desc := input.description:
             return f"🤖 Task{subagent}: *{self._escape_stars(desc)}*"
         return f"🤖 Task{subagent}"
 
     def title_TodoWriteInput(self, _input: TodoWriteInput, _: TemplateMessage) -> str:
+        """Title → '✅ Todo List'."""
         return "✅ Todo List"
 
     def title_AskUserQuestionInput(
         self, _input: AskUserQuestionInput, _: TemplateMessage
     ) -> str:
+        """Title → '❓ Asking questions...'."""
         return "❓ Asking questions..."
 
     def title_ExitPlanModeInput(
         self, _input: ExitPlanModeInput, _: TemplateMessage
     ) -> str:
+        """Title → '📝 Exiting plan mode'."""
         return "📝 Exiting plan mode"
 
     def title_ThinkingMessage(
         self, _content: ThinkingMessage, _message: TemplateMessage
     ) -> str:
+        """Title → '🤖 Assistant: *excerpt*' (paired) or '💭 Thinking: *excerpt*'."""
+        is_sidechain = _message.meta.is_sidechain
+
         # When paired with Assistant, use Assistant title with assistant excerpt
         if _message.is_first_in_pair and _message.pair_last is not None:
             if (
                 pair_msg := self._ctx.get(_message.pair_last) if self._ctx else None
             ) and isinstance(pair_msg.content, AssistantTextMessage):
+                if is_sidechain:
+                    if excerpt := self._excerpt(self._get_message_text(pair_msg)):
+                        return f"🔗 Sub-assistant: *{self._escape_stars(excerpt)}*"
+                    return "🔗 Sub-assistant"
                 if excerpt := self._excerpt(self._get_message_text(pair_msg)):
                     return f"🤖 Assistant: *{self._escape_stars(excerpt)}*"
                 return "🤖 Assistant"
 
-        # Standalone thinking
+        # Standalone thinking (use "Thinking" for both main and sidechain)
         if excerpt := self._excerpt(self._get_message_text(_message)):
             return f"💭 Thinking: *{self._escape_stars(excerpt)}*"
         return "💭 Thinking"
@@ -658,11 +711,14 @@ class MarkdownRenderer(Renderer):
     def title_AssistantTextMessage(
         self, _content: AssistantTextMessage, message: TemplateMessage
     ) -> str:
+        """Title → '🤖 Assistant: *excerpt*' or '' (if paired)."""
         # When paired (after Thinking), skip title (already rendered with Thinking)
         if message.is_last_in_pair:
             return ""
-        # Sidechain assistant messages get special title
+        # Sidechain assistant messages get excerpt too
         if message.meta.is_sidechain:
+            if excerpt := self._excerpt(self._get_message_text(message)):
+                return f"🔗 Sub-assistant: *{self._escape_stars(excerpt)}*"
             return "🔗 Sub-assistant"
         if excerpt := self._excerpt(self._get_message_text(message)):
             return f"🤖 Assistant: *{self._escape_stars(excerpt)}*"

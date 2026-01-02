@@ -5,22 +5,30 @@ import os
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Optional, cast
+from typing import Any, ClassVar, Optional, cast
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Vertical
+from textual.screen import ModalScreen
 from textual.widgets import (
     DataTable,
     Footer,
     Header,
     Label,
+    MarkdownViewer,
     Static,
+    Tree,
 )
 from textual.reactive import reactive
 
 from .cache import CacheManager, SessionCacheData, get_library_version
-from .converter import ensure_fresh_cache
+from .converter import (
+    ensure_fresh_cache,
+    get_file_extension,
+    load_directory_transcripts,
+)
+from .renderer import get_renderer
 from .utils import get_project_display_name
 
 
@@ -179,6 +187,128 @@ class ProjectSelector(App[Path]):
         self.exit(None)
 
 
+class MarkdownViewerScreen(ModalScreen[None]):
+    """Modal screen for viewing Markdown content with table of contents."""
+
+    CSS = """
+    MarkdownViewerScreen {
+        align: center middle;
+    }
+
+    #md-container {
+        width: 95%;
+        height: 95%;
+        border: solid $primary;
+        background: $surface;
+    }
+
+    #md-header {
+        dock: top;
+        height: 3;
+        background: $primary;
+        color: $text;
+        text-align: center;
+        padding: 1;
+    }
+
+    #md-viewer {
+        height: 1fr;
+    }
+
+    /* Limit ToC width to ~1/3 of the viewer */
+    #md-viewer MarkdownTableOfContents {
+        max-width: 60;
+    }
+
+    #md-footer {
+        dock: bottom;
+        height: 1;
+        background: $primary-darken-2;
+        color: $text-muted;
+        text-align: center;
+    }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "dismiss", "Close", show=True),
+        Binding("q", "dismiss", "Close", show=False),
+    ]
+
+    def __init__(self, content: str, title: str = "Markdown Viewer") -> None:
+        super().__init__()
+        self.md_content = content
+        self.md_title = title
+
+    def compose(self) -> ComposeResult:
+        with Container(id="md-container"):
+            yield Static(self.md_title, id="md-header")
+            yield MarkdownViewer(
+                self.md_content, id="md-viewer", show_table_of_contents=True
+            )
+            yield Static("Press ESC or q to close | t: toggle ToC", id="md-footer")
+
+    def on_mount(self) -> None:
+        """Customize ToC tree after mount."""
+        self.call_later(self._customize_toc_tree)
+
+    def _customize_toc_tree(self) -> None:
+        """Customize ToC: collapse to 3 levels and remove roman numeral prefixes."""
+        try:
+            viewer = self.query_one("#md-viewer", MarkdownViewer)
+            toc = viewer.query_one("MarkdownTableOfContents")
+            tree = cast(Tree[Any], toc.query_one(Tree))
+
+            # Clean up labels (remove roman numerals and message type prefixes)
+            self._clean_toc_labels(tree.root)
+
+            # Collapse all, then expand root, children, and grandchildren
+            tree.root.collapse_all()
+            tree.root.expand()
+            for child in tree.root.children:
+                child.expand()
+                for grandchild in child.children:
+                    grandchild.expand()
+        except Exception:
+            pass  # ToC might not be ready yet, or tree structure differs
+
+    def _clean_toc_labels(self, node: Any) -> None:
+        """Recursively clean tree node labels for a cleaner ToC."""
+        import re
+
+        # Unicode roman numerals used by Textual's MarkdownTableOfContents
+        roman_numerals = "ⅠⅡⅢⅣⅤⅥ"
+        # Message type prefixes that add clutter in ToC context
+        clutter_prefixes = (
+            "User: ",
+            "Assistant: ",
+            "Thinking: ",
+            "Sub-assistant: ",
+        )
+
+        label = str(node.label)
+
+        # Strip leading roman numeral and space (e.g., "Ⅱ Heading" -> "Heading")
+        if label and label[0] in roman_numerals:
+            label = label[2:] if len(label) > 1 else label
+
+        # Strip message type prefixes wherever they appear
+        # (they come after the emoji, e.g., "🤷 User: *text*" -> "🤷 *text*")
+        for prefix in clutter_prefixes:
+            if prefix in label:
+                label = label.replace(prefix, "", 1)
+                break
+
+        # Simplify "Task (details): " to "Task: " (details are redundant)
+        label = re.sub(r"Task \([^)]+\): ", "Task: ", label)
+
+        node.set_label(label)
+        for child in node.children:
+            self._clean_toc_labels(child)
+
+    async def action_dismiss(self, result: None = None) -> None:
+        self.dismiss(result)
+
+
 class SessionBrowser(App[Optional[str]]):
     """Interactive TUI for browsing and managing Claude Code Log sessions."""
 
@@ -220,6 +350,12 @@ class SessionBrowser(App[Optional[str]]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "quit", "Quit"),
         Binding("h", "export_selected", "Open HTML page"),
+        Binding("m", "export_markdown", "Open Markdown"),
+        Binding("v", "view_markdown", "View Markdown"),
+        # Hidden "force regenerate" variants (uppercase)
+        Binding("H", "force_export_html", "Force HTML", show=False),
+        Binding("M", "force_export_markdown", "Force Markdown", show=False),
+        Binding("V", "force_view_markdown", "Force View", show=False),
         Binding("c", "resume_selected", "Resume in Claude Code"),
         Binding("e", "toggle_expanded", "Toggle Expanded View"),
         Binding("p", "back_to_projects", "Open Project Selector"),
@@ -506,23 +642,87 @@ class SessionBrowser(App[Optional[str]]):
             # If widget not mounted yet or we can't get the row data, don't update selection
             pass
 
-    def action_export_selected(self) -> None:
-        """Export the selected session to HTML."""
+    def _export_to_browser(self, format: str, *, force: bool = False) -> None:
+        """Export session to file and open in browser.
+
+        Args:
+            format: Output format - "html" or "md".
+            force: If True, always regenerate even if file is up-to-date.
+        """
+        if not self.selected_session_id:
+            self.notify("No session selected", severity="warning")
+            return
+
+        format_name = "HTML" if format == "html" else "Markdown"
+        try:
+            session_file = self._ensure_session_file(
+                self.selected_session_id, format, force=force
+            )
+            if session_file is None:
+                self.notify(f"Failed to generate {format_name} file", severity="error")
+                return
+
+            webbrowser.open(f"file://{session_file}")
+            msg = (
+                f"Regenerated: {session_file.name}"
+                if force
+                else f"Opened: {session_file.name}"
+            )
+            self.notify(msg)
+
+        except Exception as e:
+            self.notify(f"Error with {format_name}: {e}", severity="error")
+
+    def _view_markdown_embedded(self, *, force: bool = False) -> None:
+        """View session Markdown in embedded viewer.
+
+        Args:
+            force: If True, always regenerate even if file is up-to-date.
+        """
         if not self.selected_session_id:
             self.notify("No session selected", severity="warning")
             return
 
         try:
-            # Use cached session HTML file directly
-            session_file = (
-                self.project_path / f"session-{self.selected_session_id}.html"
+            session_file = self._ensure_session_file(
+                self.selected_session_id, "md", force=force
             )
+            if session_file is None:
+                self.notify("Failed to generate Markdown file", severity="error")
+                return
 
-            webbrowser.open(f"file://{session_file}")
-            self.notify(f"Opened session HTML: {session_file}")
+            content = session_file.read_text(encoding="utf-8")
+            title = f"Session: {self.selected_session_id[:8]}..."
+            self.push_screen(MarkdownViewerScreen(content, title))
+            if force:
+                self.notify(f"Regenerated: {session_file.name}")
 
         except Exception as e:
-            self.notify(f"Error opening session HTML: {e}", severity="error")
+            self.notify(f"Error viewing Markdown: {e}", severity="error")
+
+    def action_export_selected(self) -> None:
+        """Export the selected session to HTML and open in browser."""
+        self._export_to_browser("html")
+
+    def action_export_markdown(self) -> None:
+        """Export the selected session to Markdown and open in browser."""
+        self._export_to_browser("md")
+
+    def action_view_markdown(self) -> None:
+        """View the selected session's Markdown in an embedded viewer."""
+        self._view_markdown_embedded()
+
+    def action_force_export_html(self) -> None:
+        """Force regenerate HTML and open in browser (hidden shortcut: H)."""
+        self._export_to_browser("html", force=True)
+
+    def action_force_export_markdown(self) -> None:
+        """Force regenerate Markdown and open in browser (hidden shortcut: M)."""
+        self._export_to_browser("md", force=True)
+
+    def action_force_view_markdown(self) -> None:
+        """Force regenerate and view Markdown in embedded viewer (hidden shortcut: V)."""
+        self._view_markdown_embedded(force=True)
 
     def action_resume_selected(self) -> None:
         """Resume the selected session in Claude Code."""
@@ -616,6 +816,74 @@ class SessionBrowser(App[Optional[str]]):
 
         expanded_content.update("\n".join(content_parts))
 
+    def _ensure_session_file(
+        self, session_id: str, format: str, *, force: bool = False
+    ) -> Optional[Path]:
+        """Ensure the session file exists and is up-to-date.
+
+        Regenerates the file if it doesn't exist or is outdated.
+
+        Args:
+            session_id: The session ID to generate a file for.
+            format: Output format - "html" or "md".
+            force: If True, always regenerate even if file is up-to-date.
+
+        Returns:
+            Path to the file if successful, None if regeneration failed.
+        """
+        ext = get_file_extension(format)
+        session_file = self.project_path / f"session-{session_id}.{ext}"
+        renderer = get_renderer(format)
+
+        # Check if we need to regenerate
+        needs_regeneration = (
+            force or not session_file.exists() or renderer.is_outdated(session_file)
+        )
+
+        if not needs_regeneration:
+            return session_file
+
+        # Load messages from JSONL files
+        try:
+            messages = load_directory_transcripts(
+                self.project_path, self.cache_manager, silent=True
+            )
+            if not messages:
+                return None
+
+            # Build session title
+            session_data = self.sessions.get(session_id)
+            project_cache = self.cache_manager.get_cached_project_data()
+            project_name = get_project_display_name(
+                self.project_path.name,
+                project_cache.working_directories if project_cache else None,
+            )
+            if session_data and session_data.summary:
+                session_title = f"{project_name}: {session_data.summary}"
+            elif session_data and session_data.first_user_message:
+                preview = session_data.first_user_message
+                if len(preview) > 50:
+                    preview = preview[:50] + "..."
+                session_title = f"{project_name}: {preview}"
+            else:
+                session_title = f"{project_name}: Session {session_id[:8]}"
+
+            # Generate session content
+            session_content = renderer.generate_session(
+                messages,
+                session_id,
+                session_title,
+                self.cache_manager,
+                self.project_path,
+            )
+            if session_content:
+                session_file.write_text(session_content, encoding="utf-8")
+                return session_file
+        except Exception:
+            return None
+
+        return None
+
     def action_toggle_expanded(self) -> None:
         """Toggle the expanded view for the selected session."""
         if (
@@ -646,7 +914,9 @@ class SessionBrowser(App[Optional[str]]):
             "- Expanded content updates automatically when visible\n\n"
             "Actions:\n"
             "- e: Toggle expanded view for session\n"
-            "- h: Open selected session's HTML page log\n"
+            "- h: Open selected session's HTML page\n"
+            "- m: Open selected session's Markdown file (in browser)\n"
+            "- v: View Markdown in embedded viewer\n"
             "- c: Resume selected session in Claude Code\n"
             "- p: Open project selector\n"
             "- q: Quit\n\n"
