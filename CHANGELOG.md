@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.0.0] - 2026-01-22
+
+BREAKING CHANGE: cache is now using a SQLite database instead of JSON files!
+
+This shouldn't change how the library works for you, but if you were using it in a custom way, some edge cases might break your setup.
+
+### Changed
+
+- **SQLite cache (#59)**
+- **Integrate review feedback from #71 + MarkdownPreview in TUI (#75)**
+- **Consolidate Rendering Architecture (#74)**
+- **Add Markdown renderer (#71)**
+- **HTML polish: tool titles, AskUserQuestion, fold bar, thinking borders (#70)**
+- **Rename *Content to *Message and add ToolOutput/ToolUseMessage types (#69)**
+- **Remove MessageModifiers (#68)**
+- **Refactor content formatting to use dispatcher pattern (#67)**
+- **Improve message styling consistency (#66)**
+- **Fix user text message deduplication to keep best version (#65)**
+- **Integrate coderabbit review suggestions for #63**
+- **Remove content_html field from TemplateMessage (#63)**
+
+
 ## [0.9.0] - 2025-12-08
 
 ### Changed
