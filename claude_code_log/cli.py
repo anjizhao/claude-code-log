@@ -17,7 +17,12 @@ from .converter import (
     get_file_extension,
     process_projects_hierarchy,
 )
-from .cache import CacheManager, get_library_version
+from .cache import (
+    CacheManager,
+    get_all_cached_projects,
+    get_cache_db_path,
+    get_library_version,
+)
 
 
 def get_default_projects_dir() -> Path:
@@ -25,36 +30,75 @@ def get_default_projects_dir() -> Path:
     return Path.home() / ".claude" / "projects"
 
 
-def _launch_tui_with_cache_check(project_path: Path) -> Optional[str]:
+def _discover_projects(
+    projects_dir: Path,
+) -> tuple[list[Path], set[Path]]:
+    """Discover active and archived projects in the projects directory.
+
+    Returns:
+        Tuple of (all_project_dirs, archived_projects_set)
+    """
+    # Find active projects (directories with JSONL files)
+    project_dirs = [
+        d for d in projects_dir.iterdir() if d.is_dir() and list(d.glob("*.jsonl"))
+    ]
+
+    # Find archived projects (in cache but without JSONL files)
+    archived_projects: set[Path] = set()
+    cached_projects = get_all_cached_projects(projects_dir)
+    active_project_paths = {str(p) for p in project_dirs}
+    for project_path_str, is_archived in cached_projects:
+        if is_archived and project_path_str not in active_project_paths:
+            archived_path = Path(project_path_str)
+            archived_projects.add(archived_path)
+            project_dirs.append(archived_path)
+
+    return project_dirs, archived_projects
+
+
+def _launch_tui_with_cache_check(
+    project_path: Path, is_archived: bool = False
+) -> Optional[str]:
     """Launch TUI with proper cache checking and user feedback."""
     click.echo("Checking cache and loading session data...")
 
     # Check if we need to rebuild cache
     cache_manager = CacheManager(project_path, get_library_version())
-    jsonl_files = list(project_path.glob("*.jsonl"))
-    modified_files = cache_manager.get_modified_files(jsonl_files)
     project_cache = cache_manager.get_cached_project_data()
 
-    if not (project_cache and project_cache.sessions and not modified_files):
-        # Need to rebuild cache
-        if modified_files:
+    if is_archived:
+        # Archived projects have no JSONL files, just load from cache
+        if project_cache and project_cache.sessions:
             click.echo(
-                f"Found {len(modified_files)} modified files, rebuilding cache..."
+                f"[ARCHIVED] Found {len(project_cache.sessions)} sessions in cache. Launching TUI..."
             )
         else:
-            click.echo("Building session cache...")
-
-        # Pre-build the cache before launching TUI (no HTML generation)
-        try:
-            ensure_fresh_cache(project_path, cache_manager, silent=True)
-            click.echo("Cache ready! Launching TUI...")
-        except Exception as e:
-            click.echo(f"Error building cache: {e}", err=True)
+            click.echo("Error: No cached sessions found for archived project", err=True)
             return None
     else:
-        click.echo(
-            f"Cache up to date. Found {len(project_cache.sessions)} sessions. Launching TUI..."
-        )
+        jsonl_files = list(project_path.glob("*.jsonl"))
+        modified_files = cache_manager.get_modified_files(jsonl_files)
+
+        if not (project_cache and project_cache.sessions and not modified_files):
+            # Need to rebuild cache
+            if modified_files:
+                click.echo(
+                    f"Found {len(modified_files)} modified files, rebuilding cache..."
+                )
+            else:
+                click.echo("Building session cache...")
+
+            # Pre-build the cache before launching TUI (no HTML generation)
+            try:
+                ensure_fresh_cache(project_path, cache_manager, silent=True)
+                click.echo("Cache ready! Launching TUI...")
+            except Exception as e:
+                click.echo(f"Error building cache: {e}", err=True)
+                return None
+        else:
+            click.echo(
+                f"Cache up to date. Found {len(project_cache.sessions)} sessions. Launching TUI..."
+            )
 
     # Small delay to let user see the message before TUI clears screen
     import time
@@ -63,7 +107,7 @@ def _launch_tui_with_cache_check(project_path: Path) -> Optional[str]:
 
     from .tui import run_session_browser
 
-    result = run_session_browser(project_path)
+    result = run_session_browser(project_path, is_archived=is_archived)
     return result
 
 
@@ -193,24 +237,23 @@ def _find_relative_matches(
         try:
             # Load cache to check for working directories
             cache_manager = CacheManager(project_dir, get_library_version())
-            project_cache = cache_manager.get_cached_project_data()
+            working_directories = cache_manager.get_working_directories()
 
             # Build cache if needed
-            if not project_cache or not project_cache.working_directories:
+            if not working_directories:
                 jsonl_files = list(project_dir.glob("*.jsonl"))
                 if jsonl_files:
                     try:
                         convert_jsonl_to_html(project_dir, silent=True)
-                        project_cache = cache_manager.get_cached_project_data()
+                        working_directories = cache_manager.get_working_directories()
                     except Exception as e:
                         logging.warning(
                             f"Failed to build cache for project {project_dir.name}: {e}"
                         )
-                        project_cache = None
 
-            if project_cache and project_cache.working_directories:
+            if working_directories:
                 # Check for relative matches
-                for cwd in project_cache.working_directories:
+                for cwd in working_directories:
                     cwd_path = Path(cwd).resolve()
                     if current_cwd_path.is_relative_to(cwd_path):
                         relative_matches.append(project_dir)
@@ -263,6 +306,17 @@ def _clear_caches(input_path: Path, all_projects: bool) -> None:
         if all_projects:
             # Clear cache for all project directories
             click.echo("Clearing caches for all projects...")
+
+            # Delete the SQLite cache database (respects CLAUDE_CODE_LOG_CACHE_PATH env var)
+            cache_db = get_cache_db_path(input_path)
+            if cache_db.exists():
+                try:
+                    cache_db.unlink()
+                    click.echo(f"  Deleted SQLite cache database: {cache_db}")
+                except Exception as e:
+                    click.echo(f"  Warning: Failed to delete cache database: {e}")
+
+            # Also clean up old JSON cache directories (migration cleanup)
             project_dirs = [
                 d
                 for d in input_path.iterdir()
@@ -271,12 +325,16 @@ def _clear_caches(input_path: Path, all_projects: bool) -> None:
 
             for project_dir in project_dirs:
                 try:
-                    cache_manager = CacheManager(project_dir, library_version)
-                    cache_manager.clear_cache()
-                    click.echo(f"  Cleared cache for {project_dir.name}")
+                    # Clean up old JSON cache directory if it exists
+                    old_cache_dir = project_dir / "cache"
+                    if old_cache_dir.exists():
+                        import shutil
+
+                        shutil.rmtree(old_cache_dir)
+                        click.echo(f"  Cleared old JSON cache for {project_dir.name}")
                 except Exception as e:
                     click.echo(
-                        f"  Warning: Failed to clear cache for {project_dir.name}: {e}"
+                        f"  Warning: Failed to clear old cache for {project_dir.name}: {e}"
                     )
 
         elif input_path.is_dir():
@@ -284,6 +342,14 @@ def _clear_caches(input_path: Path, all_projects: bool) -> None:
             click.echo(f"Clearing cache for {input_path}...")
             cache_manager = CacheManager(input_path, library_version)
             cache_manager.clear_cache()
+
+            # Also clean up old JSON cache directory if it exists
+            old_cache_dir = input_path / "cache"
+            if old_cache_dir.exists():
+                import shutil
+
+                shutil.rmtree(old_cache_dir)
+                click.echo("  Cleared old JSON cache directory")
         else:
             # Single file - no cache to clear
             click.echo("Cache clearing not applicable for single files.")
@@ -435,6 +501,12 @@ def _clear_output_files(input_path: Path, all_projects: bool, file_ext: str) -> 
     help="Image export mode: placeholder (mark position), embedded (base64), referenced (PNG files). Default: embedded for HTML, referenced for Markdown.",
 )
 @click.option(
+    "--page-size",
+    type=int,
+    default=2000,
+    help="Maximum messages per page for combined transcript (default: 2000). Sessions are never split across pages.",
+)
+@click.option(
     "--debug",
     is_flag=True,
     default=False,
@@ -455,6 +527,7 @@ def main(
     projects_dir: Optional[Path],
     output_format: str,
     image_export_mode: Optional[str],
+    page_size: int,
     debug: bool,
 ) -> None:
     """Convert Claude transcript JSONL files to HTML or Markdown.
@@ -482,11 +555,8 @@ def main(
                     click.echo(f"Error: Projects directory not found: {input_path}")
                     return
 
-                project_dirs = [
-                    d
-                    for d in input_path.iterdir()
-                    if d.is_dir() and list(d.glob("*.jsonl"))
-                ]
+                # Initial project discovery
+                project_dirs, archived_projects = _discover_projects(input_path)
 
                 if not project_dirs:
                     click.echo(f"No projects with JSONL files found in {input_path}")
@@ -495,7 +565,7 @@ def main(
                 # Try to find projects that match current working directory
                 matching_projects = find_projects_by_cwd(input_path)
 
-                if len(project_dirs) == 1:
+                if len(project_dirs) == 1 and not archived_projects:
                     # Only one project, open it directly
                     result = _launch_tui_with_cache_check(project_dirs[0])
                     if result == "back_to_projects":
@@ -503,14 +573,21 @@ def main(
                         from .tui import run_project_selector
 
                         while True:
+                            # Re-discover projects (may have changed after restore)
+                            project_dirs, archived_projects = _discover_projects(
+                                input_path
+                            )
                             selected_project = run_project_selector(
-                                project_dirs, matching_projects
+                                project_dirs, matching_projects, archived_projects
                             )
                             if not selected_project:
                                 # User cancelled
                                 return
 
-                            result = _launch_tui_with_cache_check(selected_project)
+                            is_archived = selected_project in archived_projects
+                            result = _launch_tui_with_cache_check(
+                                selected_project, is_archived=is_archived
+                            )
                             if result != "back_to_projects":
                                 # User quit normally
                                 return
@@ -526,14 +603,21 @@ def main(
                         from .tui import run_project_selector
 
                         while True:
+                            # Re-discover projects (may have changed after restore)
+                            project_dirs, archived_projects = _discover_projects(
+                                input_path
+                            )
                             selected_project = run_project_selector(
-                                project_dirs, matching_projects
+                                project_dirs, matching_projects, archived_projects
                             )
                             if not selected_project:
                                 # User cancelled
                                 return
 
-                            result = _launch_tui_with_cache_check(selected_project)
+                            is_archived = selected_project in archived_projects
+                            result = _launch_tui_with_cache_check(
+                                selected_project, is_archived=is_archived
+                            )
                             if result != "back_to_projects":
                                 # User quit normally
                                 return
@@ -543,14 +627,19 @@ def main(
                     from .tui import run_project_selector
 
                     while True:
+                        # Re-discover projects each iteration (may have changed after restore)
+                        project_dirs, archived_projects = _discover_projects(input_path)
                         selected_project = run_project_selector(
-                            project_dirs, matching_projects
+                            project_dirs, matching_projects, archived_projects
                         )
                         if not selected_project:
                             # User cancelled
                             return
 
-                        result = _launch_tui_with_cache_check(selected_project)
+                        is_archived = selected_project in archived_projects
+                        result = _launch_tui_with_cache_check(
+                            selected_project, is_archived=is_archived
+                        )
                         if result != "back_to_projects":
                             # User quit normally
                             return
@@ -595,6 +684,7 @@ def main(
                 not no_individual_sessions,
                 output_format,
                 image_export_mode,
+                page_size=page_size,
             )
 
             # Count processed projects
@@ -646,6 +736,7 @@ def main(
             not no_individual_sessions,
             not no_cache,
             image_export_mode=image_export_mode,
+            page_size=page_size,
         )
         if input_path.is_file():
             click.echo(f"Successfully converted {input_path} to {output_path}")

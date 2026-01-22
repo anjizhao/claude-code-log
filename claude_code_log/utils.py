@@ -4,9 +4,11 @@
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from claude_code_log.cache import SessionCacheData
+if TYPE_CHECKING:
+    from .cache import SessionCacheData
+
 from .models import ContentItem, TextContent, TranscriptEntry, UserTranscriptEntry
 from .factories import (
     IDE_DIAGNOSTICS_PATTERN,
@@ -54,6 +56,16 @@ def format_timestamp_range(first_timestamp: str, last_timestamp: str) -> str:
         return ""
 
 
+def _is_temp_path(path_str: str) -> bool:
+    """Check if a path is a temporary/test path that should be filtered out."""
+    temp_patterns = [
+        "/private/var/folders/",  # macOS temp
+        "/tmp/",  # Unix temp
+        "/var/folders/",  # macOS temp (alternate)
+    ]
+    return any(pattern in path_str for pattern in temp_patterns)
+
+
 def get_project_display_name(
     project_dir_name: str, working_directories: Optional[list[str]] = None
 ) -> str:
@@ -67,8 +79,18 @@ def get_project_display_name(
         The project display name (e.g., "claude-code-log")
     """
     if working_directories:
+        # Filter out temporary paths (pytest, macOS temp dirs, etc.)
+        real_dirs = [wd for wd in working_directories if not _is_temp_path(wd)]
+
+        # If all directories were filtered out, fall back to project_dir_name conversion
+        if not real_dirs:
+            display_name = project_dir_name
+            if display_name.startswith("-"):
+                display_name = display_name[1:].replace("-", "/")
+            return display_name
+
         # Convert to Path objects with their original indices for tracking recency
-        paths_with_indices = [(Path(wd), i) for i, wd in enumerate(working_directories)]
+        paths_with_indices = [(Path(wd), i) for i, wd in enumerate(real_dirs)]
 
         # Sort by: 1) path depth (fewer parts = less nested), 2) recency (lower index = more recent)
         # This gives us the least nested path, with ties broken by recency
@@ -167,18 +189,21 @@ def extract_text_content_length(content: list[ContentItem]) -> int:
 
 
 def extract_working_directories(
-    entries: list[TranscriptEntry] | list[SessionCacheData],
+    entries: "list[TranscriptEntry] | list[SessionCacheData] | list[Any]",
 ) -> list[str]:
     """Extract unique working directories from a list of entries.
 
     Ordered by timestamp (most recent first).
 
     Args:
-        entries: List of entries to extract working directories from
+        entries: List of TranscriptEntry or SessionCacheData to extract working directories from
 
     Returns:
         List of unique working directory paths found in the entries
     """
+    # Import here to avoid circular dependency at runtime
+    from .cache import SessionCacheData
+
     working_directories: dict[str, str] = {}
 
     for entry in entries:
@@ -199,6 +224,9 @@ def extract_working_directories(
     # Sort by timestamp (most recent first) and return just the paths
     sorted_dirs = sorted(working_directories.items(), key=lambda x: x[1], reverse=True)
     return [path for path, _ in sorted_dirs]
+
+
+# IDE tag patterns imported from factories for compact preview rendering
 
 
 def _compact_ide_tags_for_preview(text_content: str) -> str:

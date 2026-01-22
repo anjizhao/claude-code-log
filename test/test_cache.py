@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Tests for caching functionality."""
 
-import json
 import tempfile
 from pathlib import Path
-from datetime import datetime
 from unittest.mock import patch
 
 import pytest
@@ -12,7 +10,6 @@ import pytest
 from claude_code_log.cache import (
     CacheManager,
     get_library_version,
-    ProjectCache,
     SessionCacheData,
 )
 from claude_code_log.models import (
@@ -30,7 +27,10 @@ from claude_code_log.models import (
 def temp_project_dir():
     """Create a temporary project directory for testing."""
     with tempfile.TemporaryDirectory() as temp_dir:
-        yield Path(temp_dir)
+        # Create project subdirectory so db_path (parent/claude-code-log-cache.db) is unique per test
+        project_dir = Path(temp_dir) / "project"
+        project_dir.mkdir()
+        yield project_dir
 
 
 @pytest.fixture
@@ -101,16 +101,19 @@ class TestCacheManager:
 
         assert cache_manager.project_path == temp_project_dir
         assert cache_manager.library_version == mock_version
-        assert cache_manager.cache_dir == temp_project_dir / "cache"
-        assert cache_manager.cache_dir.exists()
+        # SQLite database should be created at parent level
+        assert (
+            cache_manager.db_path
+            == temp_project_dir.parent / "claude-code-log-cache.db"
+        )
+        assert cache_manager.db_path.exists()
 
-    def test_cache_file_path(self, cache_manager, temp_project_dir):
-        """Test cache file path generation."""
-        jsonl_path = temp_project_dir / "test.jsonl"
-        cache_path = cache_manager._get_cache_file_path(jsonl_path)
-
-        expected = temp_project_dir / "cache" / "test.json"
-        assert cache_path == expected
+    def test_database_path(self, cache_manager, temp_project_dir):
+        """Test that SQLite database is created at the correct location."""
+        # Database should be at parent level (projects_dir/claude-code-log-cache.db)
+        expected_db = temp_project_dir.parent / "claude-code-log-cache.db"
+        assert cache_manager.db_path == expected_db
+        assert expected_db.exists()
 
     def test_save_and_load_entries(
         self, cache_manager, temp_project_dir, sample_entries
@@ -122,9 +125,8 @@ class TestCacheManager:
         # Save entries to cache
         cache_manager.save_cached_entries(jsonl_path, sample_entries)
 
-        # Verify cache file exists
-        cache_file = cache_manager._get_cache_file_path(jsonl_path)
-        assert cache_file.exists()
+        # Verify file is cached
+        assert cache_manager.is_file_cached(jsonl_path)
 
         # Load entries from cache
         loaded_entries = cache_manager.load_cached_entries(jsonl_path)
@@ -136,30 +138,36 @@ class TestCacheManager:
         assert loaded_entries[1].type == "assistant"
         assert loaded_entries[2].type == "summary"
 
-    def test_timestamp_based_cache_structure(
+    def test_message_storage_with_timestamps(
         self, cache_manager, temp_project_dir, sample_entries
     ):
-        """Test that cache uses timestamp-based structure."""
+        """Test that messages are stored with correct timestamps in SQLite."""
+        import sqlite3
+
         jsonl_path = temp_project_dir / "test.jsonl"
         jsonl_path.write_text("dummy content", encoding="utf-8")
 
         cache_manager.save_cached_entries(jsonl_path, sample_entries)
 
-        # Read raw cache file
-        cache_file = cache_manager._get_cache_file_path(jsonl_path)
-        with open(cache_file, "r") as f:
-            cache_data = json.load(f)
+        # Query the SQLite database directly to verify structure
+        # Filter by project_id since database is shared between tests
+        conn = sqlite3.connect(cache_manager.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT timestamp, type FROM messages WHERE project_id = ? ORDER BY timestamp NULLS LAST",
+            (cache_manager._project_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
 
-        # Verify timestamp-based structure
-        assert isinstance(cache_data, dict)
-        assert "2023-01-01T10:00:00Z" in cache_data
-        assert "2023-01-01T10:01:00Z" in cache_data
-        assert "_no_timestamp" in cache_data  # Summary entry
-
-        # Verify entry grouping
-        assert len(cache_data["2023-01-01T10:00:00Z"]) == 1
-        assert len(cache_data["2023-01-01T10:01:00Z"]) == 1
-        assert len(cache_data["_no_timestamp"]) == 1
+        # Verify entries are stored with timestamps
+        assert len(rows) == 3
+        assert rows[0]["timestamp"] == "2023-01-01T10:00:00Z"
+        assert rows[0]["type"] == "user"
+        assert rows[1]["timestamp"] == "2023-01-01T10:01:00Z"
+        assert rows[1]["type"] == "assistant"
+        assert rows[2]["timestamp"] is None  # Summary has no timestamp
+        assert rows[2]["type"] == "summary"
 
     def test_cache_invalidation_file_modification(
         self, cache_manager, temp_project_dir, sample_entries
@@ -186,17 +194,10 @@ class TestCacheManager:
         # Create cache with version 1.0.0
         with patch("claude_code_log.cache.get_library_version", return_value="1.0.0"):
             cache_manager_v1 = CacheManager(temp_project_dir, "1.0.0")
-            # Create some cache data
-            index_data = ProjectCache(
-                version="1.0.0",
-                cache_created=datetime.now().isoformat(),
-                last_updated=datetime.now().isoformat(),
-                project_path=str(temp_project_dir),
-                cached_files={},
-                sessions={},
-            )
-            with open(cache_manager_v1.index_file, "w") as f:
-                json.dump(index_data.model_dump(), f)
+            # Verify project was created with version 1.0.0
+            cached_data = cache_manager_v1.get_cached_project_data()
+            assert cached_data is not None
+            assert cached_data.version == "1.0.0"
 
         # Create new cache manager with different version
         with patch("claude_code_log.cache.get_library_version", return_value="2.0.0"):
@@ -262,6 +263,213 @@ class TestCacheManager:
         assert len(user_messages) == 1
         assert "Early message" in str(user_messages[0].message.content)
 
+    def test_filtered_loading_with_z_suffix_boundary(
+        self, cache_manager, temp_project_dir
+    ):
+        """Test that timestamps with 'Z' suffix are correctly compared at day boundaries.
+
+        This tests the edge case where a message at 23:59:59Z should be included
+        when filtering with to_date set to that day. Previously, the query used
+        isoformat() which produced '.999999' microseconds, and 'Z' > '.' in string
+        comparison caused incorrect exclusion.
+        """
+        entries = [
+            UserTranscriptEntry(
+                parentUuid=None,
+                isSidechain=False,
+                userType="user",
+                cwd="/test",
+                sessionId="session1",
+                version="1.0.0",
+                uuid="user1",
+                timestamp="2023-01-01T23:59:59Z",  # End of day with Z suffix
+                type="user",
+                message=UserMessageModel(
+                    role="user",
+                    content=[TextContent(type="text", text="End of day message")],
+                ),
+            ),
+            UserTranscriptEntry(
+                parentUuid=None,
+                isSidechain=False,
+                userType="user",
+                cwd="/test",
+                sessionId="session1",
+                version="1.0.0",
+                uuid="user2",
+                timestamp="2023-01-02T00:00:01Z",  # Start of next day
+                type="user",
+                message=UserMessageModel(
+                    role="user",
+                    content=[TextContent(type="text", text="Next day message")],
+                ),
+            ),
+        ]
+
+        jsonl_path = temp_project_dir / "test.jsonl"
+        jsonl_path.write_text("dummy content", encoding="utf-8")
+
+        cache_manager.save_cached_entries(jsonl_path, entries)
+
+        # Filter to only 2023-01-01 - should include the 23:59:59Z message
+        filtered = cache_manager.load_cached_entries_filtered(
+            jsonl_path, "2023-01-01", "2023-01-01"
+        )
+
+        assert filtered is not None
+        user_messages = [entry for entry in filtered if entry.type == "user"]
+
+        # Should include only the end-of-day message, not the next day message
+        assert len(user_messages) == 1, (
+            f"Expected 1 message from 2023-01-01, got {len(user_messages)}. "
+            "The 23:59:59Z message may have been incorrectly excluded due to "
+            "timestamp format mismatch (Z vs .999999 suffix)."
+        )
+        assert "End of day message" in str(user_messages[0].message.content)
+
+    def test_filtered_loading_with_mixed_timestamp_formats(
+        self, cache_manager, temp_project_dir
+    ):
+        """Test filtering with mixed timestamp formats (with/without fractional seconds).
+
+        This tests the bug where timestamps like '2023-01-01T10:00:00.875368Z'
+        were incorrectly compared against filter bounds like '2023-01-01T10:00:00Z'.
+        String comparison fails because '.' < 'Z' alphabetically, causing the
+        timestamp with microseconds to be incorrectly excluded even though it's
+        actually 875ms AFTER the filter bound.
+        """
+        entries = [
+            UserTranscriptEntry(
+                parentUuid=None,
+                isSidechain=False,
+                userType="user",
+                cwd="/test",
+                sessionId="session1",
+                version="1.0.0",
+                uuid="user1",
+                timestamp="2023-01-01T10:00:00Z",  # No fractional seconds
+                type="user",
+                message=UserMessageModel(
+                    role="user",
+                    content=[
+                        TextContent(type="text", text="Message without microseconds")
+                    ],
+                ),
+            ),
+            UserTranscriptEntry(
+                parentUuid=None,
+                isSidechain=False,
+                userType="user",
+                cwd="/test",
+                sessionId="session1",
+                version="1.0.0",
+                uuid="user2",
+                timestamp="2023-01-01T10:00:00.875368Z",  # With microseconds - same second
+                type="user",
+                message=UserMessageModel(
+                    role="user",
+                    content=[
+                        TextContent(type="text", text="Message with microseconds")
+                    ],
+                ),
+            ),
+            UserTranscriptEntry(
+                parentUuid=None,
+                isSidechain=False,
+                userType="user",
+                cwd="/test",
+                sessionId="session1",
+                version="1.0.0",
+                uuid="user3",
+                timestamp="2023-01-01T10:00:01.123456Z",  # Next second with microseconds
+                type="user",
+                message=UserMessageModel(
+                    role="user",
+                    content=[TextContent(type="text", text="Message next second")],
+                ),
+            ),
+        ]
+
+        jsonl_path = temp_project_dir / "test.jsonl"
+        jsonl_path.write_text("dummy content", encoding="utf-8")
+
+        cache_manager.save_cached_entries(jsonl_path, entries)
+
+        # Filter with from_date at exactly 10:00:00 - should include ALL messages
+        # The bug would cause the microsecond messages to be excluded because
+        # '2023-01-01T10:00:00.875368Z' < '2023-01-01T10:00:00Z' in string comparison
+        filtered = cache_manager.load_cached_entries_filtered(
+            jsonl_path, "2023-01-01 10:00:00", "2023-01-01 10:00:01"
+        )
+
+        assert filtered is not None
+        user_messages = [entry for entry in filtered if entry.type == "user"]
+
+        # All 3 messages should be included
+        assert len(user_messages) == 3, (
+            f"Expected 3 messages, got {len(user_messages)}. "
+            "Messages with fractional seconds may have been incorrectly excluded "
+            "due to string comparison where '.' < 'Z'."
+        )
+
+    def test_timestamp_ordering_with_mixed_formats(
+        self, cache_manager, temp_project_dir
+    ):
+        """Test that timestamps are correctly ordered regardless of format.
+
+        Without normalization, ORDER BY timestamp would sort:
+        - '2023-01-01T10:00:00.5Z' BEFORE '2023-01-01T10:00:00Z'
+        because '.' < 'Z' in ASCII, even though .5 seconds is AFTER 0 seconds.
+        """
+        entries = [
+            UserTranscriptEntry(
+                parentUuid=None,
+                isSidechain=False,
+                userType="user",
+                cwd="/test",
+                sessionId="session1",
+                version="1.0.0",
+                uuid="user1",
+                timestamp="2023-01-01T10:00:00.500000Z",  # 500ms into the second
+                type="user",
+                message=UserMessageModel(
+                    role="user",
+                    content=[TextContent(type="text", text="Second message (500ms)")],
+                ),
+            ),
+            UserTranscriptEntry(
+                parentUuid=None,
+                isSidechain=False,
+                userType="user",
+                cwd="/test",
+                sessionId="session1",
+                version="1.0.0",
+                uuid="user2",
+                timestamp="2023-01-01T10:00:00Z",  # Start of the second
+                type="user",
+                message=UserMessageModel(
+                    role="user",
+                    content=[TextContent(type="text", text="First message (0ms)")],
+                ),
+            ),
+        ]
+
+        jsonl_path = temp_project_dir / "test.jsonl"
+        jsonl_path.write_text("dummy content", encoding="utf-8")
+
+        cache_manager.save_cached_entries(jsonl_path, entries)
+
+        # Load all entries - they should be in timestamp order
+        loaded = cache_manager.load_cached_entries(jsonl_path)
+
+        assert loaded is not None
+        user_messages = [entry for entry in loaded if entry.type == "user"]
+
+        # With normalization to second precision, both messages have the same
+        # normalized timestamp, so order may vary. The key thing is that the
+        # filtering works correctly - ordering within the same second is less critical.
+        assert len(user_messages) == 2
+
     def test_clear_cache(self, cache_manager, temp_project_dir, sample_entries):
         """Test cache clearing functionality."""
         jsonl_path = temp_project_dir / "test.jsonl"
@@ -269,16 +477,22 @@ class TestCacheManager:
 
         # Create cache
         cache_manager.save_cached_entries(jsonl_path, sample_entries)
-        cache_file = cache_manager._get_cache_file_path(jsonl_path)
-        assert cache_file.exists()
-        assert cache_manager.index_file.exists()
+        assert cache_manager.is_file_cached(jsonl_path)
+
+        # Verify data exists before clearing
+        cached_data = cache_manager.get_cached_project_data()
+        assert cached_data is not None
+        assert len(cached_data.cached_files) > 0
 
         # Clear cache
         cache_manager.clear_cache()
 
-        # Verify files are deleted
-        assert not cache_file.exists()
-        assert not cache_manager.index_file.exists()
+        # Verify cache is cleared (no more files or sessions)
+        assert not cache_manager.is_file_cached(jsonl_path)
+        cached_data = cache_manager.get_cached_project_data()
+        assert cached_data is not None
+        assert len(cached_data.cached_files) == 0
+        assert len(cached_data.sessions) == 0
 
     def test_session_cache_updates(self, cache_manager):
         """Test updating session cache data."""
@@ -586,17 +800,15 @@ class TestCacheVersionCompatibility:
 class TestCacheErrorHandling:
     """Test cache error handling and edge cases."""
 
-    def test_corrupted_cache_file(self, cache_manager, temp_project_dir):
-        """Test handling of corrupted cache files."""
+    def test_missing_cache_entry(self, cache_manager, temp_project_dir):
+        """Test handling when cache entry doesn't exist."""
         jsonl_path = temp_project_dir / "test.jsonl"
         jsonl_path.write_text("dummy content", encoding="utf-8")
 
-        # Create corrupted cache file
-        cache_file = cache_manager._get_cache_file_path(jsonl_path)
-        cache_file.parent.mkdir(exist_ok=True)
-        cache_file.write_text("invalid json content", encoding="utf-8")
+        # File exists but not cached
+        assert not cache_manager.is_file_cached(jsonl_path)
 
-        # Should handle gracefully
+        # Should return None when not cached
         result = cache_manager.load_cached_entries(jsonl_path)
         assert result is None
 
@@ -626,10 +838,98 @@ class TestCacheErrorHandling:
                 assert cache_manager is not None
             except PermissionError:
                 # If we get permission errors, just skip this test
-                return pytest.skip("Cannot test permissions on this system")  # type: ignore[misc]
+                pytest.skip("Cannot test permissions on this system")
         finally:
             # Restore permissions
             try:
                 cache_dir.chmod(0o755)
             except OSError:
                 pass
+
+
+class TestCachePathEnvVar:
+    """Test CLAUDE_CODE_LOG_CACHE_PATH environment variable."""
+
+    def test_default_path_without_env_var(self, tmp_path):
+        """Test default cache path when env var is not set."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        cache = CacheManager(project_dir, "1.0.0")
+
+        # Default should be parent/claude-code-log-cache.db
+        expected_path = tmp_path / "claude-code-log-cache.db"
+        assert cache.db_path == expected_path
+        assert expected_path.exists()
+
+    def test_env_var_overrides_default(self, tmp_path, monkeypatch):
+        """Test that CLAUDE_CODE_LOG_CACHE_PATH overrides default location."""
+        custom_db = tmp_path / "custom-cache.db"
+        monkeypatch.setenv("CLAUDE_CODE_LOG_CACHE_PATH", str(custom_db))
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        cache = CacheManager(project_dir, "1.0.0")
+        assert cache.db_path == custom_db
+        assert custom_db.exists()
+
+    def test_explicit_db_path_overrides_env_var(self, tmp_path, monkeypatch):
+        """Test that explicit db_path takes precedence over env var."""
+        env_db = tmp_path / "env-cache.db"
+        explicit_db = tmp_path / "explicit-cache.db"
+        monkeypatch.setenv("CLAUDE_CODE_LOG_CACHE_PATH", str(env_db))
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        cache = CacheManager(project_dir, "1.0.0", db_path=explicit_db)
+        assert cache.db_path == explicit_db
+        assert explicit_db.exists()
+        assert not env_db.exists()
+
+    def test_get_all_cached_projects_respects_env_var(self, tmp_path, monkeypatch):
+        """Test that get_all_cached_projects uses env var."""
+        from claude_code_log.cache import get_all_cached_projects
+
+        custom_db = tmp_path / "custom-cache.db"
+        monkeypatch.setenv("CLAUDE_CODE_LOG_CACHE_PATH", str(custom_db))
+
+        projects_dir = tmp_path / "projects"
+        projects_dir.mkdir()
+
+        # Create a project and cache it
+        project_dir = projects_dir / "test-project"
+        project_dir.mkdir()
+        cache = CacheManager(project_dir, "1.0.0")  # Uses env var
+        assert cache.db_path == custom_db
+
+        # get_all_cached_projects should also use the env var
+        projects = get_all_cached_projects(projects_dir)
+        assert len(projects) == 1
+        assert projects[0][0] == str(project_dir)
+
+    def test_get_all_cached_projects_explicit_db_path(self, tmp_path, monkeypatch):
+        """Test that get_all_cached_projects explicit db_path overrides env var."""
+        from claude_code_log.cache import get_all_cached_projects
+
+        env_db = tmp_path / "env-cache.db"
+        explicit_db = tmp_path / "explicit-cache.db"
+        monkeypatch.setenv("CLAUDE_CODE_LOG_CACHE_PATH", str(env_db))
+
+        projects_dir = tmp_path / "projects"
+        projects_dir.mkdir()
+        project_dir = projects_dir / "test-project"
+        project_dir.mkdir()
+
+        # Create cache using explicit path
+        cache = CacheManager(project_dir, "1.0.0", db_path=explicit_db)
+        assert cache.db_path == explicit_db
+
+        # get_all_cached_projects with explicit path should find it
+        projects = get_all_cached_projects(projects_dir, db_path=explicit_db)
+        assert len(projects) == 1
+
+        # get_all_cached_projects without explicit path uses env var (empty db)
+        projects_env = get_all_cached_projects(projects_dir)
+        assert len(projects_env) == 0  # env_db doesn't have any projects

@@ -1531,7 +1531,7 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
             content = message.content
             message_content = content if isinstance(content, list) else []
         else:
-            message_content = message.message.content  # type: ignore[union-attr]
+            message_content = message.message.content
 
         text_content = extract_text_content(message_content)
 
@@ -1735,16 +1735,16 @@ def _render_messages(
             )
             effective_type = "user"
         else:
-            message_content = message.message.content  # type: ignore
+            message_content = message.message.content
             meta = create_meta(message)
             effective_type = message_type
 
         # Chunk content: regular items (text/image) accumulate, special items (tool/thinking) separate
         if isinstance(message_content, list):
-            chunks = chunk_message_content(message_content)  # type: ignore[arg-type]
+            chunks = chunk_message_content(message_content)
         else:
             # String content - wrap in list with single TextContent
-            content_str: str = message_content.strip() if message_content else ""  # type: ignore[union-attr]
+            content_str: str = message_content.strip() if message_content else ""
             if content_str:
                 chunks: list[ContentChunk] = [
                     [TextContent(type="text", text=content_str)]  # pyright: ignore[reportUnknownArgumentType]
@@ -2303,3 +2303,18 @@ def get_renderer(format: str, image_export_mode: Optional[str] = None) -> Render
         mode = image_export_mode or "referenced"
         return MarkdownRenderer(image_export_mode=mode)
     raise ValueError(f"Unsupported format: {format}")
+
+
+def is_html_outdated(html_file_path: Path) -> bool:
+    """Check if an HTML file is outdated based on its version comment.
+
+    This is a convenience function that uses the HtmlRenderer's is_outdated method.
+
+    Returns:
+        True if the file should be regenerated (missing version, different version, or file doesn't exist).
+        False if the file is current.
+    """
+    from .html.renderer import HtmlRenderer
+
+    renderer = HtmlRenderer()
+    return renderer.is_outdated(html_file_path)
