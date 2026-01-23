@@ -43,6 +43,8 @@ from ..models import (
     TaskOutput,
     TodoWriteInput,
     ToolResultContent,
+    WebSearchInput,
+    WebSearchOutput,
     WriteInput,
     WriteOutput,
 )
@@ -208,6 +210,44 @@ def format_exitplanmode_result(content: str) -> str:
 
     # For errors or other cases, return as-is
     return content
+
+
+# -- WebSearch Tool -----------------------------------------------------------
+
+
+def format_websearch_input(search_input: WebSearchInput) -> str:
+    """Format WebSearch tool use content showing the search query.
+
+    Args:
+        search_input: Typed WebSearchInput with query parameter.
+
+    The query is displayed prominently since it's the main input.
+    """
+    escaped_query = escape_html(search_input.query)
+    return f'<div class="websearch-query">{escaped_query}</div>'
+
+
+def format_websearch_output(output: WebSearchOutput) -> str:
+    """Format WebSearch tool result with clickable links.
+
+    Args:
+        output: Parsed WebSearchOutput with query and links.
+
+    Renders the search results as a list of clickable links.
+    """
+    if not output.links:
+        return '<div class="websearch-no-results"><em>No results found</em></div>'
+
+    html_parts: list[str] = ['<ul class="websearch-results">']
+    for link in output.links:
+        escaped_title = escape_html(link.title)
+        escaped_url = escape_html(link.url)
+        html_parts.append(
+            f'<li><a href="{escaped_url}" target="_blank" rel="noopener">'
+            f"{escaped_title}</a></li>"
+        )
+    html_parts.append("</ul>")
+    return "".join(html_parts)
 
 
 # -- TodoWrite Tool -----------------------------------------------------------
@@ -711,6 +751,7 @@ __all__ = [
     "format_multiedit_input",
     "format_bash_input",
     "format_task_input",
+    "format_websearch_input",
     # Tool output formatters (called by HtmlRenderer.format_{OutputClass})
     "format_read_output",
     "format_write_output",
@@ -719,6 +760,7 @@ __all__ = [
     "format_task_output",
     "format_askuserquestion_output",
     "format_exitplanmode_output",
+    "format_websearch_output",
     # Fallback for ToolResultContent
     "format_tool_result_content_raw",
     # Legacy formatters (still used)

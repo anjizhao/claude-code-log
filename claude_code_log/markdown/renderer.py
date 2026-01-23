@@ -41,6 +41,7 @@ from ..models import (
     TaskInput,
     TodoWriteInput,
     ToolUseContent,
+    WebSearchInput,
     WriteInput,
     # Tool output types
     AskUserQuestionOutput,
@@ -51,6 +52,7 @@ from ..models import (
     ReadOutput,
     TaskOutput,
     ToolResultContent,
+    WebSearchOutput,
     WriteOutput,
 )
 from ..renderer import (
@@ -498,6 +500,11 @@ class MarkdownRenderer(Renderer):
         # Title contains "Exiting plan mode", body is empty
         return ""
 
+    def format_WebSearchInput(self, _input: WebSearchInput, _: TemplateMessage) -> str:
+        """Format → '' (query shown in title)."""
+        # Query is shown in the title, body is empty
+        return ""
+
     def format_ToolUseContent(self, content: ToolUseContent, _: TemplateMessage) -> str:
         """Fallback for unknown tool inputs - render as key/value list."""
         return self._render_params(content.input)
@@ -609,6 +616,17 @@ class MarkdownRenderer(Renderer):
             return f"{status}\n\n{output.message}"
         return status
 
+    def format_WebSearchOutput(
+        self, output: WebSearchOutput, _: TemplateMessage
+    ) -> str:
+        """Format → markdown list of links."""
+        if not output.links:
+            return "*No results found*"
+        parts: list[str] = []
+        for link in output.links:
+            parts.append(f"- [{link.title}]({link.url})")
+        return "\n".join(parts)
+
     def format_ToolResultContent(
         self, output: ToolResultContent, message: TemplateMessage
     ) -> str:
@@ -683,6 +701,10 @@ class MarkdownRenderer(Renderer):
     ) -> str:
         """Title → '📝 Exiting plan mode'."""
         return "📝 Exiting plan mode"
+
+    def title_WebSearchInput(self, input: WebSearchInput, _: TemplateMessage) -> str:
+        """Title → '🔎 WebSearch `query`'."""
+        return f"🔎 WebSearch `{input.query}`"
 
     def title_ThinkingMessage(
         self, _content: ThinkingMessage, _message: TemplateMessage

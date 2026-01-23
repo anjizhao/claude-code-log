@@ -508,15 +508,17 @@ def parse_websearch_output(
         return WebSearchOutput(query=query, links=[])
 
     try:
-        links_json = json.loads(links_match.group(1))
-        links = [
-            WebSearchLink(
-                title=link.get("title", ""),
-                url=link.get("url", ""),
-            )
-            for link in links_json
-            if isinstance(link, dict)
-        ]
+        links_json: list[Any] = json.loads(links_match.group(1))
+        links: list[WebSearchLink] = []
+        for item in links_json:
+            if isinstance(item, dict):
+                link = cast(dict[str, Any], item)
+                links.append(
+                    WebSearchLink(
+                        title=str(link.get("title", "")),
+                        url=str(link.get("url", "")),
+                    )
+                )
     except (json.JSONDecodeError, TypeError):
         links = []
 
