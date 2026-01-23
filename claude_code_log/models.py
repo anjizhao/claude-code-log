@@ -871,6 +871,12 @@ class ExitPlanModeInput(BaseModel):
     teammateCount: Optional[int] = None
 
 
+class WebSearchInput(BaseModel):
+    """Input parameters for the WebSearch tool."""
+
+    query: str
+
+
 # Union of all typed tool inputs
 ToolInput = Union[
     BashInput,
@@ -884,6 +890,7 @@ ToolInput = Union[
     TodoWriteInput,
     AskUserQuestionInput,
     ExitPlanModeInput,
+    WebSearchInput,
     ToolUseContent,  # Generic fallback when no specialized parser
 ]
 
@@ -1032,6 +1039,26 @@ class ExitPlanModeOutput:
     approved: bool  # Whether the plan was approved
 
 
+@dataclass
+class WebSearchLink:
+    """Single search result link from WebSearch output."""
+
+    title: str
+    url: str
+
+
+@dataclass
+class WebSearchOutput:
+    """Parsed WebSearch tool output.
+
+    Symmetric with WebSearchInput for tool_use → tool_result pairing.
+    Contains the query and list of result links.
+    """
+
+    query: str
+    links: list[WebSearchLink]
+
+
 # Union of all specialized output types + ToolResultContent as generic fallback
 ToolOutput = Union[
     ReadOutput,
@@ -1041,6 +1068,7 @@ ToolOutput = Union[
     TaskOutput,
     AskUserQuestionOutput,
     ExitPlanModeOutput,
+    WebSearchOutput,
     # TODO: Add as parsers are implemented:
     # GlobOutput, GrepOutput
     ToolResultContent,  # Generic fallback for unparsed results

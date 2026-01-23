@@ -36,6 +36,7 @@ from ..models import (
     ToolResultMessage,
     ToolUseContent,
     ToolUseMessage,
+    WebSearchInput,
     WriteInput,
     # Tool output models
     AskUserQuestionAnswer,
@@ -46,6 +47,8 @@ from ..models import (
     ReadOutput,
     TaskOutput,
     ToolOutput,
+    WebSearchLink,
+    WebSearchOutput,
     WriteOutput,
 )
 
@@ -67,6 +70,7 @@ TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "AskUserQuestion": AskUserQuestionInput,
     "ask_user_question": AskUserQuestionInput,  # Legacy tool name
     "ExitPlanMode": ExitPlanModeInput,
+    "WebSearch": WebSearchInput,
 }
 
 
@@ -466,6 +470,59 @@ def parse_exitplanmode_output(
     return ExitPlanModeOutput(message=message, approved=approved)
 
 
+def parse_websearch_output(
+    tool_result: ToolResultContent, file_path: Optional[str]
+) -> Optional[WebSearchOutput]:
+    """Parse WebSearch tool result into structured content.
+
+    Parses the result format:
+    'Web search results for query: "..."\n\nLinks: [{...}, ...]'
+
+    Args:
+        tool_result: The tool result content
+        file_path: Unused for WebSearch tool
+
+    Returns:
+        WebSearchOutput with query and links
+    """
+    import json
+
+    del file_path  # Unused
+    if not (content := _extract_tool_result_text(tool_result)):
+        return None
+
+    # Extract query from the first line
+    # Format: 'Web search results for query: "..."'
+    query_match = re.match(
+        r'Web search results for query: "([^"]+)"',
+        content,
+    )
+    if not query_match:
+        return None
+    query = query_match.group(1)
+
+    # Extract Links JSON array
+    # Format: 'Links: [{...}, ...]'
+    links_match = re.search(r"Links: (\[.*?\])", content, re.DOTALL)
+    if not links_match:
+        return WebSearchOutput(query=query, links=[])
+
+    try:
+        links_json = json.loads(links_match.group(1))
+        links = [
+            WebSearchLink(
+                title=link.get("title", ""),
+                url=link.get("url", ""),
+            )
+            for link in links_json
+            if isinstance(link, dict)
+        ]
+    except (json.JSONDecodeError, TypeError):
+        links = []
+
+    return WebSearchOutput(query=query, links=links)
+
+
 # Type alias for tool output parsers
 ToolOutputParser = Callable[[ToolResultContent, Optional[str]], Optional[ToolOutput]]
 
@@ -479,6 +536,7 @@ TOOL_OUTPUT_PARSERS: dict[str, ToolOutputParser] = {
     "Task": parse_task_output,
     "AskUserQuestion": parse_askuserquestion_output,
     "ExitPlanMode": parse_exitplanmode_output,
+    "WebSearch": parse_websearch_output,
 }
 
 
