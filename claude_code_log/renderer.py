@@ -22,6 +22,7 @@ from .models import (
     SystemTranscriptEntry,
     SummaryTranscriptEntry,
     QueueOperationTranscriptEntry,
+    UserTranscriptEntry,
     ContentItem,
     TextContent,
     ToolResultContent,
@@ -1856,8 +1857,15 @@ def _render_messages(
                         chunk_meta, tool_item, ctx.tool_use_context
                     )
                 elif isinstance(tool_item, ToolResultContent):
+                    # Extract toolUseResult from user entries for structured parsing
+                    entry_tool_use_result = None
+                    if isinstance(message, UserTranscriptEntry):
+                        entry_tool_use_result = message.toolUseResult
                     tool_result = create_tool_result_message(
-                        chunk_meta, tool_item, ctx.tool_use_context
+                        chunk_meta,
+                        tool_item,
+                        ctx.tool_use_context,
+                        entry_tool_use_result,
                     )
                 elif isinstance(tool_item, ThinkingContent):
                     # Pass usage only if not yet used

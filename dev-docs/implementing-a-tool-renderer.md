@@ -80,44 +80,73 @@ TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
 
 ### Implement Output Parser
 
-Create a parser function that extracts structured data from the raw result:
+Create a parser function that extracts structured data from the raw result. Some tools (like WebSearch) have structured `toolUseResult` data available on the transcript entry, which is cleaner than regex parsing:
 
 ```python
-def parse_websearch_output(
-    tool_result: ToolResultContent, file_path: Optional[str]
+def _parse_websearch_from_structured(
+    tool_use_result: ToolUseResult,
 ) -> Optional[WebSearchOutput]:
-    """Parse WebSearch tool result as preamble/links/summary."""
+    """Parse WebSearch from structured toolUseResult data.
+
+    The toolUseResult for WebSearch has the format:
+    {
+        "query": "search query",
+        "results": [
+            {"tool_use_id": "...", "content": [{"title": "...", "url": "..."}]},
+            "Analysis text..."
+        ]
+    }
+    """
+    if not isinstance(tool_use_result, dict):
+        return None
+    query = tool_use_result.get("query")
+    results = tool_use_result.get("results")
+    # ... extract links from results[0].content, summary from results[1] ...
+    return WebSearchOutput(query=query, links=links, preamble=None, summary=summary)
+
+
+def _parse_websearch_from_text(content: str) -> Optional[WebSearchOutput]:
+    """Fallback: parse from text content using regex."""
+    # Extract query, Links JSON array, and summary from text content
+    # ... regex parsing ...
+
+
+def parse_websearch_output(
+    tool_result: ToolResultContent,
+    file_path: Optional[str],
+    tool_use_result: Optional[ToolUseResult] = None,  # Extended signature
+) -> Optional[WebSearchOutput]:
+    """Parse WebSearch tool result.
+
+    Uses structured toolUseResult when available (preferred), with
+    fallback to regex parsing from text content.
+    """
     del file_path  # Unused
-    if not (content := _extract_tool_result_text(tool_result)):
-        return None
 
-    # Extract query from anywhere in content
-    query_match = re.search(r'Web search results for query: "([^"]+)"', content)
-    if not query_match:
-        return None
-    query = query_match.group(1)
+    # Try structured data first (cleaner, more reliable)
+    if tool_use_result is not None:
+        if parsed := _parse_websearch_from_structured(tool_use_result):
+            return parsed
 
-    # Split into preamble/links/summary
-    links_start = content.find("Links: [")
-    preamble = content[:links_start].strip() if links_start > 0 else None
+    # Fallback to regex parsing from text content
+    if content := _extract_tool_result_text(tool_result):
+        return _parse_websearch_from_text(content)
 
-    # Parse Links JSON array, find end position
-    # ... bracket matching to find JSON array end ...
-
-    summary = content[json_end:].strip() or None
-
-    return WebSearchOutput(query=query, links=links, preamble=preamble, summary=summary)
+    return None
 ```
 
 ### Register Output Parser
 
-Add to `TOOL_OUTPUT_PARSERS`:
+Add to `TOOL_OUTPUT_PARSERS` and `PARSERS_WITH_TOOL_USE_RESULT`:
 
 ```python
 TOOL_OUTPUT_PARSERS: dict[str, ToolOutputParser] = {
     # ... existing entries ...
     "WebSearch": parse_websearch_output,
 }
+
+# Parsers that accept the extended signature with tool_use_result
+PARSERS_WITH_TOOL_USE_RESULT: set[str] = {"WebSearch"}
 ```
 
 ## Step 3: Implement HTML Formatters
@@ -251,6 +280,7 @@ Create test cases in the appropriate test files:
 - [ ] Add to `TOOL_INPUT_MODELS` in factory
 - [ ] Implement output parser function
 - [ ] Add to `TOOL_OUTPUT_PARSERS` in factory
+- [ ] Add to `PARSERS_WITH_TOOL_USE_RESULT` if using structured data (optional)
 - [ ] Add HTML input formatter
 - [ ] Add HTML output formatter
 - [ ] Wire up HTML renderer format methods
