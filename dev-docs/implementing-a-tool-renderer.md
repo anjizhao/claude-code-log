@@ -1,0 +1,237 @@
+# Implementing a Tool Renderer
+
+This guide walks through adding rendering support for a new Claude Code tool, using WebSearch as an example.
+
+## Overview
+
+Tool rendering involves several components working together:
+
+1. **Models** (`models.py`) - Type definitions for tool inputs and outputs
+2. **Factory** (`factories/tool_factory.py`) - Parsing raw JSON into typed models
+3. **HTML Formatters** (`html/tool_formatters.py`) - HTML rendering functions
+4. **Renderers** - Integration with HTML and Markdown renderers
+
+## Step 1: Define Models
+
+### Tool Input Model
+
+Add a Pydantic model for the tool's input parameters in `models.py`:
+
+```python
+class WebSearchInput(BaseModel):
+    """Input parameters for the WebSearch tool."""
+    query: str
+```
+
+### Tool Output Model
+
+Add a dataclass for the parsed output. Output models are dataclasses (not Pydantic) since they're created by our parsers, not from JSON:
+
+```python
+@dataclass
+class WebSearchLink:
+    """Single search result link."""
+    title: str
+    url: str
+
+@dataclass
+class WebSearchOutput:
+    """Parsed WebSearch tool output."""
+    query: str
+    links: list[WebSearchLink]
+```
+
+### Update Type Unions
+
+Add the new types to the `ToolInput` and `ToolOutput` unions:
+
+```python
+ToolInput = Union[
+    # ... existing types ...
+    WebSearchInput,
+    ToolUseContent,  # Generic fallback - keep last
+]
+
+ToolOutput = Union[
+    # ... existing types ...
+    WebSearchOutput,
+    ToolResultContent,  # Generic fallback - keep last
+]
+```
+
+## Step 2: Implement Factory Functions
+
+In `factories/tool_factory.py`:
+
+### Register Input Model
+
+Add the input model to `TOOL_INPUT_MODELS`:
+
+```python
+TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
+    # ... existing entries ...
+    "WebSearch": WebSearchInput,
+}
+```
+
+### Implement Output Parser
+
+Create a parser function that extracts structured data from the raw result:
+
+```python
+def parse_websearch_output(
+    tool_result: ToolResultContent, file_path: Optional[str]
+) -> Optional[WebSearchOutput]:
+    """Parse WebSearch tool result into structured content."""
+    del file_path  # Unused
+    if not (content := _extract_tool_result_text(tool_result)):
+        return None
+
+    # Parse the format: 'Web search results for query: "..."\n\nLinks: [...]'
+    # Extract query and links...
+    return WebSearchOutput(query=query, links=links)
+```
+
+### Register Output Parser
+
+Add to `TOOL_OUTPUT_PARSERS`:
+
+```python
+TOOL_OUTPUT_PARSERS: dict[str, ToolOutputParser] = {
+    # ... existing entries ...
+    "WebSearch": parse_websearch_output,
+}
+```
+
+## Step 3: Implement HTML Formatters
+
+In `html/tool_formatters.py`:
+
+### Input Formatter
+
+```python
+def format_websearch_input(search_input: WebSearchInput) -> str:
+    """Format WebSearch tool use content."""
+    escaped_query = escape_html(search_input.query)
+    return f'<div class="websearch-query">🔍 {escaped_query}</div>'
+```
+
+### Output Formatter
+
+```python
+def format_websearch_output(output: WebSearchOutput) -> str:
+    """Format WebSearch tool result with clickable links."""
+    html_parts = ['<ul class="websearch-results">']
+    for link in output.links:
+        escaped_title = escape_html(link.title)
+        escaped_url = escape_html(link.url)
+        html_parts.append(
+            f'<li><a href="{escaped_url}" target="_blank">{escaped_title}</a></li>'
+        )
+    html_parts.append("</ul>")
+    return "".join(html_parts)
+```
+
+### Update Exports
+
+Add functions to `__all__`:
+
+```python
+__all__ = [
+    # ... existing exports ...
+    "format_websearch_input",
+    "format_websearch_output",
+]
+```
+
+## Step 4: Wire Up HTML Renderer
+
+In `html/renderer.py`:
+
+### Import Formatters
+
+```python
+from .tool_formatters import (
+    # ... existing imports ...
+    format_websearch_input,
+    format_websearch_output,
+)
+```
+
+### Add Format Methods
+
+```python
+def format_WebSearchInput(self, input: WebSearchInput, _: TemplateMessage) -> str:
+    return format_websearch_input(input)
+
+def format_WebSearchOutput(self, output: WebSearchOutput, _: TemplateMessage) -> str:
+    return format_websearch_output(output)
+```
+
+### Add Title Method (Optional)
+
+For a custom title in the message header:
+
+```python
+def title_WebSearchInput(self, input: WebSearchInput, message: TemplateMessage) -> str:
+    return self._tool_title(message, "🔎", f'"{input.query}"')
+```
+
+## Step 5: Implement Markdown Renderer
+
+In `markdown/renderer.py`:
+
+### Import Models
+
+```python
+from ..models import (
+    # ... existing imports ...
+    WebSearchInput,
+    WebSearchOutput,
+)
+```
+
+### Add Format Methods
+
+```python
+def format_WebSearchInput(self, input: WebSearchInput, _: TemplateMessage) -> str:
+    """Format -> empty (query shown in title)."""
+    return ""
+
+def format_WebSearchOutput(self, output: WebSearchOutput, _: TemplateMessage) -> str:
+    """Format -> markdown list of links."""
+    parts = [f"Query: *{output.query}*", ""]
+    for link in output.links:
+        parts.append(f"- [{link.title}]({link.url})")
+    return "\n".join(parts)
+
+def title_WebSearchInput(self, input: WebSearchInput, _: TemplateMessage) -> str:
+    """Title -> '🔎 WebSearch `query`'."""
+    return f'🔎 WebSearch `{input.query}`'
+```
+
+## Step 6: Add Tests
+
+Create test cases in the appropriate test files:
+
+1. **Parser tests** - Verify output parsing handles various formats
+2. **Formatter tests** - Verify HTML/Markdown output is correct
+3. **Integration tests** - Verify end-to-end rendering
+
+## Checklist
+
+- [ ] Add input model to `models.py`
+- [ ] Add output model to `models.py`
+- [ ] Update `ToolInput` union
+- [ ] Update `ToolOutput` union
+- [ ] Add to `TOOL_INPUT_MODELS` in factory
+- [ ] Implement output parser function
+- [ ] Add to `TOOL_OUTPUT_PARSERS` in factory
+- [ ] Add HTML input formatter
+- [ ] Add HTML output formatter
+- [ ] Wire up HTML renderer format methods
+- [ ] Add HTML title method (if needed)
+- [ ] Add Markdown format methods
+- [ ] Add Markdown title method
+- [ ] Add tests
+- [ ] Update `__all__` exports
