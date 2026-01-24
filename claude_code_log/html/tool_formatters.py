@@ -231,26 +231,24 @@ def format_websearch_input(search_input: WebSearchInput) -> str:
 
 
 def _websearch_as_markdown(output: WebSearchOutput) -> str:
-    """Convert WebSearch output to markdown: preamble + links list + summary."""
+    """Convert WebSearch output to markdown: summary, then links at bottom."""
     parts: list[str] = []
 
-    # Preamble (text before Links)
-    if output.preamble:
-        parts.append(output.preamble)
-        parts.append("")  # Blank line
-
-    # Links as markdown list
-    if output.links:
-        for link in output.links:
-            parts.append(f"- [{link.title}]({link.url})")
-        parts.append("")  # Blank line after links
-    else:
-        parts.append("*No results found*")
-        parts.append("")
-
-    # Summary (text after Links)
+    # Summary first (the analysis text)
     if output.summary:
         parts.append(output.summary)
+
+    # Links at the bottom after a separator
+    if output.links:
+        if parts:
+            parts.append("")  # Blank line before separator
+            parts.append("---")
+            parts.append("")  # Blank line after separator
+        for link in output.links:
+            parts.append(f"- [{link.title}]({link.url})")
+    elif not output.summary:
+        # Only show "no results" if there's also no summary
+        parts.append("*No results found*")
 
     return "\n".join(parts)
 

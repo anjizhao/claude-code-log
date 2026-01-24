@@ -105,34 +105,16 @@ def _parse_websearch_from_structured(
     return WebSearchOutput(query=query, links=links, preamble=None, summary=summary)
 
 
-def _parse_websearch_from_text(content: str) -> Optional[WebSearchOutput]:
-    """Fallback: parse from text content using regex."""
-    # Extract query, Links JSON array, and summary from text content
-    # ... regex parsing ...
-
-
 def parse_websearch_output(
     tool_result: ToolResultContent,
     file_path: Optional[str],
     tool_use_result: Optional[ToolUseResult] = None,  # Extended signature
 ) -> Optional[WebSearchOutput]:
-    """Parse WebSearch tool result.
-
-    Uses structured toolUseResult when available (preferred), with
-    fallback to regex parsing from text content.
-    """
-    del file_path  # Unused
-
-    # Try structured data first (cleaner, more reliable)
-    if tool_use_result is not None:
-        if parsed := _parse_websearch_from_structured(tool_use_result):
-            return parsed
-
-    # Fallback to regex parsing from text content
-    if content := _extract_tool_result_text(tool_result):
-        return _parse_websearch_from_text(content)
-
-    return None
+    """Parse WebSearch tool result from structured toolUseResult."""
+    del tool_result, file_path  # Unused
+    if tool_use_result is None:
+        return None
+    return _parse_websearch_from_structured(tool_use_result)
 ```
 
 ### Register Output Parser

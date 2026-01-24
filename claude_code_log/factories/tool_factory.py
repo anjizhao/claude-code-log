@@ -530,117 +530,30 @@ def _parse_websearch_from_structured(
     return WebSearchOutput(query=query, links=links, preamble=None, summary=summary)
 
 
-def _parse_websearch_from_text(content: str) -> Optional[WebSearchOutput]:
-    """Parse WebSearch from text content using regex.
-
-    Fallback parser for when structured toolUseResult is not available.
-    Parses the result format:
-    '<preamble text>Links: [{...}, ...]<summary text>'
-
-    Args:
-        content: The text content to parse
-
-    Returns:
-        WebSearchOutput if parsing succeeds, None otherwise
-    """
-    import json
-
-    # Extract query from the content (anywhere in preamble)
-    # Format: 'Web search results for query: "..."'
-    # Note: query itself may contain quotes, so match until quote + newline
-    query_match = re.search(
-        r'Web search results for query: "(.+?)"\n',
-        content,
-    )
-    if not query_match:
-        return None
-    query = query_match.group(1)
-
-    # Split content into preamble/links/summary
-    # Find "Links: [" and then match the JSON array
-    links_start = content.find("Links: [")
-    if links_start == -1:
-        # No links found - return with just the query
-        return WebSearchOutput(query=query, links=[], preamble=None)
-
-    # Preamble is everything before "Links:", minus the query header line
-    # (which is redundant since query is already extracted and shown in title)
-    raw_preamble = content[:links_start].strip()
-    # Strip the "Web search results for query: ..." line
-    preamble_lines = raw_preamble.split("\n")
-    filtered_lines = [
-        line
-        for line in preamble_lines
-        if not line.startswith('Web search results for query: "')
-    ]
-    preamble = "\n".join(filtered_lines).strip() or None
-
-    # Find the end of the JSON array (matching brackets)
-    json_start = links_start + 7  # Position of '['
-    bracket_count = 0
-    json_end = json_start
-    for i, char in enumerate(content[json_start:], json_start):
-        if char == "[":
-            bracket_count += 1
-        elif char == "]":
-            bracket_count -= 1
-            if bracket_count == 0:
-                json_end = i + 1
-                break
-
-    # Parse links JSON
-    links_json_str = content[json_start:json_end]
-    try:
-        links_json: list[Any] = json.loads(links_json_str)
-        links: list[WebSearchLink] = []
-        for item in links_json:
-            if isinstance(item, dict):
-                link = cast(dict[str, Any], item)
-                links.append(
-                    WebSearchLink(
-                        title=str(link.get("title", "")),
-                        url=str(link.get("url", "")),
-                    )
-                )
-    except (json.JSONDecodeError, TypeError):
-        links = []
-
-    # Summary is everything after the JSON array
-    summary = content[json_end:].strip() or None
-
-    return WebSearchOutput(query=query, links=links, preamble=preamble, summary=summary)
-
-
 def parse_websearch_output(
     tool_result: ToolResultContent,
     file_path: Optional[str],
     tool_use_result: Optional[ToolUseResult] = None,
 ) -> Optional[WebSearchOutput]:
-    """Parse WebSearch tool result into preamble/links/summary.
+    """Parse WebSearch tool result from structured toolUseResult data.
 
-    Uses structured toolUseResult data when available (preferred), with
-    fallback to regex parsing from text content.
+    Note: A regex-based fallback parser for text content was removed.
+    See commit 0d1d2a9 if you need to restore it.
 
     Args:
-        tool_result: The tool result content
+        tool_result: The tool result content (unused, kept for signature compatibility)
         file_path: Unused for WebSearch tool
-        tool_use_result: Optional structured toolUseResult from the entry
+        tool_use_result: Structured toolUseResult from the entry
 
     Returns:
-        WebSearchOutput with query, links, preamble, and summary
+        WebSearchOutput with query, links, and summary, or None if not parseable
     """
-    del file_path  # Unused
+    del tool_result, file_path  # Unused
 
-    # Try structured data first (cleaner, more reliable)
-    if tool_use_result is not None:
-        if parsed := _parse_websearch_from_structured(tool_use_result):
-            return parsed
+    if tool_use_result is None:
+        return None
 
-    # Fallback to regex parsing from text content
-    if content := _extract_tool_result_text(tool_result):
-        return _parse_websearch_from_text(content)
-
-    return None
+    return _parse_websearch_from_structured(tool_use_result)
 
 
 # Type alias for tool output parsers

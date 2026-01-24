@@ -619,25 +619,24 @@ class MarkdownRenderer(Renderer):
     def format_WebSearchOutput(
         self, output: WebSearchOutput, _: TemplateMessage
     ) -> str:
-        """Format → preamble + markdown links list + summary."""
+        """Format → summary, then links at bottom after separator."""
         parts: list[str] = []
 
-        # Preamble (text before Links)
-        if output.preamble:
-            parts.append(self._quote(output.preamble))
-            parts.append("")
+        # Summary first (the analysis text)
+        if output.summary:
+            parts.append(self._quote(output.summary))
 
-        # Links as markdown list
+        # Links at the bottom after a separator
         if output.links:
+            if parts:
+                parts.append("")
+                parts.append("---")
+                parts.append("")
             for link in output.links:
                 parts.append(f"- [{link.title}]({link.url})")
-        else:
+        elif not output.summary:
+            # Only show "no results" if there's also no summary
             parts.append("*No results found*")
-
-        # Summary (text after Links) as collapsible
-        if output.summary:
-            parts.append("")
-            parts.append(self._collapsible("Analysis", self._quote(output.summary)))
 
         return "\n".join(parts)
 
