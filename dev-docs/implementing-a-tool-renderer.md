@@ -39,7 +39,11 @@ class WebSearchOutput:
     """Parsed WebSearch tool output."""
     query: str
     links: list[WebSearchLink]
+    preamble: Optional[str] = None  # Text before the Links
+    summary: Optional[str] = None   # Markdown analysis after the Links
 ```
+
+**Note:** Some tools have structured output with multiple sections. WebSearch is parsed as **preamble/links/summary** - text before Links, the Links JSON array, and markdown analysis after. This allows flexible rendering while preserving all content.
 
 ### Update Type Unions
 
@@ -82,14 +86,27 @@ Create a parser function that extracts structured data from the raw result:
 def parse_websearch_output(
     tool_result: ToolResultContent, file_path: Optional[str]
 ) -> Optional[WebSearchOutput]:
-    """Parse WebSearch tool result into structured content."""
+    """Parse WebSearch tool result as preamble/links/summary."""
     del file_path  # Unused
     if not (content := _extract_tool_result_text(tool_result)):
         return None
 
-    # Parse the format: 'Web search results for query: "..."\n\nLinks: [...]'
-    # Extract query and links...
-    return WebSearchOutput(query=query, links=links)
+    # Extract query from anywhere in content
+    query_match = re.search(r'Web search results for query: "([^"]+)"', content)
+    if not query_match:
+        return None
+    query = query_match.group(1)
+
+    # Split into preamble/links/summary
+    links_start = content.find("Links: [")
+    preamble = content[:links_start].strip() if links_start > 0 else None
+
+    # Parse Links JSON array, find end position
+    # ... bracket matching to find JSON array end ...
+
+    summary = content[json_end:].strip() or None
+
+    return WebSearchOutput(query=query, links=links, preamble=preamble, summary=summary)
 ```
 
 ### Register Output Parser
@@ -118,18 +135,25 @@ def format_websearch_input(search_input: WebSearchInput) -> str:
 
 ### Output Formatter
 
+For tools with structured content like WebSearch, combine all parts into markdown then render:
+
 ```python
-def format_websearch_output(output: WebSearchOutput) -> str:
-    """Format WebSearch tool result with clickable links."""
-    html_parts = ['<ul class="websearch-results">']
+def _websearch_as_markdown(output: WebSearchOutput) -> str:
+    """Convert WebSearch output to markdown: preamble + links list + summary."""
+    parts = []
+    if output.preamble:
+        parts.extend([output.preamble, ""])
     for link in output.links:
-        escaped_title = escape_html(link.title)
-        escaped_url = escape_html(link.url)
-        html_parts.append(
-            f'<li><a href="{escaped_url}" target="_blank">{escaped_title}</a></li>'
-        )
-    html_parts.append("</ul>")
-    return "".join(html_parts)
+        parts.append(f"- [{link.title}]({link.url})")
+    if output.summary:
+        parts.extend(["", output.summary])
+    return "\n".join(parts)
+
+
+def format_websearch_output(output: WebSearchOutput) -> str:
+    """Format WebSearch as single collapsible markdown block."""
+    markdown_content = _websearch_as_markdown(output)
+    return render_markdown_collapsible(markdown_content, "websearch-results")
 ```
 
 ### Update Exports

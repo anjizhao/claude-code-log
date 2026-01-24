@@ -1052,11 +1052,13 @@ class WebSearchOutput:
     """Parsed WebSearch tool output.
 
     Symmetric with WebSearchInput for tool_use → tool_result pairing.
-    Contains the query and list of result links.
+    Parsed as preamble/links/summary for flexible rendering.
     """
 
     query: str
     links: list[WebSearchLink]
+    preamble: Optional[str] = None  # Text before the Links (usually query header)
+    summary: Optional[str] = None  # Markdown analysis after the links
 
 
 # Union of all specialized output types + ToolResultContent as generic fallback

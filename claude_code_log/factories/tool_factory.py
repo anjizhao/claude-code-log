@@ -473,17 +473,20 @@ def parse_exitplanmode_output(
 def parse_websearch_output(
     tool_result: ToolResultContent, file_path: Optional[str]
 ) -> Optional[WebSearchOutput]:
-    """Parse WebSearch tool result into structured content.
+    """Parse WebSearch tool result into preamble/links/summary.
 
     Parses the result format:
-    'Web search results for query: "..."\n\nLinks: [{...}, ...]'
+    '<preamble text>Links: [{...}, ...]<summary text>'
+
+    The preamble typically contains 'Web search results for query: "..."'
+    The summary contains markdown analysis after the Links JSON.
 
     Args:
         tool_result: The tool result content
         file_path: Unused for WebSearch tool
 
     Returns:
-        WebSearchOutput with query and links
+        WebSearchOutput with query, links, preamble, and summary
     """
     import json
 
@@ -491,24 +494,53 @@ def parse_websearch_output(
     if not (content := _extract_tool_result_text(tool_result)):
         return None
 
-    # Extract query from the first line
+    # Extract query from the content (anywhere in preamble)
     # Format: 'Web search results for query: "..."'
-    query_match = re.match(
-        r'Web search results for query: "([^"]+)"',
+    # Note: query itself may contain quotes, so match until quote + newline
+    query_match = re.search(
+        r'Web search results for query: "(.+?)"\n',
         content,
     )
     if not query_match:
         return None
     query = query_match.group(1)
 
-    # Extract Links JSON array
-    # Format: 'Links: [{...}, ...]'
-    links_match = re.search(r"Links: (\[.*?\])", content, re.DOTALL)
-    if not links_match:
-        return WebSearchOutput(query=query, links=[])
+    # Split content into preamble/links/summary
+    # Find "Links: [" and then match the JSON array
+    links_start = content.find("Links: [")
+    if links_start == -1:
+        # No links found - return with just the query
+        return WebSearchOutput(query=query, links=[], preamble=None)
 
+    # Preamble is everything before "Links:", minus the query header line
+    # (which is redundant since query is already extracted and shown in title)
+    raw_preamble = content[:links_start].strip()
+    # Strip the "Web search results for query: ..." line
+    preamble_lines = raw_preamble.split("\n")
+    filtered_lines = [
+        line
+        for line in preamble_lines
+        if not line.startswith('Web search results for query: "')
+    ]
+    preamble = "\n".join(filtered_lines).strip() or None
+
+    # Find the end of the JSON array (matching brackets)
+    json_start = links_start + 7  # Position of '['
+    bracket_count = 0
+    json_end = json_start
+    for i, char in enumerate(content[json_start:], json_start):
+        if char == "[":
+            bracket_count += 1
+        elif char == "]":
+            bracket_count -= 1
+            if bracket_count == 0:
+                json_end = i + 1
+                break
+
+    # Parse links JSON
+    links_json_str = content[json_start:json_end]
     try:
-        links_json: list[Any] = json.loads(links_match.group(1))
+        links_json: list[Any] = json.loads(links_json_str)
         links: list[WebSearchLink] = []
         for item in links_json:
             if isinstance(item, dict):
@@ -522,7 +554,10 @@ def parse_websearch_output(
     except (json.JSONDecodeError, TypeError):
         links = []
 
-    return WebSearchOutput(query=query, links=links)
+    # Summary is everything after the JSON array
+    summary = content[json_end:].strip() or None
+
+    return WebSearchOutput(query=query, links=links, preamble=preamble, summary=summary)
 
 
 # Type alias for tool output parsers

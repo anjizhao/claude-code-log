@@ -221,33 +221,51 @@ def format_websearch_input(search_input: WebSearchInput) -> str:
     Args:
         search_input: Typed WebSearchInput with query parameter.
 
-    The query is displayed prominently since it's the main input.
+    Only shows the query if it exceeds 100 chars (truncated in title).
+    Otherwise returns empty since the full query is already in the title.
     """
+    if len(search_input.query) <= 100:
+        return ""  # Full query shown in title
     escaped_query = escape_html(search_input.query)
     return f'<div class="websearch-query">{escaped_query}</div>'
 
 
+def _websearch_as_markdown(output: WebSearchOutput) -> str:
+    """Convert WebSearch output to markdown: preamble + links list + summary."""
+    parts: list[str] = []
+
+    # Preamble (text before Links)
+    if output.preamble:
+        parts.append(output.preamble)
+        parts.append("")  # Blank line
+
+    # Links as markdown list
+    if output.links:
+        for link in output.links:
+            parts.append(f"- [{link.title}]({link.url})")
+        parts.append("")  # Blank line after links
+    else:
+        parts.append("*No results found*")
+        parts.append("")
+
+    # Summary (text after Links)
+    if output.summary:
+        parts.append(output.summary)
+
+    return "\n".join(parts)
+
+
 def format_websearch_output(output: WebSearchOutput) -> str:
-    """Format WebSearch tool result with clickable links.
+    """Format WebSearch tool result as collapsible markdown.
 
     Args:
-        output: Parsed WebSearchOutput with query and links.
+        output: Parsed WebSearchOutput with preamble, links, and summary.
 
-    Renders the search results as a list of clickable links.
+    Combines preamble + links as markdown list + summary into a single
+    markdown block, rendered as collapsible content.
     """
-    if not output.links:
-        return '<div class="websearch-no-results"><em>No results found</em></div>'
-
-    html_parts: list[str] = ['<ul class="websearch-results">']
-    for link in output.links:
-        escaped_title = escape_html(link.title)
-        escaped_url = escape_html(link.url)
-        html_parts.append(
-            f'<li><a href="{escaped_url}" target="_blank" rel="noopener">'
-            f"{escaped_title}</a></li>"
-        )
-    html_parts.append("</ul>")
-    return "".join(html_parts)
+    markdown_content = _websearch_as_markdown(output)
+    return render_markdown_collapsible(markdown_content, "websearch-results")
 
 
 # -- TodoWrite Tool -----------------------------------------------------------

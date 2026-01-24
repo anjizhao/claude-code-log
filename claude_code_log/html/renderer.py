@@ -441,7 +441,7 @@ class HtmlRenderer(Renderer):
         self, input: WebSearchInput, message: TemplateMessage
     ) -> str:
         """Title → '🔎 WebSearch <query>'."""
-        return self._tool_title(message, "🔎", f'"{input.query}"')
+        return self._tool_title(message, "🔎", input.query)
 
     def _flatten_preorder(
         self, roots: list[TemplateMessage]
