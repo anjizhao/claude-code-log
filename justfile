@@ -14,9 +14,9 @@ test:
 test-benchmark:
     CLAUDE_CODE_LOG_DEBUG_TIMING=1 uv run pytest -m benchmark -v
 
-# Update snapshot tests
+# Update snapshot tests (runs serially for deterministic file ordering)
 update-snapshot:
-    uv run pytest -n auto test/test_snapshot_html.py --snapshot-update
+    uv run pytest -m snapshot --snapshot-update -v
 
 # Run TUI tests (requires isolated event loop)
 test-tui:

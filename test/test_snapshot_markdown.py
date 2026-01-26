@@ -7,8 +7,13 @@ unintended changes to the rendered Markdown structure.
 import shutil
 from pathlib import Path
 
+import pytest
+
 from claude_code_log.converter import convert_jsonl_to, load_transcript
 from claude_code_log.markdown.renderer import MarkdownRenderer
+
+# Run snapshot tests serially to ensure deterministic file ordering
+pytestmark = pytest.mark.snapshot
 
 
 class TestTranscriptMarkdownSnapshots:

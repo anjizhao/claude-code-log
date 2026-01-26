@@ -7,13 +7,17 @@ unintended changes to the rendered HTML structure.
 import shutil
 from pathlib import Path
 
-from claude_code_log.converter import convert_jsonl_to_html
+import pytest
+
+from claude_code_log.converter import convert_jsonl_to_html, load_transcript
 from claude_code_log.html.renderer import (
+    generate_html,
     generate_projects_index_html,
     generate_session_html,
 )
-from claude_code_log.converter import load_transcript
-from claude_code_log.html.renderer import generate_html
+
+# Run snapshot tests serially to ensure deterministic file ordering
+pytestmark = pytest.mark.snapshot
 
 
 class TestTranscriptHTMLSnapshots:
