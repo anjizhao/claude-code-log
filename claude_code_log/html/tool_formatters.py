@@ -43,6 +43,8 @@ from ..models import (
     TaskOutput,
     TodoWriteInput,
     ToolResultContent,
+    WebSearchInput,
+    WebSearchOutput,
     WriteInput,
     WriteOutput,
 )
@@ -208,6 +210,60 @@ def format_exitplanmode_result(content: str) -> str:
 
     # For errors or other cases, return as-is
     return content
+
+
+# -- WebSearch Tool -----------------------------------------------------------
+
+
+def format_websearch_input(search_input: WebSearchInput) -> str:
+    """Format WebSearch tool use content showing the search query.
+
+    Args:
+        search_input: Typed WebSearchInput with query parameter.
+
+    Only shows the query if it exceeds 100 chars (truncated in title).
+    Otherwise returns empty since the full query is already in the title.
+    """
+    if len(search_input.query) <= 100:
+        return ""  # Full query shown in title
+    escaped_query = escape_html(search_input.query)
+    return f'<div class="websearch-query">{escaped_query}</div>'
+
+
+def _websearch_as_markdown(output: WebSearchOutput) -> str:
+    """Convert WebSearch output to markdown: summary, then links at bottom."""
+    parts: list[str] = []
+
+    # Summary first (the analysis text)
+    if output.summary:
+        parts.append(output.summary)
+
+    # Links at the bottom after a separator
+    if output.links:
+        if parts:
+            parts.append("")  # Blank line before separator
+            parts.append("---")
+            parts.append("")  # Blank line after separator
+        for link in output.links:
+            parts.append(f"- [{link.title}]({link.url})")
+    elif not output.summary:
+        # Only show "no results" if there's also no summary
+        parts.append("*No results found*")
+
+    return "\n".join(parts)
+
+
+def format_websearch_output(output: WebSearchOutput) -> str:
+    """Format WebSearch tool result as collapsible markdown.
+
+    Args:
+        output: Parsed WebSearchOutput with preamble, links, and summary.
+
+    Combines preamble + links as markdown list + summary into a single
+    markdown block, rendered as collapsible content.
+    """
+    markdown_content = _websearch_as_markdown(output)
+    return render_markdown_collapsible(markdown_content, "websearch-results")
 
 
 # -- TodoWrite Tool -----------------------------------------------------------
@@ -711,6 +767,7 @@ __all__ = [
     "format_multiedit_input",
     "format_bash_input",
     "format_task_input",
+    "format_websearch_input",
     # Tool output formatters (called by HtmlRenderer.format_{OutputClass})
     "format_read_output",
     "format_write_output",
@@ -719,6 +776,7 @@ __all__ = [
     "format_task_output",
     "format_askuserquestion_output",
     "format_exitplanmode_output",
+    "format_websearch_output",
     # Fallback for ToolResultContent
     "format_tool_result_content_raw",
     # Legacy formatters (still used)

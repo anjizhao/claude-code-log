@@ -36,6 +36,8 @@ from ..models import (
     ToolResultMessage,
     ToolUseContent,
     ToolUseMessage,
+    ToolUseResult,
+    WebSearchInput,
     WriteInput,
     # Tool output models
     AskUserQuestionAnswer,
@@ -46,6 +48,8 @@ from ..models import (
     ReadOutput,
     TaskOutput,
     ToolOutput,
+    WebSearchLink,
+    WebSearchOutput,
     WriteOutput,
 )
 
@@ -67,6 +71,7 @@ TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "AskUserQuestion": AskUserQuestionInput,
     "ask_user_question": AskUserQuestionInput,  # Legacy tool name
     "ExitPlanMode": ExitPlanModeInput,
+    "WebSearch": WebSearchInput,
 }
 
 
@@ -466,11 +471,99 @@ def parse_exitplanmode_output(
     return ExitPlanModeOutput(message=message, approved=approved)
 
 
-# Type alias for tool output parsers
-ToolOutputParser = Callable[[ToolResultContent, Optional[str]], Optional[ToolOutput]]
+def _parse_websearch_from_structured(
+    tool_use_result: ToolUseResult,
+) -> Optional[WebSearchOutput]:
+    """Parse WebSearch from structured toolUseResult data.
 
-# Registry of tool output parsers: tool_name -> parser(tool_result, file_path) -> Optional[ToolOutput]
+    The toolUseResult for WebSearch has the format:
+    {
+        "query": "search query",
+        "results": [
+            {"tool_use_id": "...", "content": [{"title": "...", "url": "..."}]},
+            "Analysis text..."
+        ],
+        "durationSeconds": 15.7
+    }
+
+    Args:
+        tool_use_result: The structured toolUseResult from the entry
+
+    Returns:
+        WebSearchOutput if parsing succeeds, None otherwise
+    """
+    if not isinstance(tool_use_result, dict):
+        return None
+
+    query = tool_use_result.get("query")
+    if not isinstance(query, str):
+        return None
+
+    results_raw = tool_use_result.get("results")
+    if not isinstance(results_raw, list):
+        return None
+    results = cast(list[Any], results_raw)
+    if len(results) < 1:
+        return None
+
+    # Extract links from the first result element
+    links: list[WebSearchLink] = []
+    first_result: Any = results[0]
+    if isinstance(first_result, dict):
+        first_result_dict = cast(dict[str, Any], first_result)
+        content_raw = first_result_dict.get("content", [])
+        if isinstance(content_raw, list):
+            content = cast(list[Any], content_raw)
+            for item in content:
+                if isinstance(item, dict):
+                    link = cast(dict[str, Any], item)
+                    title = link.get("title")
+                    url = link.get("url")
+                    if isinstance(title, str) and isinstance(url, str):
+                        links.append(WebSearchLink(title=title, url=url))
+
+    # Extract summary from the second result element (if present)
+    summary: Optional[str] = None
+    if len(results) > 1 and isinstance(results[1], str):
+        summary = results[1].strip() or None
+
+    return WebSearchOutput(query=query, links=links, preamble=None, summary=summary)
+
+
+def parse_websearch_output(
+    tool_result: ToolResultContent,
+    file_path: Optional[str],
+    tool_use_result: Optional[ToolUseResult] = None,
+) -> Optional[WebSearchOutput]:
+    """Parse WebSearch tool result from structured toolUseResult data.
+
+    Note: A regex-based fallback parser for text content was removed.
+    See commit 0d1d2a9 if you need to restore it.
+
+    Args:
+        tool_result: The tool result content (unused, kept for signature compatibility)
+        file_path: Unused for WebSearch tool
+        tool_use_result: Structured toolUseResult from the entry
+
+    Returns:
+        WebSearchOutput with query, links, and summary, or None if not parseable
+    """
+    del tool_result, file_path  # Unused
+
+    if tool_use_result is None:
+        return None
+
+    return _parse_websearch_from_structured(tool_use_result)
+
+
+# Type alias for tool output parsers
+# Standard signature: (tool_result, file_path) -> Optional[ToolOutput]
+# Extended signature: (tool_result, file_path, tool_use_result) -> Optional[ToolOutput]
+ToolOutputParser = Callable[..., Optional[ToolOutput]]
+
+# Registry of tool output parsers: tool_name -> parser function
 # Parsers receive the full ToolResultContent and can use _extract_tool_result_text() for text.
+# Some parsers (like WebSearch) also accept optional tool_use_result for structured data.
 TOOL_OUTPUT_PARSERS: dict[str, ToolOutputParser] = {
     "Read": parse_read_output,
     "Edit": parse_edit_output,
@@ -479,13 +572,18 @@ TOOL_OUTPUT_PARSERS: dict[str, ToolOutputParser] = {
     "Task": parse_task_output,
     "AskUserQuestion": parse_askuserquestion_output,
     "ExitPlanMode": parse_exitplanmode_output,
+    "WebSearch": parse_websearch_output,
 }
+
+# Parsers that accept the extended signature with tool_use_result
+PARSERS_WITH_TOOL_USE_RESULT: set[str] = {"WebSearch"}
 
 
 def create_tool_output(
     tool_name: str,
     tool_result: ToolResultContent,
     file_path: Optional[str] = None,
+    tool_use_result: Optional[ToolUseResult] = None,
 ) -> ToolOutput:
     """Create typed tool output from raw ToolResultContent.
 
@@ -497,15 +595,21 @@ def create_tool_output(
         tool_name: The name of the tool (e.g., "Bash", "Read")
         tool_result: The raw tool result content
         file_path: Optional file path for file-based tools (Read, Edit, Write)
+        tool_use_result: Optional structured toolUseResult from entry (for WebSearch, etc.)
 
     Returns:
         A typed output model if parsing succeeds, ToolResultContent as fallback.
     """
-    # Look up parser in registry and parse if available
-    if (parser := TOOL_OUTPUT_PARSERS.get(tool_name)) and (
-        parsed := parser(tool_result, file_path)
-    ):
-        return parsed
+    # Look up parser in registry
+    parser = TOOL_OUTPUT_PARSERS.get(tool_name)
+    if parser:
+        # Use extended signature for parsers that support tool_use_result
+        if tool_name in PARSERS_WITH_TOOL_USE_RESULT:
+            parsed = parser(tool_result, file_path, tool_use_result)
+        else:
+            parsed = parser(tool_result, file_path)
+        if parsed:
+            return parsed
 
     # Fallback to raw ToolResultContent
     return tool_result
@@ -570,6 +674,7 @@ def create_tool_result_message(
     meta: MessageMeta,
     tool_result: ToolResultContent,
     tool_use_context: dict[str, ToolUseContent],
+    tool_use_result: Optional[ToolUseResult] = None,
 ) -> ToolItemResult:
     """Create ToolItemResult from a tool_result content item.
 
@@ -577,6 +682,7 @@ def create_tool_result_message(
         meta: Message metadata
         tool_result: The tool result content item
         tool_use_context: Dict with tool_use_id -> ToolUseContent mapping
+        tool_use_result: Optional structured toolUseResult from the entry
 
     Returns:
         ToolItemResult with tool_result content model
@@ -598,6 +704,7 @@ def create_tool_result_message(
         result_tool_name or "",
         tool_result,
         result_file_path,
+        tool_use_result,
     )
 
     # Create content model with rendering context

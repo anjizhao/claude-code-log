@@ -35,6 +35,7 @@ from ..models import (
     TaskInput,
     TodoWriteInput,
     ToolUseContent,
+    WebSearchInput,
     WriteInput,
     # Tool output types
     AskUserQuestionOutput,
@@ -44,6 +45,7 @@ from ..models import (
     ReadOutput,
     TaskOutput,
     ToolResultContent,
+    WebSearchOutput,
     WriteOutput,
 )
 from ..renderer import (
@@ -96,6 +98,8 @@ from .tool_formatters import (
     format_task_output,
     format_todowrite_input,
     format_tool_result_content_raw,
+    format_websearch_input,
+    format_websearch_output,
     format_write_input,
     format_write_output,
     render_params_table,
@@ -302,6 +306,10 @@ class HtmlRenderer(Renderer):
         """Format → empty string (no content)."""
         return format_exitplanmode_input(input)
 
+    def format_WebSearchInput(self, input: WebSearchInput, _: TemplateMessage) -> str:
+        """Format → search query display."""
+        return format_websearch_input(input)
+
     def format_ToolUseContent(self, content: ToolUseContent, _: TemplateMessage) -> str:
         """Format → <table class='params'>key | value rows</table>."""
         return render_params_table(content.input)
@@ -341,6 +349,12 @@ class HtmlRenderer(Renderer):
     ) -> str:
         """Format → status message."""
         return format_exitplanmode_output(output)
+
+    def format_WebSearchOutput(
+        self, output: WebSearchOutput, _: TemplateMessage
+    ) -> str:
+        """Format → list of clickable search result links."""
+        return format_websearch_output(output)
 
     def format_ToolResultContent(
         self, output: ToolResultContent, _: TemplateMessage
@@ -422,6 +436,12 @@ class HtmlRenderer(Renderer):
     def title_BashInput(self, input: BashInput, message: TemplateMessage) -> str:
         """Title → '💻 Bash <description>'."""
         return self._tool_title(message, "💻", input.description)
+
+    def title_WebSearchInput(
+        self, input: WebSearchInput, message: TemplateMessage
+    ) -> str:
+        """Title → '🔎 WebSearch <query>'."""
+        return self._tool_title(message, "🔎", input.query)
 
     def _flatten_preorder(
         self, roots: list[TemplateMessage]

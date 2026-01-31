@@ -641,6 +641,7 @@ class MarkdownViewerScreen(ModalScreen[None]):
                 self._pages[self._current_page],
                 id="md-viewer",
                 show_table_of_contents=True,
+                open_links=False,  # We handle links in go() override
             )
             footer_text = "Press ESC or q to close | t: toggle ToC"
             if self._is_paginated:

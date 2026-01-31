@@ -41,6 +41,7 @@ from ..models import (
     TaskInput,
     TodoWriteInput,
     ToolUseContent,
+    WebSearchInput,
     WriteInput,
     # Tool output types
     AskUserQuestionOutput,
@@ -51,6 +52,7 @@ from ..models import (
     ReadOutput,
     TaskOutput,
     ToolResultContent,
+    WebSearchOutput,
     WriteOutput,
 )
 from ..renderer import (
@@ -498,6 +500,11 @@ class MarkdownRenderer(Renderer):
         # Title contains "Exiting plan mode", body is empty
         return ""
 
+    def format_WebSearchInput(self, _input: WebSearchInput, _: TemplateMessage) -> str:
+        """Format → '' (query shown in title)."""
+        # Query is shown in the title, body is empty
+        return ""
+
     def format_ToolUseContent(self, content: ToolUseContent, _: TemplateMessage) -> str:
         """Fallback for unknown tool inputs - render as key/value list."""
         return self._render_params(content.input)
@@ -609,6 +616,30 @@ class MarkdownRenderer(Renderer):
             return f"{status}\n\n{output.message}"
         return status
 
+    def format_WebSearchOutput(
+        self, output: WebSearchOutput, _: TemplateMessage
+    ) -> str:
+        """Format → summary, then links at bottom after separator."""
+        parts: list[str] = []
+
+        # Summary first (the analysis text)
+        if output.summary:
+            parts.append(self._quote(output.summary))
+
+        # Links at the bottom after a separator
+        if output.links:
+            if parts:
+                parts.append("")
+                parts.append("---")
+                parts.append("")
+            for link in output.links:
+                parts.append(f"- [{link.title}]({link.url})")
+        elif not output.summary:
+            # Only show "no results" if there's also no summary
+            parts.append("*No results found*")
+
+        return "\n".join(parts)
+
     def format_ToolResultContent(
         self, output: ToolResultContent, message: TemplateMessage
     ) -> str:
@@ -683,6 +714,10 @@ class MarkdownRenderer(Renderer):
     ) -> str:
         """Title → '📝 Exiting plan mode'."""
         return "📝 Exiting plan mode"
+
+    def title_WebSearchInput(self, input: WebSearchInput, _: TemplateMessage) -> str:
+        """Title → '🔎 WebSearch `query`'."""
+        return f"🔎 WebSearch `{input.query}`"
 
     def title_ThinkingMessage(
         self, _content: ThinkingMessage, _message: TemplateMessage
