@@ -42,6 +42,7 @@ from ..models import (
     TodoWriteInput,
     ToolUseContent,
     WebSearchInput,
+    WebFetchInput,
     WriteInput,
     # Tool output types
     AskUserQuestionOutput,
@@ -53,6 +54,7 @@ from ..models import (
     TaskOutput,
     ToolResultContent,
     WebSearchOutput,
+    WebFetchOutput,
     WriteOutput,
 )
 from ..renderer import (
@@ -505,6 +507,12 @@ class MarkdownRenderer(Renderer):
         # Query is shown in the title, body is empty
         return ""
 
+    def format_WebFetchInput(self, input: WebFetchInput, _: TemplateMessage) -> str:
+        """Format → '' (url in title, prompt if long)."""
+        if len(input.prompt) > 100:
+            return self._code_fence(input.prompt)
+        return ""
+
     def format_ToolUseContent(self, content: ToolUseContent, _: TemplateMessage) -> str:
         """Fallback for unknown tool inputs - render as key/value list."""
         return self._render_params(content.input)
@@ -640,6 +648,31 @@ class MarkdownRenderer(Renderer):
 
         return "\n".join(parts)
 
+    def format_WebFetchOutput(self, output: WebFetchOutput, _: TemplateMessage) -> str:
+        """Format → metadata line + blockquoted result.
+
+        WebFetch results are AI-generated summaries, not raw content,
+        so a collapsible section isn't needed - use blockquote directly.
+        """
+        meta_parts: list[str] = []
+        if output.code is not None:
+            status = f"{output.code} {output.code_text or ''}".strip()
+            meta_parts.append(status)
+        if output.bytes is not None:
+            if output.bytes >= 1024 * 1024:
+                meta_parts.append(f"{output.bytes / (1024 * 1024):.1f} MB")
+            elif output.bytes >= 1024:
+                meta_parts.append(f"{output.bytes / 1024:.1f} KB")
+            else:
+                meta_parts.append(f"{output.bytes} bytes")
+        if output.duration_ms is not None:
+            if output.duration_ms >= 1000:
+                meta_parts.append(f"{output.duration_ms / 1000:.1f}s")
+            else:
+                meta_parts.append(f"{output.duration_ms}ms")
+        meta_line = f"*{' · '.join(meta_parts)}*\n\n" if meta_parts else ""
+        return meta_line + self._quote(output.result)
+
     def format_ToolResultContent(
         self, output: ToolResultContent, message: TemplateMessage
     ) -> str:
@@ -718,6 +751,11 @@ class MarkdownRenderer(Renderer):
     def title_WebSearchInput(self, input: WebSearchInput, _: TemplateMessage) -> str:
         """Title → '🔎 WebSearch `query`'."""
         return f"🔎 WebSearch `{input.query}`"
+
+    def title_WebFetchInput(self, input: WebFetchInput, _: TemplateMessage) -> str:
+        """Title → '🌐 WebFetch `url`' (truncated if > 60 chars)."""
+        url = input.url[:60] + "…" if len(input.url) > 60 else input.url
+        return f"🌐 WebFetch `{url}`"
 
     def title_ThinkingMessage(
         self, _content: ThinkingMessage, _message: TemplateMessage

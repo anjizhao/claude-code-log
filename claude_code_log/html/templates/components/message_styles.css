@@ -918,6 +918,51 @@ details summary {
     margin: 10px 0;
 }
 
+/* WebFetch tool styling */
+.webfetch-prompt {
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-bottom: 8px;
+}
+
+.webfetch-meta {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.85em;
+}
+
+.webfetch-status {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.webfetch-status-success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.webfetch-status-error {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.webfetch-size,
+.webfetch-duration {
+    color: var(--text-muted);
+}
+
+/* Override negative margin for WebFetch collapsible - needs space for meta badges */
+.webfetch-result.collapsible-code {
+    margin-top: 0;
+}
+
+/* Override centered h1 from global styles for WebFetch content */
+.webfetch-result h1 {
+    text-align: left;
+}
+
 @media (max-width: 1280px) {
     .fold-bar {
         height: auto;
