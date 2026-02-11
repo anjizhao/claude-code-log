@@ -65,7 +65,7 @@
                 {% if project.is_archived %}
                 <span class="archived-badge">Archived</span>
                 {% else %}
-                <span class="transcript-link-hint">(← open combined transcript)</span>
+                <span class="transcript-link-hint">(← {% if project.html_file.endswith('/index.html') %}open sessions{% else %}open combined transcript{% endif %})</span>
                 {% endif %}
             </div>
             <div class='project-stats'>

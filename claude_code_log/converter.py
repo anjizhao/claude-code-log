@@ -592,6 +592,54 @@ def _assign_sessions_to_pages(
     return pages
 
 
+def _build_project_summary_from_cache(
+    input_path: Path,
+    cache_manager: Optional["CacheManager"],
+    working_directories: List[str],
+) -> Dict[str, Any]:
+    """Build project summary dict from cache data for the project session index."""
+    project_data: Dict[str, Any] = {
+        "name": input_path.name,
+        "html_file": "index.html",
+        "jsonl_count": len(list(input_path.glob("*.jsonl"))),
+        "message_count": 0,
+        "last_modified": 0.0,
+        "working_directories": working_directories,
+        "sessions": [],
+    }
+
+    if cache_manager is not None:
+        cached = cache_manager.get_cached_project_data()
+        if cached is not None:
+            project_data["message_count"] = cached.total_message_count
+            project_data["total_input_tokens"] = cached.total_input_tokens
+            project_data["total_output_tokens"] = cached.total_output_tokens
+            project_data["total_cache_creation_tokens"] = (
+                cached.total_cache_creation_tokens
+            )
+            project_data["total_cache_read_tokens"] = cached.total_cache_read_tokens
+            project_data["latest_timestamp"] = cached.latest_timestamp
+            project_data["earliest_timestamp"] = cached.earliest_timestamp
+            project_data["sessions"] = [
+                {
+                    "id": s.session_id,
+                    "summary": s.summary,
+                    "timestamp_range": format_timestamp_range(
+                        s.first_timestamp, s.last_timestamp
+                    ),
+                    "first_timestamp": s.first_timestamp,
+                    "last_timestamp": s.last_timestamp,
+                    "message_count": s.message_count,
+                    "first_user_message": s.first_user_message
+                    or "[No user message found in session.]",
+                }
+                for s in cached.sessions.values()
+                if s.first_user_message and s.first_user_message != "Warmup"
+            ]
+
+    return project_data
+
+
 def _build_session_data_from_messages(
     messages: List[TranscriptEntry],
 ) -> Dict[str, SessionCacheData]:
@@ -915,6 +963,7 @@ def convert_jsonl_to(
     silent: bool = False,
     image_export_mode: Optional[str] = None,
     page_size: int = 2000,
+    skip_combined: bool = False,
 ) -> Path:
     """Convert JSONL transcript(s) to the specified format.
 
@@ -930,6 +979,7 @@ def convert_jsonl_to(
         image_export_mode: Image export mode ("placeholder", "embedded", "referenced").
         page_size: Maximum messages per page for combined transcript pagination.
             If None, uses format default (embedded for HTML, referenced for Markdown).
+        skip_combined: Skip combined transcript, generate project session index instead.
     """
     if not input_path.exists():
         raise FileNotFoundError(f"Input path not found: {input_path}")
@@ -958,7 +1008,10 @@ def convert_jsonl_to(
     else:
         # Directory mode - Cache-First Approach
         if output_path is None:
-            output_path = input_path / f"combined_transcripts.{ext}"
+            if skip_combined:
+                output_path = input_path / f"index.{ext}"
+            else:
+                output_path = input_path / f"combined_transcripts.{ext}"
 
         # Phase 1: Ensure cache is fresh and populated
         cache_was_updated = ensure_fresh_cache(
@@ -973,19 +1026,35 @@ def convert_jsonl_to(
             and from_date is None
             and to_date is None
         ):
-            # Check if combined HTML is stale
-            combined_stale, _ = cache_manager.is_html_stale(output_path.name, None)
-            if not combined_stale and not is_html_outdated(output_path):
-                # Check if any session HTML is stale
+            if skip_combined:
+                # When skipping combined, check project index + session staleness
+                project_index_stale = (
+                    is_html_outdated(output_path) or not output_path.exists()
+                )
                 stale_sessions = cache_manager.get_stale_sessions()
-                if not stale_sessions or not generate_individual_sessions:
-                    # Nothing needs regeneration - skip loading
+                if not project_index_stale and (
+                    not stale_sessions or not generate_individual_sessions
+                ):
                     if not silent:
                         print(
                             f"All HTML files are current for {input_path.name}, "
                             "skipping regeneration"
                         )
                     return output_path
+            else:
+                # Check if combined HTML is stale
+                combined_stale, _ = cache_manager.is_html_stale(output_path.name, None)
+                if not combined_stale and not is_html_outdated(output_path):
+                    # Check if any session HTML is stale
+                    stale_sessions = cache_manager.get_stale_sessions()
+                    if not stale_sessions or not generate_individual_sessions:
+                        # Nothing needs regeneration - skip loading
+                        if not silent:
+                            print(
+                                f"All HTML files are current for {input_path.name}, "
+                                "skipping regeneration"
+                            )
+                        return output_path
 
         # Phase 2: Load messages (will use fresh cache when available)
         messages = load_directory_transcripts(
@@ -1016,94 +1085,112 @@ def convert_jsonl_to(
         date_range_str = " ".join(date_range_parts)
         title += f" ({date_range_str})"
 
-    # Generate combined output file (check if regeneration needed)
+    # Generate output file (check if regeneration needed)
     assert output_path is not None
     renderer = get_renderer(format, image_export_mode)
-
-    # Decide whether to use pagination (HTML only, directory mode, no date filter)
-    use_pagination = False
     cached_data = cache_manager.get_cached_project_data() if cache_manager else None
     total_message_count = (
         cached_data.total_message_count if cached_data else len(messages)
     )
-    existing_page_count = cache_manager.get_page_count() if cache_manager else 0
 
-    if (
-        format == "html"
-        and cache_manager is not None
-        and input_path.is_dir()
-        and from_date is None
-        and to_date is None
-    ):
-        # Use pagination if total messages exceed page_size or there are existing pages
-        use_pagination = total_message_count > page_size or existing_page_count > 1
-
-    if use_pagination:
-        # Use paginated HTML generation
-        assert cache_manager is not None  # Ensured by use_pagination condition
-        # Use cached session data if available, otherwise build from messages
-        if cached_data is not None:
-            warmup_session_ids = get_warmup_session_ids(messages)
-            current_session_ids: set[str] = set()
-            for message in messages:
-                session_id = getattr(message, "sessionId", "")
-                if session_id and session_id not in warmup_session_ids:
-                    current_session_ids.add(session_id)
-            session_data = {
-                session_id: session_cache
-                for session_id, session_cache in cached_data.sessions.items()
-                if session_id in current_session_ids
-            }
-        else:
-            session_data = _build_session_data_from_messages(messages)
-        output_path = _generate_paginated_html(
-            messages,
-            input_path,
-            title,
-            page_size,
-            cache_manager,
-            session_data,
-            working_directories,
-            silent=silent,
+    if skip_combined and input_path.is_dir():
+        # Generate lightweight project session index instead of combined transcript
+        should_regenerate = (
+            renderer.is_outdated(output_path)
+            or not output_path.exists()
+            or cache_was_updated
         )
+        if should_regenerate:
+            project_data = _build_project_summary_from_cache(
+                input_path, cache_manager, working_directories
+            )
+            from .html.renderer import generate_project_sessions_index_html
+
+            content = generate_project_sessions_index_html(project_data)
+            output_path.write_text(content, encoding="utf-8")
+        elif not silent:
+            print(f"Project index {output_path.name} is current, skipping regeneration")
     else:
-        # Use single-file generation for small projects or filtered views
-        # Use incremental regeneration via html_cache when available
-        if cache_manager is not None and input_path.is_dir():
-            is_stale, _reason = cache_manager.is_html_stale(output_path.name, None)
-            should_regenerate = (
-                is_stale
-                or renderer.is_outdated(output_path)
-                or from_date is not None
-                or to_date is not None
-                or not output_path.exists()
+        # Generate combined transcript (paginated or single-file)
+        existing_page_count = cache_manager.get_page_count() if cache_manager else 0
+
+        # Decide whether to use pagination (HTML only, directory mode, no date filter)
+        use_pagination = False
+        if (
+            format == "html"
+            and cache_manager is not None
+            and input_path.is_dir()
+            and from_date is None
+            and to_date is None
+        ):
+            use_pagination = total_message_count > page_size or existing_page_count > 1
+
+        if use_pagination:
+            # Use paginated HTML generation
+            assert cache_manager is not None  # Ensured by use_pagination condition
+            # Use cached session data if available, otherwise build from messages
+            if cached_data is not None:
+                warmup_session_ids = get_warmup_session_ids(messages)
+                current_session_ids: set[str] = set()
+                for message in messages:
+                    session_id = getattr(message, "sessionId", "")
+                    if session_id and session_id not in warmup_session_ids:
+                        current_session_ids.add(session_id)
+                session_data = {
+                    session_id: session_cache
+                    for session_id, session_cache in cached_data.sessions.items()
+                    if session_id in current_session_ids
+                }
+            else:
+                session_data = _build_session_data_from_messages(messages)
+            output_path = _generate_paginated_html(
+                messages,
+                input_path,
+                title,
+                page_size,
+                cache_manager,
+                session_data,
+                working_directories,
+                silent=silent,
             )
         else:
-            # Fallback: old logic for single file mode or no cache
-            should_regenerate = (
-                renderer.is_outdated(output_path)
-                or from_date is not None
-                or to_date is not None
-                or not output_path.exists()
-                or (input_path.is_dir() and cache_was_updated)
-            )
-
-        if should_regenerate:
-            # For referenced images, pass the output directory
-            output_dir = output_path.parent
-            content = renderer.generate(messages, title, output_dir=output_dir)
-            assert content is not None
-            output_path.write_text(content, encoding="utf-8")
-
-            # Update html_cache for combined transcript (HTML only)
-            if format == "html" and cache_manager is not None:
-                cache_manager.update_html_cache(
-                    output_path.name, None, total_message_count
+            # Use single-file generation for small projects or filtered views
+            # Use incremental regeneration via html_cache when available
+            if cache_manager is not None and input_path.is_dir():
+                is_stale, _reason = cache_manager.is_html_stale(output_path.name, None)
+                should_regenerate = (
+                    is_stale
+                    or renderer.is_outdated(output_path)
+                    or from_date is not None
+                    or to_date is not None
+                    or not output_path.exists()
                 )
-        elif not silent:
-            print(
-                f"{format.upper()} file {output_path.name} is current, skipping regeneration"
-            )
+            else:
+                # Fallback: old logic for single file mode or no cache
+                should_regenerate = (
+                    renderer.is_outdated(output_path)
+                    or from_date is not None
+                    or to_date is not None
+                    or not output_path.exists()
+                    or (input_path.is_dir() and cache_was_updated)
+                )
+
+            if should_regenerate:
+                # For referenced images, pass the output directory
+                output_dir = output_path.parent
+                content = renderer.generate(messages, title, output_dir=output_dir)
+                assert content is not None
+                output_path.write_text(content, encoding="utf-8")
+
+                # Update html_cache for combined transcript (HTML only)
+                if format == "html" and cache_manager is not None:
+                    cache_manager.update_html_cache(
+                        output_path.name, None, total_message_count
+                    )
+            elif not silent:
+                print(
+                    f"{format.upper()} file {output_path.name} is current, skipping regeneration"
+                )
 
     # Generate individual session files if requested and in directory mode
     if generate_individual_sessions and input_path.is_dir():
@@ -1662,6 +1749,7 @@ def process_projects_hierarchy(
     image_export_mode: Optional[str] = None,
     silent: bool = True,
     page_size: int = 2000,
+    skip_combined: bool = False,
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked output files.
 
@@ -1675,6 +1763,7 @@ def process_projects_hierarchy(
         image_export_mode: Image export mode for markdown
         silent: If True, suppress verbose per-file logging (show summary only)
         page_size: Maximum messages per page for combined transcript pagination
+        skip_combined: Skip combined transcript, generate project session index instead
     """
     import time
 
@@ -1757,11 +1846,18 @@ def process_projects_hierarchy(
                 else 0
             )
             total_archived += archived_count
-            output_path = project_dir / "combined_transcripts.html"
+            if skip_combined:
+                output_path = project_dir / "index.html"
+            else:
+                output_path = project_dir / "combined_transcripts.html"
             # Check combined_stale using the appropriate cache:
             # - Paginated projects store data in html_pages table (via save_page_cache)
             # - Non-paginated projects store data in html_cache table (via update_html_cache)
-            if cache_manager is not None:
+            if skip_combined:
+                combined_stale = (
+                    is_html_outdated(output_path) or not output_path.exists()
+                )
+            elif cache_manager is not None:
                 existing_page_count = cache_manager.get_page_count()
                 if existing_page_count > 0:
                     # Paginated project: check page 1 staleness
@@ -1818,6 +1914,7 @@ def process_projects_hierarchy(
                     silent=silent,
                     image_export_mode=image_export_mode,
                     page_size=page_size,
+                    skip_combined=skip_combined,
                 )
 
                 # Track timing
@@ -1852,11 +1949,16 @@ def process_projects_hierarchy(
                     # Track total sessions for stats
                     stats.sessions_total = len(cached_project_data.sessions)
                     # Use cached aggregation data
+                    project_html_file = (
+                        f"{project_dir.name}/index.html"
+                        if skip_combined
+                        else f"{project_dir.name}/{output_path.name}"
+                    )
                     project_summaries.append(
                         {
                             "name": project_dir.name,
                             "path": project_dir,
-                            "html_file": f"{project_dir.name}/{output_path.name}",
+                            "html_file": project_html_file,
                             "jsonl_count": jsonl_count,
                             "message_count": cached_project_data.total_message_count,
                             "last_modified": last_modified,
@@ -2017,7 +2119,9 @@ def process_projects_hierarchy(
                 {
                     "name": archived_dir.name,
                     "path": archived_dir,
-                    "html_file": f"{archived_dir.name}/combined_transcripts.html",
+                    "html_file": f"{archived_dir.name}/index.html"
+                    if skip_combined
+                    else f"{archived_dir.name}/combined_transcripts.html",
                     "jsonl_count": 0,
                     "message_count": cached_project_data.total_message_count,
                     "last_modified": 0.0,

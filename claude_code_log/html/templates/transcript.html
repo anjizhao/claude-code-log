@@ -89,7 +89,7 @@
     {% if combined_transcript_link %}
     <div class="navigation">
         <a href="{{ combined_transcript_link }}" class="combined-transcript-link">
-            ← View All Sessions (Combined Transcript)
+            ← {% if combined_transcript_link == "index.html" %}View All Sessions{% else %}View All Sessions (Combined Transcript){% endif %}
         </a>
     </div>
     {% elif sessions and sessions|length > 1 %}

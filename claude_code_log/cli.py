@@ -459,6 +459,11 @@ def _clear_output_files(input_path: Path, all_projects: bool, file_ext: str) -> 
     help="Skip generating individual session HTML files (only create combined transcript)",
 )
 @click.option(
+    "--skip-combined",
+    is_flag=True,
+    help="Skip generating combined transcript; create a project-level session index instead",
+)
+@click.option(
     "--no-cache",
     is_flag=True,
     help="Disable caching and force reprocessing of all files",
@@ -520,6 +525,7 @@ def main(
     to_date: Optional[str],
     all_projects: bool,
     no_individual_sessions: bool,
+    skip_combined: bool,
     no_cache: bool,
     clear_cache: bool,
     clear_output: bool,
@@ -685,6 +691,7 @@ def main(
                 output_format,
                 image_export_mode,
                 page_size=page_size,
+                skip_combined=skip_combined,
             )
 
             # Count processed projects
@@ -737,6 +744,7 @@ def main(
             not no_cache,
             image_export_mode=image_export_mode,
             page_size=page_size,
+            skip_combined=skip_combined,
         )
         if input_path.is_file():
             click.echo(f"Successfully converted {input_path} to {output_path}")
