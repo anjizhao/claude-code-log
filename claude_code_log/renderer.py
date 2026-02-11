@@ -385,7 +385,11 @@ class TemplateProject:
         self.total_cache_read_tokens = project_data.get("total_cache_read_tokens", 0)
         self.latest_timestamp = project_data.get("latest_timestamp", "")
         self.earliest_timestamp = project_data.get("earliest_timestamp", "")
-        self.sessions = project_data.get("sessions", [])
+        self.sessions = sorted(
+            project_data.get("sessions", []),
+            key=lambda s: s.get("last_timestamp", s.get("timestamp_range", "")),
+            reverse=True,
+        )
         self.working_directories = project_data.get("working_directories", [])
 
         # Format display name using shared logic
