@@ -46,6 +46,7 @@ class SessionCacheData(BaseModel):
     """Cached session-level information."""
 
     session_id: str
+    custom_title: Optional[str] = None
     summary: Optional[str] = None
     first_timestamp: str
     last_timestamp: str
@@ -594,12 +595,14 @@ class CacheManager:
                 conn.execute(
                     """
                     INSERT INTO sessions (
-                        project_id, session_id, summary, first_timestamp, last_timestamp,
+                        project_id, session_id, custom_title, summary,
+                        first_timestamp, last_timestamp,
                         message_count, first_user_message, cwd,
                         total_input_tokens, total_output_tokens,
                         total_cache_creation_tokens, total_cache_read_tokens
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(project_id, session_id) DO UPDATE SET
+                        custom_title = excluded.custom_title,
                         summary = excluded.summary,
                         first_timestamp = excluded.first_timestamp,
                         last_timestamp = excluded.last_timestamp,
@@ -614,6 +617,7 @@ class CacheManager:
                     (
                         self._project_id,
                         session_id,
+                        data.custom_title,
                         data.summary,
                         data.first_timestamp,
                         data.last_timestamp,
@@ -741,6 +745,7 @@ class CacheManager:
             for row in session_rows:
                 sessions[row["session_id"]] = SessionCacheData(
                     session_id=row["session_id"],
+                    custom_title=row["custom_title"],
                     summary=row["summary"],
                     first_timestamp=row["first_timestamp"],
                     last_timestamp=row["last_timestamp"],
@@ -1058,6 +1063,7 @@ class CacheManager:
                 if session_id not in valid_session_ids:
                     archived_sessions[session_id] = SessionCacheData(
                         session_id=session_id,
+                        custom_title=row["custom_title"],
                         summary=row["summary"],
                         first_timestamp=row["first_timestamp"],
                         last_timestamp=row["last_timestamp"],

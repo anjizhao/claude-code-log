@@ -31,6 +31,7 @@ from .factories import create_transcript_entry
 from .models import (
     TranscriptEntry,
     AssistantTranscriptEntry,
+    CustomTitleTranscriptEntry,
     SummaryTranscriptEntry,
     SystemTranscriptEntry,
     UserTranscriptEntry,
@@ -85,8 +86,8 @@ def filter_messages_by_date(
 
     filtered_messages: list[TranscriptEntry] = []
     for message in messages:
-        # Handle SummaryTranscriptEntry which doesn't have timestamp
-        if isinstance(message, SummaryTranscriptEntry):
+        # Handle entries without timestamp (summaries, custom titles)
+        if isinstance(message, (SummaryTranscriptEntry, CustomTitleTranscriptEntry)):
             filtered_messages.append(message)
             continue
 
@@ -202,6 +203,7 @@ def load_transcript(
                         "user",
                         "assistant",
                         "summary",
+                        "custom-title",
                         "system",
                         "queue-operation",
                     ]:
@@ -623,7 +625,7 @@ def _build_project_summary_from_cache(
             project_data["sessions"] = [
                 {
                     "id": s.session_id,
-                    "summary": s.summary,
+                    "summary": s.custom_title or s.summary,
                     "timestamp_range": format_timestamp_range(
                         s.first_timestamp, s.last_timestamp
                     ),
@@ -662,7 +664,7 @@ def _build_session_data_from_messages(
     sessions: Dict[str, Dict[str, Any]] = {}
     for message in messages:
         if not hasattr(message, "sessionId") or isinstance(
-            message, SummaryTranscriptEntry
+            message, (SummaryTranscriptEntry, CustomTitleTranscriptEntry)
         ):
             continue
 
@@ -1331,6 +1333,12 @@ def _update_cache_with_session_data(
             ):
                 session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
 
+    # Collect custom titles (from /rename command)
+    custom_titles: dict[str, str] = {}
+    for message in messages:
+        if isinstance(message, CustomTitleTranscriptEntry):
+            custom_titles[message.sessionId] = message.customTitle
+
     # Group messages by session and calculate session data
     sessions_cache_data: dict[str, SessionCacheData] = {}
 
@@ -1354,9 +1362,9 @@ def _update_cache_with_session_data(
                 if not earliest_timestamp or message_timestamp < earliest_timestamp:
                     earliest_timestamp = message_timestamp
 
-        # Process session-level data (skip summaries)
+        # Process session-level data (skip summaries and custom titles)
         if hasattr(message, "sessionId") and not isinstance(
-            message, SummaryTranscriptEntry
+            message, (SummaryTranscriptEntry, CustomTitleTranscriptEntry)
         ):
             session_id = getattr(message, "sessionId", "")
             if not session_id:
@@ -1365,6 +1373,7 @@ def _update_cache_with_session_data(
             if session_id not in sessions_cache_data:
                 sessions_cache_data[session_id] = SessionCacheData(
                     session_id=session_id,
+                    custom_title=custom_titles.get(session_id),
                     summary=session_summaries.get(session_id),
                     first_timestamp=getattr(message, "timestamp", ""),
                     last_timestamp=getattr(message, "timestamp", ""),
@@ -1492,11 +1501,17 @@ def _collect_project_sessions(messages: list[TranscriptEntry]) -> list[dict[str,
             ):
                 session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
 
+    # Collect custom titles (from /rename command)
+    custom_titles: dict[str, str] = {}
+    for message in messages:
+        if isinstance(message, CustomTitleTranscriptEntry):
+            custom_titles[message.sessionId] = message.customTitle
+
     # Group messages by session (excluding warmup-only sessions)
     sessions: dict[str, dict[str, Any]] = {}
     for message in messages:
         if hasattr(message, "sessionId") and not isinstance(
-            message, SummaryTranscriptEntry
+            message, (SummaryTranscriptEntry, CustomTitleTranscriptEntry)
         ):
             session_id = getattr(message, "sessionId", "")
             if not session_id or session_id in warmup_session_ids:
@@ -1505,7 +1520,8 @@ def _collect_project_sessions(messages: list[TranscriptEntry]) -> list[dict[str,
             if session_id not in sessions:
                 sessions[session_id] = {
                     "id": session_id,
-                    "summary": session_summaries.get(session_id),
+                    "summary": custom_titles.get(session_id)
+                    or session_summaries.get(session_id),
                     "first_timestamp": getattr(message, "timestamp", ""),
                     "last_timestamp": getattr(message, "timestamp", ""),
                     "message_count": 0,
@@ -1609,7 +1625,9 @@ def _generate_individual_session_files(
         # Create session-specific title using cache data if available
         if session_id in session_data:
             session_cache = session_data[session_id]
-            if session_cache.summary:
+            if session_cache.custom_title:
+                session_title = f"{project_title}: {session_cache.custom_title}"
+            elif session_cache.summary:
                 session_title = f"{project_title}: {session_cache.summary}"
             else:
                 # Fall back to first user message preview

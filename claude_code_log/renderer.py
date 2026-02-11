@@ -19,6 +19,7 @@ from .models import (
     MessageType,
     TranscriptEntry,
     AssistantTranscriptEntry,
+    CustomTitleTranscriptEntry,
     SystemTranscriptEntry,
     SummaryTranscriptEntry,
     QueueOperationTranscriptEntry,
@@ -665,6 +666,11 @@ def prepare_session_summaries(messages: list[TranscriptEntry]) -> dict[str, str]
                 and uuid_to_session_backup[leaf_uuid] not in session_summaries
             ):
                 session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
+
+    # Custom titles (from /rename) take priority over auto-generated summaries
+    for message in messages:
+        if isinstance(message, CustomTitleTranscriptEntry):
+            session_summaries[message.sessionId] = message.customTitle
 
     return session_summaries
 
@@ -1516,8 +1522,8 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
     filtered: list[TranscriptEntry] = []
 
     for message in messages:
-        # Skip summary messages
-        if isinstance(message, SummaryTranscriptEntry):
+        # Skip summary and custom-title messages (metadata, not renderable)
+        if isinstance(message, (SummaryTranscriptEntry, CustomTitleTranscriptEntry)):
             continue
 
         # Skip most queue operations - only process 'remove' for counts
@@ -1724,8 +1730,8 @@ def _render_messages(
                 ctx.register(system_msg)
             continue
 
-        # Skip summary messages (should be filtered in pass 1, but be defensive)
-        if isinstance(message, SummaryTranscriptEntry):
+        # Skip summary/custom-title messages (should be filtered in pass 1, but be defensive)
+        if isinstance(message, (SummaryTranscriptEntry, CustomTitleTranscriptEntry)):
             continue
 
         # Handle queue-operation 'remove' messages as user messages
