@@ -249,15 +249,7 @@
   }
   /* Session navigation styles */
   .navigation {
-      background-color: var(--bg-neutral);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 24px;
-      box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-      border-left: var(--white-dimmed) 1px solid;
-      border-top: var(--white-dimmed) 1px solid;
-      border-bottom: #00000017 1px solid;
-      border-right: #00000017 1px solid;
+      margin-bottom: 16px;
   }
   
   .navigation h2 {
@@ -3137,15 +3129,7 @@
   }
   /* Session navigation styles */
   .navigation {
-      background-color: var(--bg-neutral);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 24px;
-      box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-      border-left: var(--white-dimmed) 1px solid;
-      border-top: var(--white-dimmed) 1px solid;
-      border-bottom: #00000017 1px solid;
-      border-right: #00000017 1px solid;
+      margin-bottom: 16px;
   }
   
   .navigation h2 {
@@ -4494,6 +4478,8 @@
   </head>
   
   <body>
+      
+  
       <h1 id="title">Test Session</h1>
   
       
@@ -8109,15 +8095,7 @@
   }
   /* Session navigation styles */
   .navigation {
-      background-color: var(--bg-neutral);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 24px;
-      box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-      border-left: var(--white-dimmed) 1px solid;
-      border-top: var(--white-dimmed) 1px solid;
-      border-bottom: #00000017 1px solid;
-      border-right: #00000017 1px solid;
+      margin-bottom: 16px;
   }
   
   .navigation h2 {
@@ -9466,6 +9444,8 @@
   </head>
   
   <body>
+      
+  
       <h1 id="title">Edge Cases</h1>
   
       
@@ -13177,15 +13157,7 @@
   }
   /* Session navigation styles */
   .navigation {
-      background-color: var(--bg-neutral);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 24px;
-      box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-      border-left: var(--white-dimmed) 1px solid;
-      border-top: var(--white-dimmed) 1px solid;
-      border-bottom: #00000017 1px solid;
-      border-right: #00000017 1px solid;
+      margin-bottom: 16px;
   }
   
   .navigation h2 {
@@ -14534,6 +14506,12 @@
   </head>
   
   <body>
+      
+      <div class="navigation">
+          <a href="../index.html" class="combined-transcript-link">&larr; All Projects</a>
+      </div>
+      
+  
       <h1 id="title">Claude Transcripts - test_multi_session_html0</h1>
   
       
@@ -18286,15 +18264,7 @@
   }
   /* Session navigation styles */
   .navigation {
-      background-color: var(--bg-neutral);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 24px;
-      box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-      border-left: var(--white-dimmed) 1px solid;
-      border-top: var(--white-dimmed) 1px solid;
-      border-bottom: #00000017 1px solid;
-      border-right: #00000017 1px solid;
+      margin-bottom: 16px;
   }
   
   .navigation h2 {
@@ -19643,6 +19613,8 @@
   </head>
   
   <body>
+      
+  
       <h1 id="title">Test Transcript</h1>
   
       

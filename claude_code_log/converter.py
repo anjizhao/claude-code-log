@@ -1206,6 +1206,7 @@ def convert_jsonl_to(
             cache_was_updated,
             image_export_mode,
             silent=silent,
+            skip_combined=skip_combined,
         )
 
     return output_path
@@ -1582,6 +1583,7 @@ def _generate_individual_session_files(
     cache_was_updated: bool = False,
     image_export_mode: Optional[str] = None,
     silent: bool = False,
+    skip_combined: bool = False,
 ) -> int:
     """Generate individual files for each session in the specified format.
 
@@ -1682,7 +1684,12 @@ def _generate_individual_session_files(
         if should_regenerate_session:
             # Generate session content
             session_content = renderer.generate_session(
-                messages, session_id, session_title, cache_manager, output_dir
+                messages,
+                session_id,
+                session_title,
+                cache_manager,
+                output_dir,
+                skip_combined=skip_combined,
             )
             assert session_content is not None
             # Write session file

@@ -579,6 +579,7 @@ class HtmlRenderer(Renderer):
         title: Optional[str] = None,
         cache_manager: Optional["CacheManager"] = None,
         output_dir: Optional[Path] = None,
+        skip_combined: bool = False,
     ) -> str:
         """Generate HTML for a single session."""
         # Filter messages for this session (SummaryTranscriptEntry.sessionId is always None)
@@ -590,8 +591,7 @@ class HtmlRenderer(Renderer):
             try:
                 project_cache = cache_manager.get_cached_project_data()
                 if project_cache and project_cache.sessions:
-                    # Prefer project session index if it exists, otherwise combined
-                    if output_dir and (output_dir / "index.html").exists():
+                    if skip_combined:
                         combined_link = "index.html"
                     else:
                         combined_link = "combined_transcripts.html"

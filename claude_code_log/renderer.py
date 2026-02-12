@@ -2260,6 +2260,7 @@ class Renderer:
         title: Optional[str] = None,
         cache_manager: Optional["CacheManager"] = None,
         output_dir: Optional[Path] = None,
+        skip_combined: bool = False,
     ) -> Optional[str]:
         """Generate output for a single session.
 
