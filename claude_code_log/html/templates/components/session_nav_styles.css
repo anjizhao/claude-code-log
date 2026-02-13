@@ -31,11 +31,11 @@
 
 .session-link-title {
     font-weight: 600;
-    font-size: 0.9em;
+    font-size: 1em;
 }
 
 .session-link-meta {
-    font-size: 0.8em;
+    font-size: 1em;
     color: #6c757d;
     margin-top: 2px;
 }
@@ -54,19 +54,6 @@
     font-weight: 600;
 }
 
-.project-sessions .session-link {
-    padding: 6px 8px;
-    font-size: 0.8em;
-    margin-bottom: 4px;
-}
-
-.project-sessions .session-link-title {
-    font-size: 0.85em;
-}
-
-.project-sessions .session-link-meta {
-    font-size: 0.75em;
-}
 
 /* Combined transcript link */
 .combined-transcript-link {
