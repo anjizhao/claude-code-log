@@ -124,12 +124,6 @@ pre {
     line-height: 1.5;
 }
 
-/* Summary stats layout (used in index.html) */
-.summary-stats-flex {
-    display: flex;
-    gap: 3em;
-}
-
 /* Common card styling */
 .card-base {
     background-color: #ffffff66;

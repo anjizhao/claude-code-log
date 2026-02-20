@@ -34,35 +34,16 @@
     <!-- Search Component -->
     {% include 'components/search.html' %}
 
-    <div class='summary'>
-        <div class='summary-stats'>
-            <div class="summary-stats-flex">
-                <div class='summary-stat'>
-                    <div class='number'>{{ summary.total_projects }}</div>
-                    <div class='label'>Projects</div>
-                </div>
-                <div class='summary-stat'>
-                    <div class='number'>{{ summary.total_jsonl }}</div>
-                    <div class='label'>Transcript Files</div>
-                </div>
-                <div class='summary-stat'>
-                    <div class='number'>{{ summary.total_messages }}</div>
-                    <div class='label'>Messages</div>
-                </div>
-            </div>
-            {% if summary.token_summary %}
-            <div class='summary-stat'>
-                <div class='number'>💸</div>
-                <div class='label'>{{ summary.token_summary }}</div>
-            </div>
-            {% endif %}
-            {% if summary.formatted_time_range %}
-            <div class='summary-stat'>
-                <div class='number'>🕐</div>
-                <div class='label'><span class="timestamp"{% if summary.earliest_interaction %} data-timestamp="{{ summary.earliest_interaction }}"{% endif %}{% if summary.latest_interaction and summary.latest_interaction != summary.earliest_interaction %} data-timestamp-end="{{ summary.latest_interaction }}"{% endif %}>{{ summary.formatted_time_range }}</span></div>
-            </div>
-            {% endif %}
-        </div>
+    <div class='project-stats'>
+        <div class='stat'>📁 {{ summary.total_projects }} projects</div>
+        <div class='stat'>📋 {{ summary.total_jsonl }} transcript files</div>
+        <div class='stat'>💬 {{ summary.total_messages }} messages</div>
+        {% if summary.token_summary %}
+        <div class='stat'>🪙 {{ summary.token_summary }}</div>
+        {% endif %}
+        {% if summary.formatted_time_range %}
+        <div class='stat'>🕒 <span class="timestamp"{% if summary.earliest_interaction %} data-timestamp="{{ summary.earliest_interaction }}"{% endif %}{% if summary.latest_interaction and summary.latest_interaction != summary.earliest_interaction %} data-timestamp-end="{{ summary.latest_interaction }}"{% endif %}>{{ summary.formatted_time_range }}</span></div>
+        {% endif %}
     </div>
 
     <div class='project-list'>

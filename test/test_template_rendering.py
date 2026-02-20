@@ -220,7 +220,7 @@ class TestTemplateRendering:
         assert "<!DOCTYPE html>" in index_html
         assert "<title>Claude Code Projects</title>" in index_html
         assert "class='project-list'" in index_html
-        assert "class='summary'" in index_html
+        assert "class='project-stats'" in index_html
 
         # Check project data
         assert "test-project-1" in index_html

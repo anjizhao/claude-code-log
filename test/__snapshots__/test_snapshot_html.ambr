@@ -136,12 +136,6 @@
       line-height: 1.5;
   }
   
-  /* Summary stats layout (used in index.html) */
-  .summary-stats-flex {
-      display: flex;
-      gap: 3em;
-  }
-  
   /* Common card styling */
   .card-base {
       background-color: #ffffff66;
@@ -388,42 +382,6 @@
       display: flex;
       align-items: center;
       gap: 5px;
-  }
-  
-  /* Summary section */
-  .summary {
-      text-align: center;
-      margin-bottom: 30px;
-      padding: 15px;
-      background-color: #ffffff66;
-      border-radius: 8px;
-      box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-      border-left: #ffffff66 1px solid;
-      border-top: #ffffff66 1px solid;
-      border-bottom: #00000017 1px solid;
-      border-right: #00000017 1px solid;
-  }
-  
-  .summary-stats {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 15px;
-  }
-  
-  .summary-stat {
-      text-align: center;
-  }
-  
-  .summary-stat .number {
-      font-size: 1.5em;
-      font-weight: 600;
-      color: var(--system-warning-color);
-  }
-  
-  .summary-stat .label {
-      color: var(--text-muted);
-      font-size: 0.9em;
   }
   
   /* Session details styling within project cards */
@@ -1636,35 +1594,16 @@
   })();
   </script>
   
-      <div class='summary'>
-          <div class='summary-stats'>
-              <div class="summary-stats-flex">
-                  <div class='summary-stat'>
-                      <div class='number'>2</div>
-                      <div class='label'>Projects</div>
-                  </div>
-                  <div class='summary-stat'>
-                      <div class='number'>8</div>
-                      <div class='label'>Transcript Files</div>
-                  </div>
-                  <div class='summary-stat'>
-                      <div class='number'>67</div>
-                      <div class='label'>Messages</div>
-                  </div>
-              </div>
-              
-              <div class='summary-stat'>
-                  <div class='number'>💸</div>
-                  <div class='label'>Input: 1000 | Output: 2000 | Cache Creation: 500 | Cache Read: 1500</div>
-              </div>
-              
-              
-              <div class='summary-stat'>
-                  <div class='number'>🕐</div>
-                  <div class='label'><span class="timestamp" data-timestamp="2025-01-01T09:00:00Z" data-timestamp-end="2025-01-15T10:00:00Z">2025-01-01 09:00:00 to 2025-01-15 10:00:00</span></div>
-              </div>
-              
-          </div>
+      <div class='project-stats'>
+          <div class='stat'>📁 2 projects</div>
+          <div class='stat'>📋 8 transcript files</div>
+          <div class='stat'>💬 67 messages</div>
+          
+          <div class='stat'>🪙 Input: 1000 | Output: 2000 | Cache Creation: 500 | Cache Read: 1500</div>
+          
+          
+          <div class='stat'>🕒 <span class="timestamp" data-timestamp="2025-01-01T09:00:00Z" data-timestamp-end="2025-01-15T10:00:00Z">2025-01-01 09:00:00 to 2025-01-15 10:00:00</span></div>
+          
       </div>
   
       <div class='project-list'>
@@ -2006,12 +1945,6 @@
       word-break: break-word;
       font-family: var(--font-monospace);
       line-height: 1.5;
-  }
-  
-  /* Summary stats layout (used in index.html) */
-  .summary-stats-flex {
-      display: flex;
-      gap: 3em;
   }
   
   /* Common card styling */
@@ -6959,12 +6892,6 @@
       word-break: break-word;
       font-family: var(--font-monospace);
       line-height: 1.5;
-  }
-  
-  /* Summary stats layout (used in index.html) */
-  .summary-stats-flex {
-      display: flex;
-      gap: 3em;
   }
   
   /* Common card styling */
@@ -12008,12 +11935,6 @@
       word-break: break-word;
       font-family: var(--font-monospace);
       line-height: 1.5;
-  }
-  
-  /* Summary stats layout (used in index.html) */
-  .summary-stats-flex {
-      display: flex;
-      gap: 3em;
   }
   
   /* Common card styling */
@@ -17102,12 +17023,6 @@
       word-break: break-word;
       font-family: var(--font-monospace);
       line-height: 1.5;
-  }
-  
-  /* Summary stats layout (used in index.html) */
-  .summary-stats-flex {
-      display: flex;
-      gap: 3em;
   }
   
   /* Common card styling */
