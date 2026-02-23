@@ -579,18 +579,22 @@ class HtmlRenderer(Renderer):
         title: Optional[str] = None,
         cache_manager: Optional["CacheManager"] = None,
         output_dir: Optional[Path] = None,
+        skip_combined: bool = False,
     ) -> str:
         """Generate HTML for a single session."""
         # Filter messages for this session (SummaryTranscriptEntry.sessionId is always None)
         session_messages = [msg for msg in messages if msg.sessionId == session_id]
 
-        # Get combined transcript link if cache manager is available
+        # Get back link to project page (combined transcript or project session index)
         combined_link = None
         if cache_manager is not None:
             try:
                 project_cache = cache_manager.get_cached_project_data()
                 if project_cache and project_cache.sessions:
-                    combined_link = "combined_transcripts.html"
+                    if skip_combined:
+                        combined_link = "index.html"
+                    else:
+                        combined_link = "combined_transcripts.html"
             except Exception:
                 pass
 
@@ -618,6 +622,30 @@ class HtmlRenderer(Renderer):
                 title=title,
                 projects=template_projects,
                 summary=template_summary,
+                library_version=get_library_version(),
+            )
+        )
+
+    def generate_project_sessions_index(
+        self,
+        project_data: dict[str, Any],
+    ) -> str:
+        """Generate a lightweight project-level session index page."""
+        from ..renderer import TemplateProject
+
+        project = TemplateProject(project_data)
+        env = get_template_environment()
+        template = env.get_template("project_sessions.html")
+        return str(
+            template.render(
+                title=project.display_name,
+                sessions=project.sessions,
+                session_count=len(project.sessions),
+                message_count=project.message_count,
+                formatted_time_range=project.formatted_time_range,
+                earliest_timestamp=project.earliest_timestamp,
+                latest_timestamp=project.latest_timestamp,
+                token_summary=project.token_summary,
                 library_version=get_library_version(),
             )
         )
@@ -686,3 +714,13 @@ def generate_projects_index_html(
     This is a convenience function that delegates to HtmlRenderer.generate_projects_index.
     """
     return HtmlRenderer().generate_projects_index(project_summaries, from_date, to_date)
+
+
+def generate_project_sessions_index_html(
+    project_data: dict[str, Any],
+) -> str:
+    """Generate a project-level session index page.
+
+    This is a convenience function that delegates to HtmlRenderer.generate_project_sessions_index.
+    """
+    return HtmlRenderer().generate_project_sessions_index(project_data)

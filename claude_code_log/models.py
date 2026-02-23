@@ -28,6 +28,7 @@ class MessageType(str, Enum):
     SYSTEM = "system"
     SUMMARY = "summary"
     QUEUE_OPERATION = "queue-operation"
+    CUSTOM_TITLE = "custom-title"
 
     # Rendering/display types (derived from content)
     TOOL_USE = "tool_use"
@@ -186,6 +187,14 @@ class SummaryTranscriptEntry(BaseModel):
     sessionId: None = None  # Summaries don't have a sessionId
 
 
+class CustomTitleTranscriptEntry(BaseModel):
+    """Custom session title set by user via /rename command."""
+
+    type: Literal["custom-title"]
+    customTitle: str
+    sessionId: str
+
+
 class SystemTranscriptEntry(BaseTranscriptEntry):
     """System messages like warnings, notifications, hook summaries, etc."""
 
@@ -224,6 +233,7 @@ TranscriptEntry = Union[
     UserTranscriptEntry,
     AssistantTranscriptEntry,
     SummaryTranscriptEntry,
+    CustomTitleTranscriptEntry,
     SystemTranscriptEntry,
     QueueOperationTranscriptEntry,
 ]

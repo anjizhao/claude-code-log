@@ -905,6 +905,7 @@ class MarkdownRenderer(Renderer):
         title: Optional[str] = None,
         cache_manager: Optional["CacheManager"] = None,
         output_dir: Optional[Path] = None,
+        skip_combined: bool = False,
     ) -> str:
         """Generate Markdown for a single session."""
         session_messages = [msg for msg in messages if msg.sessionId == session_id]

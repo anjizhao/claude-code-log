@@ -1464,7 +1464,8 @@ class SessionBrowser(App[Optional[str]]):
 
             # Get summary or first user message
             preview = (
-                session_data.summary
+                session_data.custom_title
+                or session_data.summary
                 or session_data.first_user_message
                 or "No preview available"
             )
@@ -1764,6 +1765,11 @@ class SessionBrowser(App[Optional[str]]):
         # Session ID (safe - UUID format)
         content_parts.append(f"[bold]Session ID:[/bold] {self.selected_session_id}")
 
+        # Custom title (if available) - escape markup
+        if session_data.custom_title:
+            escaped_title = self._escape_rich_markup(session_data.custom_title)
+            content_parts.append(f"\n[bold]Title:[/bold] {escaped_title}")
+
         # Summary (if available) - escape markup
         if session_data.summary:
             escaped_summary = self._escape_rich_markup(session_data.summary)
@@ -1849,7 +1855,9 @@ class SessionBrowser(App[Optional[str]]):
                 self.project_path.name,
                 project_cache.working_directories if project_cache else None,
             )
-            if session_data and session_data.summary:
+            if session_data and session_data.custom_title:
+                session_title = f"{project_name}: {session_data.custom_title}"
+            elif session_data and session_data.summary:
                 session_title = f"{project_name}: {session_data.summary}"
             elif session_data and session_data.first_user_message:
                 preview = session_data.first_user_message

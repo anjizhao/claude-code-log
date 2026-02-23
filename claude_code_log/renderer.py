@@ -19,6 +19,7 @@ from .models import (
     MessageType,
     TranscriptEntry,
     AssistantTranscriptEntry,
+    CustomTitleTranscriptEntry,
     SystemTranscriptEntry,
     SummaryTranscriptEntry,
     QueueOperationTranscriptEntry,
@@ -385,7 +386,11 @@ class TemplateProject:
         self.total_cache_read_tokens = project_data.get("total_cache_read_tokens", 0)
         self.latest_timestamp = project_data.get("latest_timestamp", "")
         self.earliest_timestamp = project_data.get("earliest_timestamp", "")
-        self.sessions = project_data.get("sessions", [])
+        self.sessions = sorted(
+            project_data.get("sessions", []),
+            key=lambda s: s.get("last_timestamp", s.get("timestamp_range", "")),
+            reverse=True,
+        )
         self.working_directories = project_data.get("working_directories", [])
 
         # Format display name using shared logic
@@ -661,6 +666,11 @@ def prepare_session_summaries(messages: list[TranscriptEntry]) -> dict[str, str]
                 and uuid_to_session_backup[leaf_uuid] not in session_summaries
             ):
                 session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
+
+    # Custom titles (from /rename) take priority over auto-generated summaries
+    for message in messages:
+        if isinstance(message, CustomTitleTranscriptEntry):
+            session_summaries[message.sessionId] = message.customTitle
 
     return session_summaries
 
@@ -1512,8 +1522,8 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
     filtered: list[TranscriptEntry] = []
 
     for message in messages:
-        # Skip summary messages
-        if isinstance(message, SummaryTranscriptEntry):
+        # Skip summary and custom-title messages (metadata, not renderable)
+        if isinstance(message, (SummaryTranscriptEntry, CustomTitleTranscriptEntry)):
             continue
 
         # Skip most queue operations - only process 'remove' for counts
@@ -1720,8 +1730,8 @@ def _render_messages(
                 ctx.register(system_msg)
             continue
 
-        # Skip summary messages (should be filtered in pass 1, but be defensive)
-        if isinstance(message, SummaryTranscriptEntry):
+        # Skip summary/custom-title messages (should be filtered in pass 1, but be defensive)
+        if isinstance(message, (SummaryTranscriptEntry, CustomTitleTranscriptEntry)):
             continue
 
         # Handle queue-operation 'remove' messages as user messages
@@ -2250,6 +2260,7 @@ class Renderer:
         title: Optional[str] = None,
         cache_manager: Optional["CacheManager"] = None,
         output_dir: Optional[Path] = None,
+        skip_combined: bool = False,
     ) -> Optional[str]:
         """Generate output for a single session.
 

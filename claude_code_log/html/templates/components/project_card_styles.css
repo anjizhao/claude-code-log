@@ -56,42 +56,6 @@
     gap: 5px;
 }
 
-/* Summary section */
-.summary {
-    text-align: center;
-    margin-bottom: 30px;
-    padding: 15px;
-    background-color: #ffffff66;
-    border-radius: 8px;
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-left: #ffffff66 1px solid;
-    border-top: #ffffff66 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
-}
-
-.summary-stats {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 15px;
-}
-
-.summary-stat {
-    text-align: center;
-}
-
-.summary-stat .number {
-    font-size: 1.5em;
-    font-weight: 600;
-    color: var(--system-warning-color);
-}
-
-.summary-stat .label {
-    color: var(--text-muted);
-    font-size: 0.9em;
-}
-
 /* Session details styling within project cards */
 .project-sessions details {
     margin-top: 15px;

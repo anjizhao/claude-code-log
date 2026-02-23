@@ -22,6 +22,18 @@
 </head>
 
 <body>
+    {% if combined_transcript_link %}
+    <div class="navigation">
+        <a href="{{ combined_transcript_link }}" class="combined-transcript-link">
+            ← {% if combined_transcript_link == "index.html" %}View All Sessions{% else %}View All Sessions (Combined Transcript){% endif %}
+        </a>
+    </div>
+    {% elif sessions and sessions|length > 1 %}
+    <div class="navigation">
+        <a href="../index.html" class="combined-transcript-link">&larr; All Projects</a>
+    </div>
+    {% endif %}
+
     <h1 id="title">{{ title }}</h1>
 
     {% if page_info %}
@@ -86,13 +98,7 @@
     </div>
 
 
-    {% if combined_transcript_link %}
-    <div class="navigation">
-        <a href="{{ combined_transcript_link }}" class="combined-transcript-link">
-            ← View All Sessions (Combined Transcript)
-        </a>
-    </div>
-    {% elif sessions and sessions|length > 1 %}
+    {% if sessions and sessions|length > 1 %}
     {{ render_session_nav(sessions, "toc") }}
     {% endif %}
 

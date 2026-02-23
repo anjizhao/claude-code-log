@@ -23,6 +23,7 @@ from ..models import (
     ToolUseContent,
     # Transcript entry types
     AssistantTranscriptEntry,
+    CustomTitleTranscriptEntry,
     MessageType,
     QueueOperationTranscriptEntry,
     SummaryTranscriptEntry,
@@ -211,6 +212,7 @@ ENTRY_CREATORS: dict[str, Callable[[dict[str, Any]], TranscriptEntry]] = {
     "user": _create_user_entry,
     "assistant": _create_assistant_entry,
     "summary": lambda data: SummaryTranscriptEntry.model_validate(data),
+    "custom-title": lambda data: CustomTitleTranscriptEntry.model_validate(data),
     "system": lambda data: SystemTranscriptEntry.model_validate(data),
     "queue-operation": _create_queue_operation_entry,
 }
