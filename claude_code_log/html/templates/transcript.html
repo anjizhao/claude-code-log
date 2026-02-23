@@ -45,7 +45,7 @@
             <div class="page-stats">
                 <span class="stat">💬 {{ page_stats.message_count }} messages</span>
                 <span class="stat">🕒 {{ page_stats.date_range }}</span>
-                {% if page_stats.token_summary %}
+                {% if show_stats and page_stats.token_summary %}
                 <span class="stat">🪙 {{ page_stats.token_summary }}</span>
                 {% endif %}
             </div>
@@ -99,7 +99,7 @@
 
 
     {% if sessions and sessions|length > 1 %}
-    {{ render_session_nav(sessions, "toc") }}
+    {{ render_session_nav(sessions, "toc", show_stats=show_stats) }}
     {% endif %}
 
     {% for message, message_title, html_content, formatted_timestamp in messages %}
@@ -142,7 +142,7 @@
                 <div class='timestamp-row'>
                     <span class='timestamp'{% if message.meta and message.meta.timestamp %} data-timestamp='{{ message.meta.timestamp }}'{% if message.pair_duration %} data-duration='{{ message.pair_duration }}'{% endif %}{% endif %}>{{ formatted_timestamp }}</span>
                 </div>
-                {% if message.token_usage %}
+                {% if show_stats and message.token_usage %}
                 <span class='token-usage'>{{ message.token_usage }}</span>
                 {% endif %}
             </div>

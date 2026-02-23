@@ -69,6 +69,8 @@ class HtmlCacheEntry(BaseModel):
     )
     message_count: int = 0  # for sanity checking
     library_version: str  # which version generated it
+    show_stats: bool = False  # whether token stats were displayed
+    skip_combined: bool = False  # whether skip_combined mode was used
 
 
 class PageCacheData(BaseModel):
@@ -89,6 +91,7 @@ class PageCacheData(BaseModel):
     total_cache_read_tokens: int = 0
     generated_at: str  # ISO timestamp when page was generated
     library_version: str
+    show_stats: bool = False  # whether token stats were displayed
 
 
 class ProjectCache(BaseModel):
@@ -856,7 +859,8 @@ class CacheManager:
 
         with self._get_connection() as conn:
             row = conn.execute(
-                """SELECT html_path, generated_at, source_session_id, message_count, library_version
+                """SELECT html_path, generated_at, source_session_id, message_count,
+                          library_version, show_stats, skip_combined
                    FROM html_cache
                    WHERE project_id = ? AND html_path = ?""",
                 (self._project_id, html_path),
@@ -871,6 +875,8 @@ class CacheManager:
             source_session_id=row["source_session_id"],
             message_count=row["message_count"] or 0,
             library_version=row["library_version"],
+            show_stats=bool(row["show_stats"]),
+            skip_combined=bool(row["skip_combined"]),
         )
 
     def update_html_cache(
@@ -878,6 +884,8 @@ class CacheManager:
         html_path: str,
         session_id: Optional[str],
         message_count: int,
+        show_stats: bool = False,
+        skip_combined: bool = False,
     ) -> None:
         """Update or insert HTML cache entry."""
         if self._project_id is None:
@@ -886,14 +894,17 @@ class CacheManager:
         with self._get_connection() as conn:
             conn.execute(
                 """INSERT INTO html_cache
-                   (project_id, html_path, generated_at, source_session_id, message_count, library_version)
-                   VALUES (?, ?, ?, ?, ?, ?)
+                   (project_id, html_path, generated_at, source_session_id, message_count,
+                    library_version, show_stats, skip_combined)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(project_id, html_path)
                    DO UPDATE SET
                        generated_at = excluded.generated_at,
                        source_session_id = excluded.source_session_id,
                        message_count = excluded.message_count,
-                       library_version = excluded.library_version""",
+                       library_version = excluded.library_version,
+                       show_stats = excluded.show_stats,
+                       skip_combined = excluded.skip_combined""",
                 (
                     self._project_id,
                     html_path,
@@ -901,12 +912,18 @@ class CacheManager:
                     session_id,
                     message_count,
                     self.library_version,
+                    int(show_stats),
+                    int(skip_combined),
                 ),
             )
             conn.commit()
 
     def is_html_stale(
-        self, html_path: str, session_id: Optional[str] = None
+        self,
+        html_path: str,
+        session_id: Optional[str] = None,
+        show_stats: bool = False,
+        skip_combined: bool = False,
     ) -> tuple[bool, str]:
         """Check if HTML file needs regeneration.
 
@@ -930,6 +947,12 @@ class CacheManager:
         # Check library version in cache
         if html_cache.library_version != self.library_version:
             return True, "version_mismatch"
+
+        # Check if rendering flags changed
+        if html_cache.show_stats != show_stats:
+            return True, "show_stats_changed"
+        if html_cache.skip_combined != skip_combined:
+            return True, "skip_combined_changed"
 
         # Check if file exists and has correct version
         actual_file = self.project_path / html_path
@@ -969,7 +992,10 @@ class CacheManager:
         return False, "up_to_date"
 
     def get_stale_sessions(
-        self, valid_session_ids: Optional[set[str]] = None
+        self,
+        valid_session_ids: Optional[set[str]] = None,
+        show_stats: bool = False,
+        skip_combined: bool = False,
     ) -> List[tuple[str, str]]:
         """Get list of sessions that need HTML regeneration.
 
@@ -977,6 +1003,8 @@ class CacheManager:
             valid_session_ids: If provided, only check sessions in this set.
                 Sessions not in this set are considered "archived" (JSONL deleted)
                 and are skipped to avoid perpetual staleness.
+            show_stats: Current show_stats render flag (forwarded to is_html_stale).
+            skip_combined: Current skip_combined render flag (forwarded to is_html_stale).
 
         Returns:
             List of (session_id, reason) tuples for sessions needing regeneration
@@ -1006,7 +1034,9 @@ class CacheManager:
 
                 html_path = f"session-{session_id}.html"
 
-                is_stale, reason = self.is_html_stale(html_path, session_id)
+                is_stale, reason = self.is_html_stale(
+                    html_path, session_id, show_stats, skip_combined
+                )
                 if is_stale:
                     stale_sessions.append((session_id, reason))
 
@@ -1188,6 +1218,7 @@ class CacheManager:
             total_cache_read_tokens=page_row["total_cache_read_tokens"] or 0,
             generated_at=page_row["generated_at"],
             library_version=page_row["library_version"],
+            show_stats=bool(page_row["show_stats"]),
         )
 
     def get_all_pages(self) -> List[PageCacheData]:
@@ -1235,6 +1266,7 @@ class CacheManager:
                         or 0,
                         generated_at=page_row["generated_at"],
                         library_version=page_row["library_version"],
+                        show_stats=bool(page_row["show_stats"]),
                     )
                 )
 
@@ -1253,6 +1285,7 @@ class CacheManager:
         total_output_tokens: int,
         total_cache_creation_tokens: int,
         total_cache_read_tokens: int,
+        show_stats: bool = False,
     ) -> None:
         """Update or insert page cache entry."""
         if self._project_id is None or not session_ids:
@@ -1266,8 +1299,8 @@ class CacheManager:
                     first_session_id, last_session_id, first_timestamp, last_timestamp,
                     total_input_tokens, total_output_tokens,
                     total_cache_creation_tokens, total_cache_read_tokens,
-                    generated_at, library_version)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    generated_at, library_version, show_stats)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(project_id, page_number)
                    DO UPDATE SET
                        html_path = excluded.html_path,
@@ -1282,7 +1315,8 @@ class CacheManager:
                        total_cache_creation_tokens = excluded.total_cache_creation_tokens,
                        total_cache_read_tokens = excluded.total_cache_read_tokens,
                        generated_at = excluded.generated_at,
-                       library_version = excluded.library_version""",
+                       library_version = excluded.library_version,
+                       show_stats = excluded.show_stats""",
                 (
                     self._project_id,
                     page_number,
@@ -1299,6 +1333,7 @@ class CacheManager:
                     total_cache_read_tokens,
                     datetime.now().isoformat(),
                     self.library_version,
+                    int(show_stats),
                 ),
             )
 
@@ -1324,13 +1359,17 @@ class CacheManager:
             conn.commit()
 
     def is_page_stale(
-        self, page_number: int, page_size_config: int
+        self,
+        page_number: int,
+        page_size_config: int,
+        show_stats: bool = False,
     ) -> tuple[bool, str]:
         """Check if a page needs regeneration.
 
         Args:
             page_number: The page number to check
             page_size_config: The current page size configuration
+            show_stats: Whether token stats should be displayed
 
         Returns:
             Tuple of (is_stale: bool, reason: str)
@@ -1347,6 +1386,10 @@ class CacheManager:
         # Check if page size config changed
         if page_data.page_size_config != page_size_config:
             return True, "page_size_changed"
+
+        # Check if show_stats flag changed
+        if page_data.show_stats != show_stats:
+            return True, "show_stats_changed"
 
         # Check library version
         if page_data.library_version != self.library_version:

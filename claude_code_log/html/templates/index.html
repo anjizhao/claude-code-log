@@ -38,7 +38,7 @@
         <div class='stat'>📁 {{ summary.total_projects }} projects</div>
         <div class='stat'>📋 {{ summary.total_jsonl }} transcript files</div>
         <div class='stat'>💬 {{ summary.total_messages }} messages</div>
-        {% if summary.token_summary %}
+        {% if show_stats and summary.token_summary %}
         <div class='stat'>🪙 {{ summary.token_summary }}</div>
         {% endif %}
         {% if summary.formatted_time_range %}
@@ -65,7 +65,7 @@
                 {% else %}
                 <div class='stat'>🕒 {{ project.formatted_date }}</div>
                 {% endif %}
-                {% if project.token_summary %}
+                {% if show_stats and project.token_summary %}
                 <div class='stat'>🪙 {{ project.token_summary }}</div>
                 {% endif %}
             </div>
@@ -74,7 +74,7 @@
             <div class='project-sessions'>
                 <details>
                     <summary>Sessions ({{ project.sessions|length }})</summary>
-                    {{ render_session_nav(project.sessions, "expandable", project.name + "/") }}
+                    {{ render_session_nav(project.sessions, "expandable", project.name + "/", show_stats) }}
                 </details>
             </div>
             {% endif %}

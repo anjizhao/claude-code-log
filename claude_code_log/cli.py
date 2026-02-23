@@ -512,6 +512,12 @@ def _clear_output_files(input_path: Path, all_projects: bool, file_ext: str) -> 
     help="Maximum messages per page for combined transcript (default: 2000). Sessions are never split across pages.",
 )
 @click.option(
+    "--show-stats",
+    is_flag=True,
+    default=False,
+    help="Show token usage statistics in generated output (hidden by default)",
+)
+@click.option(
     "--debug",
     is_flag=True,
     default=False,
@@ -533,6 +539,7 @@ def main(
     projects_dir: Optional[Path],
     output_format: str,
     image_export_mode: Optional[str],
+    show_stats: bool,
     page_size: int,
     debug: bool,
 ) -> None:
@@ -692,6 +699,7 @@ def main(
                 image_export_mode,
                 page_size=page_size,
                 skip_combined=skip_combined,
+                show_stats=show_stats,
             )
 
             # Count processed projects
@@ -745,6 +753,7 @@ def main(
             image_export_mode=image_export_mode,
             page_size=page_size,
             skip_combined=skip_combined,
+            show_stats=show_stats,
         )
         if input_path.is_file():
             click.echo(f"Successfully converted {input_path} to {output_path}")
