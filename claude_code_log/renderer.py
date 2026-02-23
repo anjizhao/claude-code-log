@@ -2240,6 +2240,7 @@ class Renderer:
         title: Optional[str] = None,
         combined_transcript_link: Optional[str] = None,
         output_dir: Optional[Path] = None,
+        show_stats: bool = False,
     ) -> Optional[str]:
         """Generate output from transcript messages.
 
@@ -2261,6 +2262,7 @@ class Renderer:
         cache_manager: Optional["CacheManager"] = None,
         output_dir: Optional[Path] = None,
         skip_combined: bool = False,
+        show_stats: bool = False,
     ) -> Optional[str]:
         """Generate output for a single session.
 
@@ -2280,6 +2282,7 @@ class Renderer:
         project_summaries: list[dict[str, Any]],
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        show_stats: bool = False,
     ) -> Optional[str]:
         """Generate a projects index page.
 

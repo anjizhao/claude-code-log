@@ -867,6 +867,7 @@ class MarkdownRenderer(Renderer):
         title: Optional[str] = None,
         combined_transcript_link: Optional[str] = None,
         output_dir: Optional[Path] = None,
+        show_stats: bool = False,
     ) -> str:
         """Generate Markdown from transcript messages."""
         self._output_dir = output_dir
@@ -906,6 +907,7 @@ class MarkdownRenderer(Renderer):
         cache_manager: Optional["CacheManager"] = None,
         output_dir: Optional[Path] = None,
         skip_combined: bool = False,
+        show_stats: bool = False,
     ) -> str:
         """Generate Markdown for a single session."""
         session_messages = [msg for msg in messages if msg.sessionId == session_id]
@@ -922,6 +924,7 @@ class MarkdownRenderer(Renderer):
         project_summaries: list[dict[str, Any]],
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        show_stats: bool = False,
     ) -> str:
         """Generate a Markdown projects index page."""
         title = title_for_projects_index(project_summaries, from_date, to_date)

@@ -518,6 +518,7 @@ class HtmlRenderer(Renderer):
         output_dir: Optional[Path] = None,
         page_info: Optional[dict[str, Any]] = None,
         page_stats: Optional[dict[str, Any]] = None,
+        show_stats: bool = False,
     ) -> str:
         """Generate HTML from transcript messages.
 
@@ -567,6 +568,7 @@ class HtmlRenderer(Renderer):
                     is_session_header=is_session_header,
                     page_info=page_info,
                     page_stats=page_stats,
+                    show_stats=show_stats,
                 )
             )
 
@@ -580,6 +582,7 @@ class HtmlRenderer(Renderer):
         cache_manager: Optional["CacheManager"] = None,
         output_dir: Optional[Path] = None,
         skip_combined: bool = False,
+        show_stats: bool = False,
     ) -> str:
         """Generate HTML for a single session."""
         # Filter messages for this session (SummaryTranscriptEntry.sessionId is always None)
@@ -603,6 +606,7 @@ class HtmlRenderer(Renderer):
             title or f"Session {session_id[:8]}",
             combined_transcript_link=combined_link,
             output_dir=output_dir,
+            show_stats=show_stats,
         )
 
     def generate_projects_index(
@@ -610,6 +614,7 @@ class HtmlRenderer(Renderer):
         project_summaries: list[dict[str, Any]],
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        show_stats: bool = False,
     ) -> str:
         """Generate an HTML projects index page."""
         title = title_for_projects_index(project_summaries, from_date, to_date)
@@ -623,12 +628,14 @@ class HtmlRenderer(Renderer):
                 projects=template_projects,
                 summary=template_summary,
                 library_version=get_library_version(),
+                show_stats=show_stats,
             )
         )
 
     def generate_project_sessions_index(
         self,
         project_data: dict[str, Any],
+        show_stats: bool = False,
     ) -> str:
         """Generate a lightweight project-level session index page."""
         from ..renderer import TemplateProject
@@ -647,6 +654,7 @@ class HtmlRenderer(Renderer):
                 latest_timestamp=project.latest_timestamp,
                 token_summary=project.token_summary,
                 library_version=get_library_version(),
+                show_stats=show_stats,
             )
         )
 
@@ -673,6 +681,7 @@ def generate_html(
     combined_transcript_link: Optional[str] = None,
     page_info: Optional[dict[str, Any]] = None,
     page_stats: Optional[dict[str, Any]] = None,
+    show_stats: bool = False,
 ) -> str:
     """Generate HTML from transcript messages using Jinja2 templates.
 
@@ -684,6 +693,7 @@ def generate_html(
         combined_transcript_link: Optional link to combined transcript.
         page_info: Optional pagination info (page_number, prev_link, next_link).
         page_stats: Optional page statistics (message_count, date_range, token_summary).
+        show_stats: Whether to display token usage statistics.
     """
     return HtmlRenderer().generate(
         messages,
@@ -691,6 +701,7 @@ def generate_html(
         combined_transcript_link,
         page_info=page_info,
         page_stats=page_stats,
+        show_stats=show_stats,
     )
 
 
@@ -708,19 +719,25 @@ def generate_projects_index_html(
     project_summaries: list[dict[str, Any]],
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    show_stats: bool = False,
 ) -> str:
     """Generate an index HTML page listing all projects using Jinja2 templates.
 
     This is a convenience function that delegates to HtmlRenderer.generate_projects_index.
     """
-    return HtmlRenderer().generate_projects_index(project_summaries, from_date, to_date)
+    return HtmlRenderer().generate_projects_index(
+        project_summaries, from_date, to_date, show_stats=show_stats
+    )
 
 
 def generate_project_sessions_index_html(
     project_data: dict[str, Any],
+    show_stats: bool = False,
 ) -> str:
     """Generate a project-level session index page.
 
     This is a convenience function that delegates to HtmlRenderer.generate_project_sessions_index.
     """
-    return HtmlRenderer().generate_project_sessions_index(project_data)
+    return HtmlRenderer().generate_project_sessions_index(
+        project_data, show_stats=show_stats
+    )

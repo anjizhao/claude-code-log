@@ -748,6 +748,7 @@ def _generate_paginated_html(
     session_data: Dict[str, SessionCacheData],
     working_directories: List[str],
     silent: bool = False,
+    show_stats: bool = False,
 ) -> Path:
     """Generate paginated HTML files for combined transcript.
 
@@ -814,7 +815,9 @@ def _generate_paginated_html(
         page_file = output_dir / html_path
 
         # Check if page is stale
-        is_stale, reason = cache_manager.is_page_stale(page_num, page_size)
+        is_stale, reason = cache_manager.is_page_stale(
+            page_num, page_size, show_stats=show_stats
+        )
 
         if not is_stale and page_file.exists():
             if not silent:
@@ -906,6 +909,7 @@ def _generate_paginated_html(
             page_title,
             page_info=page_info,
             page_stats=page_stats,
+            show_stats=show_stats,
         )
         page_file.write_text(html_content, encoding="utf-8")
 
@@ -922,6 +926,7 @@ def _generate_paginated_html(
             total_output_tokens=total_output_tokens,
             total_cache_creation_tokens=total_cache_creation_tokens,
             total_cache_read_tokens=total_cache_read_tokens,
+            show_stats=show_stats,
         )
 
     return first_page_path
@@ -966,6 +971,7 @@ def convert_jsonl_to(
     image_export_mode: Optional[str] = None,
     page_size: int = 2000,
     skip_combined: bool = False,
+    show_stats: bool = False,
 ) -> Path:
     """Convert JSONL transcript(s) to the specified format.
 
@@ -1030,10 +1036,19 @@ def convert_jsonl_to(
         ):
             if skip_combined:
                 # When skipping combined, check project index + session staleness
-                project_index_stale = (
-                    is_html_outdated(output_path) or not output_path.exists()
+                # Use cache staleness check (tracks show_stats/skip_combined flags)
+                # in addition to file-level version check
+                index_cache_stale, _ = cache_manager.is_html_stale(
+                    output_path.name, None, show_stats, skip_combined
                 )
-                stale_sessions = cache_manager.get_stale_sessions()
+                project_index_stale = (
+                    index_cache_stale
+                    or is_html_outdated(output_path)
+                    or not output_path.exists()
+                )
+                stale_sessions = cache_manager.get_stale_sessions(
+                    show_stats=show_stats, skip_combined=skip_combined
+                )
                 if not project_index_stale and (
                     not stale_sessions or not generate_individual_sessions
                 ):
@@ -1045,10 +1060,14 @@ def convert_jsonl_to(
                     return output_path
             else:
                 # Check if combined HTML is stale
-                combined_stale, _ = cache_manager.is_html_stale(output_path.name, None)
+                combined_stale, _ = cache_manager.is_html_stale(
+                    output_path.name, None, show_stats, skip_combined
+                )
                 if not combined_stale and not is_html_outdated(output_path):
                     # Check if any session HTML is stale
-                    stale_sessions = cache_manager.get_stale_sessions()
+                    stale_sessions = cache_manager.get_stale_sessions(
+                        show_stats=show_stats, skip_combined=skip_combined
+                    )
                     if not stale_sessions or not generate_individual_sessions:
                         # Nothing needs regeneration - skip loading
                         if not silent:
@@ -1097,19 +1116,46 @@ def convert_jsonl_to(
 
     if skip_combined and input_path.is_dir():
         # Generate lightweight project session index instead of combined transcript
-        should_regenerate = (
-            renderer.is_outdated(output_path)
-            or not output_path.exists()
-            or cache_was_updated
-        )
+        if cache_manager is not None:
+            is_stale, _reason = cache_manager.is_html_stale(
+                output_path.name,
+                None,
+                show_stats=show_stats,
+                skip_combined=skip_combined,
+            )
+            should_regenerate = (
+                is_stale
+                or renderer.is_outdated(output_path)
+                or not output_path.exists()
+                or cache_was_updated
+            )
+        else:
+            # Fallback without cache: can't track render flag changes
+            should_regenerate = (
+                renderer.is_outdated(output_path)
+                or not output_path.exists()
+                or cache_was_updated
+            )
         if should_regenerate:
             project_data = _build_project_summary_from_cache(
                 input_path, cache_manager, working_directories
             )
             from .html.renderer import generate_project_sessions_index_html
 
-            content = generate_project_sessions_index_html(project_data)
+            content = generate_project_sessions_index_html(
+                project_data, show_stats=show_stats
+            )
             output_path.write_text(content, encoding="utf-8")
+
+            # Update html_cache for project index (HTML only)
+            if format == "html" and cache_manager is not None:
+                cache_manager.update_html_cache(
+                    output_path.name,
+                    None,
+                    total_message_count,
+                    show_stats=show_stats,
+                    skip_combined=skip_combined,
+                )
         elif not silent:
             print(f"Project index {output_path.name} is current, skipping regeneration")
     else:
@@ -1154,12 +1200,17 @@ def convert_jsonl_to(
                 session_data,
                 working_directories,
                 silent=silent,
+                show_stats=show_stats,
             )
         else:
             # Use single-file generation for small projects or filtered views
             # Use incremental regeneration via html_cache when available
             if cache_manager is not None and input_path.is_dir():
-                is_stale, _reason = cache_manager.is_html_stale(output_path.name, None)
+                is_stale, _reason = cache_manager.is_html_stale(
+                    output_path.name,
+                    None,
+                    show_stats=show_stats,
+                )
                 should_regenerate = (
                     is_stale
                     or renderer.is_outdated(output_path)
@@ -1169,6 +1220,8 @@ def convert_jsonl_to(
                 )
             else:
                 # Fallback: old logic for single file mode or no cache
+                # Note: without cache, render flag changes (show_stats, skip_combined)
+                # cannot be tracked. Use cache (default) for reliable flag tracking.
                 should_regenerate = (
                     renderer.is_outdated(output_path)
                     or from_date is not None
@@ -1180,14 +1233,19 @@ def convert_jsonl_to(
             if should_regenerate:
                 # For referenced images, pass the output directory
                 output_dir = output_path.parent
-                content = renderer.generate(messages, title, output_dir=output_dir)
+                content = renderer.generate(
+                    messages, title, output_dir=output_dir, show_stats=show_stats
+                )
                 assert content is not None
                 output_path.write_text(content, encoding="utf-8")
 
                 # Update html_cache for combined transcript (HTML only)
                 if format == "html" and cache_manager is not None:
                     cache_manager.update_html_cache(
-                        output_path.name, None, total_message_count
+                        output_path.name,
+                        None,
+                        total_message_count,
+                        show_stats=show_stats,
                     )
             elif not silent:
                 print(
@@ -1207,6 +1265,7 @@ def convert_jsonl_to(
             image_export_mode,
             silent=silent,
             skip_combined=skip_combined,
+            show_stats=show_stats,
         )
 
     return output_path
@@ -1584,6 +1643,7 @@ def _generate_individual_session_files(
     image_export_mode: Optional[str] = None,
     silent: bool = False,
     skip_combined: bool = False,
+    show_stats: bool = False,
 ) -> int:
     """Generate individual files for each session in the specified format.
 
@@ -1662,7 +1722,10 @@ def _generate_individual_session_files(
         # Use incremental regeneration: check per-session staleness via html_cache
         if cache_manager is not None and format == "html":
             is_stale, _reason = cache_manager.is_html_stale(
-                session_file_name, session_id
+                session_file_name,
+                session_id,
+                show_stats=show_stats,
+                skip_combined=skip_combined,
             )
             should_regenerate_session = (
                 is_stale
@@ -1673,6 +1736,8 @@ def _generate_individual_session_files(
             )
         else:
             # Fallback without cache or non-HTML formats
+            # Note: without cache, render flag changes (show_stats, skip_combined)
+            # cannot be tracked. Use cache (default) for reliable flag tracking.
             should_regenerate_session = (
                 renderer.is_outdated(session_file_path)
                 or from_date is not None
@@ -1690,6 +1755,7 @@ def _generate_individual_session_files(
                 cache_manager,
                 output_dir,
                 skip_combined=skip_combined,
+                show_stats=show_stats,
             )
             assert session_content is not None
             # Write session file
@@ -1711,7 +1777,11 @@ def _generate_individual_session_files(
                         and getattr(m, "sessionId") == session_id
                     )
                 cache_manager.update_html_cache(
-                    session_file_name, session_id, session_message_count
+                    session_file_name,
+                    session_id,
+                    session_message_count,
+                    show_stats=show_stats,
+                    skip_combined=skip_combined,
                 )
         elif not silent:
             print(
@@ -1775,6 +1845,7 @@ def process_projects_hierarchy(
     silent: bool = True,
     page_size: int = 2000,
     skip_combined: bool = False,
+    show_stats: bool = False,
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked output files.
 
@@ -1860,7 +1931,11 @@ def process_projects_hierarchy(
             )
             # Pass valid_session_ids to skip archived sessions (JSONL deleted)
             stale_sessions = (
-                cache_manager.get_stale_sessions(valid_session_ids)
+                cache_manager.get_stale_sessions(
+                    valid_session_ids,
+                    show_stats=show_stats,
+                    skip_combined=skip_combined,
+                )
                 if cache_manager
                 else []
             )
@@ -1879,18 +1954,30 @@ def process_projects_hierarchy(
             # - Paginated projects store data in html_pages table (via save_page_cache)
             # - Non-paginated projects store data in html_cache table (via update_html_cache)
             if skip_combined:
-                combined_stale = (
-                    is_html_outdated(output_path) or not output_path.exists()
-                )
+                if cache_manager is not None:
+                    combined_stale = cache_manager.is_html_stale(
+                        output_path.name,
+                        None,
+                        show_stats=show_stats,
+                        skip_combined=skip_combined,
+                    )[0]
+                else:
+                    combined_stale = (
+                        is_html_outdated(output_path) or not output_path.exists()
+                    )
             elif cache_manager is not None:
                 existing_page_count = cache_manager.get_page_count()
                 if existing_page_count > 0:
                     # Paginated project: check page 1 staleness
-                    combined_stale = cache_manager.is_page_stale(1, page_size)[0]
+                    combined_stale = cache_manager.is_page_stale(
+                        1, page_size, show_stats=show_stats
+                    )[0]
                 else:
                     # Non-paginated project: check html_cache
                     combined_stale = cache_manager.is_html_stale(
-                        output_path.name, None
+                        output_path.name,
+                        None,
+                        show_stats=show_stats,
                     )[0]
             else:
                 combined_stale = True
@@ -1926,6 +2013,8 @@ def process_projects_hierarchy(
                 if modified_files:
                     any_cache_updated = True
                     projects_with_updates += 1
+                elif combined_stale or stale_sessions:
+                    any_cache_updated = True
 
                 # Generate output for this project (handles cache updates internally)
                 output_path = convert_jsonl_to(
@@ -1940,6 +2029,7 @@ def process_projects_hierarchy(
                     image_export_mode=image_export_mode,
                     page_size=page_size,
                     skip_combined=skip_combined,
+                    show_stats=show_stats,
                 )
 
                 # Track timing
@@ -2192,7 +2282,7 @@ def process_projects_hierarchy(
     index_regenerated = False
     if renderer.is_outdated(index_path) or from_date or to_date or any_cache_updated:
         index_content = renderer.generate_projects_index(
-            project_summaries, from_date, to_date
+            project_summaries, from_date, to_date, show_stats=show_stats
         )
         assert index_content is not None
         index_path.write_text(index_content, encoding="utf-8")

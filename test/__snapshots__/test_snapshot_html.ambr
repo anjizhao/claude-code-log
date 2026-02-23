@@ -915,43 +915,67 @@
           searchState.searchIndex = [];
           
           if (searchState.isIndexPage) {
-              // Index page: index projects with individual sessions
-              document.querySelectorAll('.project-card').forEach(card => {
-                  const projectName = card.querySelector('.project-name a')?.textContent || '';
-                  const projectStats = card.querySelector('.project-stats')?.textContent || '';
-                  const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
-                  
-                  // Index the project itself
-                  searchState.searchIndex.push({
-                      type: 'project',
-                      name: projectName,
-                      stats: projectStats,
-                      element: card,
-                      link: projectLink,
-                      searchText: `${projectName} ${projectStats}`,
-                      originalText: `${projectName} ${projectStats}`
+              const projectCards = document.querySelectorAll('.project-card');
+              if (projectCards.length > 0) {
+                  // Main index page: index projects with individual sessions
+                  projectCards.forEach(card => {
+                      const projectName = card.querySelector('.project-name a')?.textContent || '';
+                      const projectStats = card.querySelector('.project-stats')?.textContent || '';
+                      const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
+  
+                      // Index the project itself
+                      searchState.searchIndex.push({
+                          type: 'project',
+                          name: projectName,
+                          stats: projectStats,
+                          element: card,
+                          link: projectLink,
+                          searchText: `${projectName} ${projectStats}`,
+                          originalText: `${projectName} ${projectStats}`
+                      });
+  
+                      // Index individual sessions within the project
+                      card.querySelectorAll('.session-link').forEach(link => {
+                          const sessionText = link.textContent || '';
+                          const sessionHref = link.getAttribute('href') || '';
+                          const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
+                          const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
+  
+                          searchState.searchIndex.push({
+                              type: 'session',
+                              projectName: projectName,
+                              sessionText: sessionText,
+                              sessionPreview: sessionPreview,
+                              sessionMeta: sessionMeta,
+                              element: card,
+                              link: sessionHref,
+                              searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
+                              originalText: `${sessionText} ${sessionPreview}`
+                          });
+                      });
                   });
-                  
-                  // Index individual sessions within the project
-                  card.querySelectorAll('.session-link').forEach(link => {
+              } else {
+                  // Project sessions page: index session links directly
+                  document.querySelectorAll('.session-link').forEach(link => {
                       const sessionText = link.textContent || '';
                       const sessionHref = link.getAttribute('href') || '';
+                      const sessionTitle = link.querySelector('.session-link-title')?.textContent?.trim() || '';
                       const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
                       const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
-                      
+  
                       searchState.searchIndex.push({
                           type: 'session',
-                          projectName: projectName,
+                          projectName: '',
                           sessionText: sessionText,
                           sessionPreview: sessionPreview,
                           sessionMeta: sessionMeta,
-                          element: card,
+                          element: link,
                           link: sessionHref,
-                          searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
-                          originalText: `${sessionText} ${sessionPreview}`
+                          searchText: `${sessionTitle} ${sessionPreview} ${sessionMeta}`,
+                          originalText: `${sessionTitle} ${sessionPreview}`
                       });
                   });
-              });
+              }
           } else {
               // Transcript page: index messages
               document.querySelectorAll('.message:not(.session-header)').forEach(message => {
@@ -1599,8 +1623,6 @@
           <div class='stat'>📋 8 transcript files</div>
           <div class='stat'>💬 67 messages</div>
           
-          <div class='stat'>🪙 Input: 1000 | Output: 2000 | Cache Creation: 500 | Cache Read: 1500</div>
-          
           
           <div class='stat'>🕒 <span class="timestamp" data-timestamp="2025-01-01T09:00:00Z" data-timestamp-end="2025-01-15T10:00:00Z">2025-01-01 09:00:00 to 2025-01-15 10:00:00</span></div>
           
@@ -1640,8 +1662,6 @@
                   
                   <div class='stat'>🕒 <span class="timestamp" data-timestamp="2025-01-01T09:00:00Z" data-timestamp-end="2025-01-15T10:00:00Z">2025-01-01 09:00:00 to 2025-01-15 10:00:00</span></div>
                   
-                  
-                  <div class='stat'>🪙 Input: 1000 | Output: 2000 | Cache Creation: 500 | Cache Read: 1500</div>
                   
               </div>
   
@@ -6075,43 +6095,67 @@
           searchState.searchIndex = [];
           
           if (searchState.isIndexPage) {
-              // Index page: index projects with individual sessions
-              document.querySelectorAll('.project-card').forEach(card => {
-                  const projectName = card.querySelector('.project-name a')?.textContent || '';
-                  const projectStats = card.querySelector('.project-stats')?.textContent || '';
-                  const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
-                  
-                  // Index the project itself
-                  searchState.searchIndex.push({
-                      type: 'project',
-                      name: projectName,
-                      stats: projectStats,
-                      element: card,
-                      link: projectLink,
-                      searchText: `${projectName} ${projectStats}`,
-                      originalText: `${projectName} ${projectStats}`
+              const projectCards = document.querySelectorAll('.project-card');
+              if (projectCards.length > 0) {
+                  // Main index page: index projects with individual sessions
+                  projectCards.forEach(card => {
+                      const projectName = card.querySelector('.project-name a')?.textContent || '';
+                      const projectStats = card.querySelector('.project-stats')?.textContent || '';
+                      const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
+  
+                      // Index the project itself
+                      searchState.searchIndex.push({
+                          type: 'project',
+                          name: projectName,
+                          stats: projectStats,
+                          element: card,
+                          link: projectLink,
+                          searchText: `${projectName} ${projectStats}`,
+                          originalText: `${projectName} ${projectStats}`
+                      });
+  
+                      // Index individual sessions within the project
+                      card.querySelectorAll('.session-link').forEach(link => {
+                          const sessionText = link.textContent || '';
+                          const sessionHref = link.getAttribute('href') || '';
+                          const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
+                          const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
+  
+                          searchState.searchIndex.push({
+                              type: 'session',
+                              projectName: projectName,
+                              sessionText: sessionText,
+                              sessionPreview: sessionPreview,
+                              sessionMeta: sessionMeta,
+                              element: card,
+                              link: sessionHref,
+                              searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
+                              originalText: `${sessionText} ${sessionPreview}`
+                          });
+                      });
                   });
-                  
-                  // Index individual sessions within the project
-                  card.querySelectorAll('.session-link').forEach(link => {
+              } else {
+                  // Project sessions page: index session links directly
+                  document.querySelectorAll('.session-link').forEach(link => {
                       const sessionText = link.textContent || '';
                       const sessionHref = link.getAttribute('href') || '';
+                      const sessionTitle = link.querySelector('.session-link-title')?.textContent?.trim() || '';
                       const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
                       const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
-                      
+  
                       searchState.searchIndex.push({
                           type: 'session',
-                          projectName: projectName,
+                          projectName: '',
                           sessionText: sessionText,
                           sessionPreview: sessionPreview,
                           sessionMeta: sessionMeta,
-                          element: card,
+                          element: link,
                           link: sessionHref,
-                          searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
-                          originalText: `${sessionText} ${sessionPreview}`
+                          searchText: `${sessionTitle} ${sessionPreview} ${sessionMeta}`,
+                          originalText: `${sessionTitle} ${sessionPreview}`
                       });
                   });
-              });
+              }
           } else {
               // Transcript page: index messages
               document.querySelectorAll('.message:not(.session-header)').forEach(message => {
@@ -11118,43 +11162,67 @@
           searchState.searchIndex = [];
           
           if (searchState.isIndexPage) {
-              // Index page: index projects with individual sessions
-              document.querySelectorAll('.project-card').forEach(card => {
-                  const projectName = card.querySelector('.project-name a')?.textContent || '';
-                  const projectStats = card.querySelector('.project-stats')?.textContent || '';
-                  const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
-                  
-                  // Index the project itself
-                  searchState.searchIndex.push({
-                      type: 'project',
-                      name: projectName,
-                      stats: projectStats,
-                      element: card,
-                      link: projectLink,
-                      searchText: `${projectName} ${projectStats}`,
-                      originalText: `${projectName} ${projectStats}`
+              const projectCards = document.querySelectorAll('.project-card');
+              if (projectCards.length > 0) {
+                  // Main index page: index projects with individual sessions
+                  projectCards.forEach(card => {
+                      const projectName = card.querySelector('.project-name a')?.textContent || '';
+                      const projectStats = card.querySelector('.project-stats')?.textContent || '';
+                      const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
+  
+                      // Index the project itself
+                      searchState.searchIndex.push({
+                          type: 'project',
+                          name: projectName,
+                          stats: projectStats,
+                          element: card,
+                          link: projectLink,
+                          searchText: `${projectName} ${projectStats}`,
+                          originalText: `${projectName} ${projectStats}`
+                      });
+  
+                      // Index individual sessions within the project
+                      card.querySelectorAll('.session-link').forEach(link => {
+                          const sessionText = link.textContent || '';
+                          const sessionHref = link.getAttribute('href') || '';
+                          const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
+                          const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
+  
+                          searchState.searchIndex.push({
+                              type: 'session',
+                              projectName: projectName,
+                              sessionText: sessionText,
+                              sessionPreview: sessionPreview,
+                              sessionMeta: sessionMeta,
+                              element: card,
+                              link: sessionHref,
+                              searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
+                              originalText: `${sessionText} ${sessionPreview}`
+                          });
+                      });
                   });
-                  
-                  // Index individual sessions within the project
-                  card.querySelectorAll('.session-link').forEach(link => {
+              } else {
+                  // Project sessions page: index session links directly
+                  document.querySelectorAll('.session-link').forEach(link => {
                       const sessionText = link.textContent || '';
                       const sessionHref = link.getAttribute('href') || '';
+                      const sessionTitle = link.querySelector('.session-link-title')?.textContent?.trim() || '';
                       const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
                       const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
-                      
+  
                       searchState.searchIndex.push({
                           type: 'session',
-                          projectName: projectName,
+                          projectName: '',
                           sessionText: sessionText,
                           sessionPreview: sessionPreview,
                           sessionMeta: sessionMeta,
-                          element: card,
+                          element: link,
                           link: sessionHref,
-                          searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
-                          originalText: `${sessionText} ${sessionPreview}`
+                          searchText: `${sessionTitle} ${sessionPreview} ${sessionMeta}`,
+                          originalText: `${sessionTitle} ${sessionPreview}`
                       });
                   });
-              });
+              }
           } else {
               // Transcript page: index messages
               document.querySelectorAll('.message:not(.session-header)').forEach(message => {
@@ -14969,8 +15037,6 @@
               <div class='session-link-meta'>
                   <span class="timestamp" data-timestamp="2025-07-03T15:50:07.874717Z" data-timestamp-end="2025-07-03T15:54:07.874717Z">2025-07-03 15:50:07 - 2025-07-03 15:54:07</span> • 3 messages
                   
-                  <br>Token usage – Input: 20 | Output: 35
-                  
               </div>
               
               <pre class='session-preview'>This is from a different session file to test multi-session handling.</pre>
@@ -14987,8 +15053,6 @@
               </div>
               <div class='session-link-meta'>
                   <span class="timestamp" data-timestamp="2025-07-03T15:50:07.874907Z" data-timestamp-end="2025-07-03T16:10:07.874907Z">2025-07-03 15:50:07 - 2025-07-03 16:10:07</span> • 11 messages
-                  
-                  <br>Token usage – Input: 218 | Output: 445
                   
               </div>
               
@@ -16206,43 +16270,67 @@
           searchState.searchIndex = [];
           
           if (searchState.isIndexPage) {
-              // Index page: index projects with individual sessions
-              document.querySelectorAll('.project-card').forEach(card => {
-                  const projectName = card.querySelector('.project-name a')?.textContent || '';
-                  const projectStats = card.querySelector('.project-stats')?.textContent || '';
-                  const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
-                  
-                  // Index the project itself
-                  searchState.searchIndex.push({
-                      type: 'project',
-                      name: projectName,
-                      stats: projectStats,
-                      element: card,
-                      link: projectLink,
-                      searchText: `${projectName} ${projectStats}`,
-                      originalText: `${projectName} ${projectStats}`
+              const projectCards = document.querySelectorAll('.project-card');
+              if (projectCards.length > 0) {
+                  // Main index page: index projects with individual sessions
+                  projectCards.forEach(card => {
+                      const projectName = card.querySelector('.project-name a')?.textContent || '';
+                      const projectStats = card.querySelector('.project-stats')?.textContent || '';
+                      const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
+  
+                      // Index the project itself
+                      searchState.searchIndex.push({
+                          type: 'project',
+                          name: projectName,
+                          stats: projectStats,
+                          element: card,
+                          link: projectLink,
+                          searchText: `${projectName} ${projectStats}`,
+                          originalText: `${projectName} ${projectStats}`
+                      });
+  
+                      // Index individual sessions within the project
+                      card.querySelectorAll('.session-link').forEach(link => {
+                          const sessionText = link.textContent || '';
+                          const sessionHref = link.getAttribute('href') || '';
+                          const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
+                          const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
+  
+                          searchState.searchIndex.push({
+                              type: 'session',
+                              projectName: projectName,
+                              sessionText: sessionText,
+                              sessionPreview: sessionPreview,
+                              sessionMeta: sessionMeta,
+                              element: card,
+                              link: sessionHref,
+                              searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
+                              originalText: `${sessionText} ${sessionPreview}`
+                          });
+                      });
                   });
-                  
-                  // Index individual sessions within the project
-                  card.querySelectorAll('.session-link').forEach(link => {
+              } else {
+                  // Project sessions page: index session links directly
+                  document.querySelectorAll('.session-link').forEach(link => {
                       const sessionText = link.textContent || '';
                       const sessionHref = link.getAttribute('href') || '';
+                      const sessionTitle = link.querySelector('.session-link-title')?.textContent?.trim() || '';
                       const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
                       const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
-                      
+  
                       searchState.searchIndex.push({
                           type: 'session',
-                          projectName: projectName,
+                          projectName: '',
                           sessionText: sessionText,
                           sessionPreview: sessionPreview,
                           sessionMeta: sessionMeta,
-                          element: card,
+                          element: link,
                           link: sessionHref,
-                          searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
-                          originalText: `${sessionText} ${sessionPreview}`
+                          searchText: `${sessionTitle} ${sessionPreview} ${sessionMeta}`,
+                          originalText: `${sessionTitle} ${sessionPreview}`
                       });
                   });
-              });
+              }
           } else {
               // Transcript page: index messages
               document.querySelectorAll('.message:not(.session-header)').forEach(message => {
@@ -21153,43 +21241,67 @@
           searchState.searchIndex = [];
           
           if (searchState.isIndexPage) {
-              // Index page: index projects with individual sessions
-              document.querySelectorAll('.project-card').forEach(card => {
-                  const projectName = card.querySelector('.project-name a')?.textContent || '';
-                  const projectStats = card.querySelector('.project-stats')?.textContent || '';
-                  const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
-                  
-                  // Index the project itself
-                  searchState.searchIndex.push({
-                      type: 'project',
-                      name: projectName,
-                      stats: projectStats,
-                      element: card,
-                      link: projectLink,
-                      searchText: `${projectName} ${projectStats}`,
-                      originalText: `${projectName} ${projectStats}`
+              const projectCards = document.querySelectorAll('.project-card');
+              if (projectCards.length > 0) {
+                  // Main index page: index projects with individual sessions
+                  projectCards.forEach(card => {
+                      const projectName = card.querySelector('.project-name a')?.textContent || '';
+                      const projectStats = card.querySelector('.project-stats')?.textContent || '';
+                      const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
+  
+                      // Index the project itself
+                      searchState.searchIndex.push({
+                          type: 'project',
+                          name: projectName,
+                          stats: projectStats,
+                          element: card,
+                          link: projectLink,
+                          searchText: `${projectName} ${projectStats}`,
+                          originalText: `${projectName} ${projectStats}`
+                      });
+  
+                      // Index individual sessions within the project
+                      card.querySelectorAll('.session-link').forEach(link => {
+                          const sessionText = link.textContent || '';
+                          const sessionHref = link.getAttribute('href') || '';
+                          const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
+                          const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
+  
+                          searchState.searchIndex.push({
+                              type: 'session',
+                              projectName: projectName,
+                              sessionText: sessionText,
+                              sessionPreview: sessionPreview,
+                              sessionMeta: sessionMeta,
+                              element: card,
+                              link: sessionHref,
+                              searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
+                              originalText: `${sessionText} ${sessionPreview}`
+                          });
+                      });
                   });
-                  
-                  // Index individual sessions within the project
-                  card.querySelectorAll('.session-link').forEach(link => {
+              } else {
+                  // Project sessions page: index session links directly
+                  document.querySelectorAll('.session-link').forEach(link => {
                       const sessionText = link.textContent || '';
                       const sessionHref = link.getAttribute('href') || '';
+                      const sessionTitle = link.querySelector('.session-link-title')?.textContent?.trim() || '';
                       const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
                       const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
-                      
+  
                       searchState.searchIndex.push({
                           type: 'session',
-                          projectName: projectName,
+                          projectName: '',
                           sessionText: sessionText,
                           sessionPreview: sessionPreview,
                           sessionMeta: sessionMeta,
-                          element: card,
+                          element: link,
                           link: sessionHref,
-                          searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
-                          originalText: `${sessionText} ${sessionPreview}`
+                          searchText: `${sessionTitle} ${sessionPreview} ${sessionMeta}`,
+                          originalText: `${sessionTitle} ${sessionPreview}`
                       });
                   });
-              });
+              }
           } else {
               // Transcript page: index messages
               document.querySelectorAll('.message:not(.session-header)').forEach(message => {
