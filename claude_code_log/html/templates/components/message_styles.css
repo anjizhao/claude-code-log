@@ -5,10 +5,6 @@
     border-radius: 8px;
     border-left: var(--white-dimmed) 2px solid;
     background-color: var(--highlight-light);
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
     position: relative;
 }
 
@@ -245,7 +241,7 @@
 }
 
 .pair-duration {
-    font-size: 80%;
+    font-size: 0.8em;
     color: var(--text-muted);
     font-style: italic;
 }
@@ -330,14 +326,14 @@
 
 .system-info .header,
 .system-info .content {
-    font-size: 80%;
+    font-size: 0.8em;
 }
 
 /* Hook summary styling */
 .system-hook {
     border-left-color: var(--warning-dimmed);
     background-color: var(--highlight-dimmed);
-    font-size: 90%;
+    font-size: 0.9em;
 }
 
 .hook-summary {
@@ -454,7 +450,7 @@
     border-radius: 4px;
     margin: 4px 0;
     font-family: var(--font-monospace);
-    font-size: 80%;
+    font-size: 0.8em;
     line-height: 1.3;
     white-space: pre;
     overflow-x: auto;
@@ -517,7 +513,7 @@
 }
 
 .message.tool_use pre, .message.tool_result pre {
-    font-size: 80%;
+    font-size: 0.8em;
 }
 
 /* Sidechain message styling */
@@ -553,11 +549,6 @@
     border-radius: 8px;
     padding: 16px;
     margin: 30px 0 20px 0;
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-left: var(--white-dimmed) 1px solid;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
 }
 
 .session-header .header {
@@ -578,7 +569,7 @@
     padding: 8px 12px;
     margin: 8px 0;
     border-radius: 4px;
-    font-size: 80%;
+    font-size: 0.8em;
     font-style: italic;
 }
 
@@ -659,18 +650,13 @@ pre > code {
     padding: 8px;
     margin: 8px 0;
     overflow-x: auto;
-    box-shadow: -4px -4px 10px #eeeeee33, 4px 4px 10px #00000007;
-    border-left: var(--white-dimmed) 1px solid;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
 }
 
 /* Tool parameter table styling */
 .tool-params-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 80%;
+    font-size: 0.8em;
 }
 
 .tool-params-table tr {
@@ -737,7 +723,7 @@ pre > code {
 
 .thinking-content {
     font-style: italic;
-    font-size: 80%;
+    font-size: 0.8em;
 }
 
 .thinking-content em {
@@ -746,7 +732,7 @@ pre > code {
 
 .thinking-text {
     font-family: var(--font-ui);
-    font-size: 90%;
+    font-size: 0.9em;
     word-wrap: break-word;
     color: #555;
 }
@@ -757,11 +743,6 @@ pre > code {
     padding: 6px;
     margin: 4px 0;
     font-size: 0.9em;
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-left: var(--white-dimmed) 1px solid;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
 }
 
 /* Session summary styling */
@@ -772,10 +753,6 @@ pre > code {
     margin: 8px 0;
     border-radius: 0 4px 4px 0;
     font-style: italic;
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
 }
 
 /* Collapsible details styling */
@@ -851,7 +828,6 @@ details summary {
     padding: 0;
     margin: 0;
     color: #555;
-    line-height: 1.3;
     white-space: pre-wrap;
     word-wrap: break-word;
 }

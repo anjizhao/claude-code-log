@@ -23,7 +23,7 @@
     border-radius: 4px;
     overflow-x: auto;
     font-family: var(--font-monospace);
-    font-size: 80%;
+    font-size: 0.8em;
     line-height: 2ex;
 }
 
