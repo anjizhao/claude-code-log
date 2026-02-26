@@ -2088,7 +2088,8 @@ def process_projects_hierarchy(
                             "sessions": [
                                 {
                                     "id": session_data.session_id,
-                                    "summary": session_data.summary,
+                                    "summary": session_data.custom_title
+                                    or session_data.summary,
                                     "timestamp_range": format_timestamp_range(
                                         session_data.first_timestamp,
                                         session_data.last_timestamp,
@@ -2251,7 +2252,8 @@ def process_projects_hierarchy(
                     "sessions": [
                         {
                             "id": session_data.session_id,
-                            "summary": session_data.summary,
+                            "summary": session_data.custom_title
+                            or session_data.summary,
                             "timestamp_range": format_timestamp_range(
                                 session_data.first_timestamp,
                                 session_data.last_timestamp,
