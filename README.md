@@ -25,6 +25,14 @@ uv sync
 uv run claude-code-log
 ```
 
+### Running from a local clone
+
+If you have a local clone, you can run it from anywhere without installing:
+
+```bash
+uv run --directory /path/to/claude-code-log claude-code-log [options]
+```
+
 ## Usage
 
 ```bash
