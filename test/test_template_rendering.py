@@ -159,7 +159,7 @@ class TestTemplateRendering:
         )
 
         messages = load_transcript(test_data_path)
-        html_content = generate_html(messages)
+        html_content = generate_html(messages, show_stats=True)
 
         # Check tool use formatting
         assert "Tool Use:" in html_content
@@ -174,7 +174,7 @@ class TestTemplateRendering:
         # Check tool input details
         assert 'class="collapsible-details"' in html_content
         assert "<summary>" in html_content
-        assert "Input:" in html_content
+        assert "Input:" in html_content  # token usage string, requires show_stats=True
         assert "details-content" in html_content
 
     def test_timestamp_formatting(self):

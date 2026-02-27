@@ -10,15 +10,10 @@
 .highlight pre {
     margin: 0;
     padding: 0.5em;
-    line-height: 1.5;
     font-family: var(--font-monospace);
     white-space: pre;  /* Prevent line wrapping */
 }
 
-/* Smaller font for code blocks in markdown content (assistant messages, thinking, etc.) */
-.content.markdown .highlight pre code {
-    font-size: 80%;
-}
 
 /* Line numbers table styling */
 .highlight .highlighttable {
@@ -44,7 +39,6 @@
     background: var(--color-bg-tertiary);
     padding: 0.65em 0.5em 0.5em 0.8em;
     margin: 0;
-    line-height: 1.5;
     white-space: pre;
 }
 
@@ -58,7 +52,6 @@
 
 .highlight td.code pre {
     padding-left: 0.8em;
-    line-height: 1.5;
 }
 
 /* Read tool specific styles */
@@ -89,7 +82,7 @@
     border-left: 3px solid var(--color-blue);
     border-radius: 4px;
     font-style: italic;
-    font-size: 80%;
+    font-size: 0.8em;
     color: var(--color-text-secondary);
 }
 
