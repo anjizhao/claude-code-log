@@ -186,6 +186,9 @@ class TemplateMessage:
         # Children for tree-based rendering
         self.children: list["TemplateMessage"] = []
 
+        # Whether this is a continuation of a previous assistant/thinking sibling
+        self.is_continuation: bool = False
+
     # -- Properties derived from content/meta --
 
     @property
@@ -619,6 +622,10 @@ def generate_template_messages(
     # HtmlRenderer flattens this via pre-order traversal for template rendering
     with log_timing("Build message tree", t_start):
         root_messages = _build_message_tree(template_messages)
+
+    # Mark consecutive assistant/thinking siblings so the template can hide
+    # redundant titles (e.g., repeated "Assistant" headers)
+    _mark_continuation_messages(root_messages)
 
     # Clean up sidechain duplicates on the tree structure
     # - Remove first UserTextMessage (duplicate of Task input prompt)
@@ -1266,6 +1273,38 @@ def _normalize_for_dedup(text: str) -> str:
     but not present in the sidechain assistant's final message.
     """
     return _AGENT_ID_LINE_PATTERN.sub("", text).strip()
+
+
+def _mark_continuation_messages(root_messages: list[TemplateMessage]) -> None:
+    """Mark consecutive same-type assistant or thinking siblings as continuations.
+
+    Walks the tree recursively. For each node's children, tracks runs of
+    same-type messages. The first in a run keeps its title; subsequent
+    ones get is_continuation=True so the template can hide the redundant title.
+
+    Only assistant and thinking types are eligible. A thinking message does NOT
+    continue an assistant run (and vice versa).
+
+    Args:
+        root_messages: Root messages with children populated
+    """
+    _CONTINUATION_TYPES = {"assistant", "thinking"}
+
+    def process(message: TemplateMessage) -> None:
+        for child in message.children:
+            process(child)
+
+        prev_type: str | None = None
+        for child in message.children:
+            if child.type in _CONTINUATION_TYPES:
+                if child.type == prev_type:
+                    child.is_continuation = True
+                prev_type = child.type
+            else:
+                prev_type = None
+
+    for root in root_messages:
+        process(root)
 
 
 def _cleanup_sidechain_duplicates(root_messages: list[TemplateMessage]) -> None:
