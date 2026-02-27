@@ -20,7 +20,6 @@ uv sync
 ```
 claude_code_log/
 ├── cli.py              # Command-line interface with project discovery
-├── tui.py              # Interactive Terminal User Interface (Textual)
 ├── parser.py           # Data extraction and parsing from JSONL files
 ├── renderer.py         # Format-neutral message processing and tree building
 ├── renderer_timings.py # Performance timing instrumentation
@@ -40,8 +39,6 @@ claude_code_log/
 │   ├── system_formatters.py
 │   ├── tool_formatters.py
 │   └── utils.py
-├── markdown/           # Markdown output rendering
-│   └── renderer.py
 └── templates/          # Jinja2 HTML templates
     ├── transcript.html
     ├── index.html
@@ -59,20 +56,19 @@ The project uses:
 
 - Python 3.10+ with uv package management
 - Click for CLI interface
-- Textual for Terminal User Interface
 - Pydantic for data modeling and validation
 - Jinja2 for HTML template rendering
-- mistune for Markdown rendering
+- mistune for Markdown rendering (within HTML output)
 - dateparser for natural language date parsing
 
 ### Dependency Management
 
 ```bash
 # Add a new dependency
-uv add textual
+uv add click
 
 # Remove a dependency
-uv remove textual
+uv remove click
 
 # Sync dependencies
 uv sync
@@ -80,12 +76,9 @@ uv sync
 
 ## Testing
 
-The project uses a categorized test system to avoid async event loop conflicts.
-
 ### Test Categories
 
 - **Unit Tests** (no mark): Fast, standalone tests
-- **TUI Tests** (`@pytest.mark.tui`): Textual-based TUI tests
 - **Browser Tests** (`@pytest.mark.browser`): Playwright-based browser tests
 - **Snapshot Tests**: HTML regression tests using syrupy
 
@@ -94,10 +87,7 @@ The project uses a categorized test system to avoid async event loop conflicts.
 ```bash
 # Unit tests only (fast, recommended for development)
 just test
-# or: uv run pytest -n auto -m "not (tui or browser)" -v
-
-# TUI tests (isolated event loop)
-just test-tui
+# or: uv run pytest -n auto -m "not browser" -v
 
 # Browser tests (requires Chromium)
 just test-browser
@@ -133,16 +123,6 @@ Browser tests require Chromium:
 ```bash
 uv run playwright install chromium
 ```
-
-### Why Test Categories?
-
-The test suite is categorized because different async frameworks conflict:
-
-- **TUI tests** use Textual's async event loop (`run_test()`)
-- **Browser tests** use Playwright's internal asyncio
-- **pytest-asyncio** manages async test execution
-
-Running all tests together can cause "RuntimeError: This event loop is already running". The categorization ensures reliable test execution.
 
 ### Test Coverage
 
@@ -200,8 +180,8 @@ list[TranscriptEntry]
 list[TemplateMessage] with MessageContent
     ↓ (renderer.py)
 Tree of TemplateMessage (roots with children)
-    ↓ (html/renderer.py or markdown/renderer.py)
-Final output (HTML or Markdown)
+    ↓ (html/renderer.py)
+Final HTML output
 ```
 
 ### Data Models
