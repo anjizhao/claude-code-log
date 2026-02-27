@@ -849,6 +849,7 @@
                 clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
                 clone.querySelectorAll('details > summary').forEach(function(el) { el.remove(); });
                 clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
+                clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
 
                 const htmlContent = clone.innerHTML;
                 // Attach clone temporarily to get accurate innerText
