@@ -10,8 +10,7 @@ from click.testing import CliRunner
 
 from claude_code_log.cli import (
     _clear_caches,
-    _clear_output_files,
-    _discover_projects,
+    _clear_html_files,
     get_default_projects_dir,
     main,
 )
@@ -103,65 +102,6 @@ class TestGetDefaultProjectsDir:
         assert result == Path.home() / ".claude" / "projects"
 
 
-class TestDiscoverProjects:
-    """Tests for _discover_projects helper."""
-
-    def test_discovers_active_projects(
-        self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
-    ):
-        """Finds directories with JSONL files."""
-        projects_dir = cli_projects_setup.projects_dir
-
-        # Create two active projects
-        create_project_with_jsonl(projects_dir, "project-1", sample_jsonl_content)
-        create_project_with_jsonl(projects_dir, "project-2", sample_jsonl_content)
-
-        # Create an empty directory (not a project)
-        (projects_dir / "empty-dir").mkdir()
-
-        project_dirs, archived = _discover_projects(projects_dir)
-
-        assert len(project_dirs) == 2
-        assert len(archived) == 0
-        project_names = {p.name for p in project_dirs}
-        assert project_names == {"project-1", "project-2"}
-
-    def test_discovers_archived_projects(
-        self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
-    ):
-        """Finds archived projects from cache."""
-        projects_dir = cli_projects_setup.projects_dir
-        db_path = cli_projects_setup.db_path
-
-        # Create a project and cache it
-        project_dir = create_project_with_jsonl(
-            projects_dir, "my-project", sample_jsonl_content
-        )
-        cache_manager = CacheManager(project_dir, "1.0.0", db_path=db_path)
-
-        # Save entries to cache
-        from claude_code_log.converter import load_transcript
-
-        jsonl_file = project_dir / "session-1.jsonl"
-        entries = load_transcript(jsonl_file, silent=True)
-        cache_manager.save_cached_entries(jsonl_file, entries)
-
-        # Delete the JSONL file to simulate archival
-        jsonl_file.unlink()
-
-        project_dirs, archived = _discover_projects(projects_dir)
-
-        assert len(project_dirs) == 1
-        assert len(archived) == 1
-        assert project_dir in archived
-
-    def test_empty_directory(self, cli_projects_setup: ProjectsSetup):
-        """Empty projects directory returns empty lists."""
-        project_dirs, archived = _discover_projects(cli_projects_setup.projects_dir)
-        assert project_dirs == []
-        assert archived == set()
-
-
 class TestClearCaches:
     """Tests for _clear_caches helper."""
 
@@ -240,8 +180,8 @@ class TestClearCaches:
         _clear_caches(jsonl_file, all_projects=False)
 
 
-class TestClearOutputFiles:
-    """Tests for _clear_output_files helper."""
+class TestClearHtmlFiles:
+    """Tests for _clear_html_files helper."""
 
     def test_clear_html_single_project(
         self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
@@ -257,7 +197,7 @@ class TestClearOutputFiles:
 
         assert len(list(project_dir.glob("*.html"))) == 2
 
-        _clear_output_files(project_dir, all_projects=False, file_ext="html")
+        _clear_html_files(project_dir, all_projects=False)
 
         assert len(list(project_dir.glob("*.html"))) == 0
 
@@ -277,28 +217,13 @@ class TestClearOutputFiles:
         # Create index file
         (projects_dir / "index.html").write_text("<html></html>")
 
-        _clear_output_files(projects_dir, all_projects=True, file_ext="html")
+        _clear_html_files(projects_dir, all_projects=True)
 
         # All HTML files should be gone
         assert not (projects_dir / "index.html").exists()
         for i in range(2):
             project_dir = projects_dir / f"project-{i}"
             assert len(list(project_dir.glob("*.html"))) == 0
-
-    def test_clear_md_files(
-        self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
-    ):
-        """Clears Markdown files."""
-        project_dir = create_project_with_jsonl(
-            cli_projects_setup.projects_dir, "test-project", sample_jsonl_content
-        )
-
-        (project_dir / "combined_transcripts.md").write_text("# Test")
-        assert len(list(project_dir.glob("*.md"))) == 1
-
-        _clear_output_files(project_dir, all_projects=False, file_ext="md")
-
-        assert len(list(project_dir.glob("*.md"))) == 0
 
     def test_clear_no_files_to_remove(self, cli_projects_setup: ProjectsSetup):
         """No error when no files to remove."""
@@ -307,7 +232,7 @@ class TestClearOutputFiles:
         (project_dir / "test.jsonl").write_text('{"type": "user"}')
 
         # Should complete without error
-        _clear_output_files(project_dir, all_projects=False, file_ext="html")
+        _clear_html_files(project_dir, all_projects=False)
 
 
 class TestCLIMainCommand:
@@ -371,20 +296,6 @@ class TestCLIMainCommand:
         assert result2.exit_code == 0
         assert len(list(project_dir.glob("*.html"))) == 0
 
-    def test_format_option_md(
-        self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
-    ):
-        """--format md generates Markdown output."""
-        project_dir = create_project_with_jsonl(
-            cli_projects_setup.projects_dir, "test-project", sample_jsonl_content
-        )
-
-        runner = CliRunner()
-        result = runner.invoke(main, [str(project_dir), "--format", "md"])
-
-        assert result.exit_code == 0
-        assert len(list(project_dir.glob("*.md"))) > 0
-
     def test_no_cache_flag(
         self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
     ):
@@ -431,19 +342,6 @@ class TestCLIMainCommand:
 
 class TestCLIErrorHandling:
     """Tests for CLI error handling paths."""
-
-    def test_invalid_format_option(
-        self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
-    ):
-        """Invalid format option shows error."""
-        project_dir = create_project_with_jsonl(
-            cli_projects_setup.projects_dir, "test-project", sample_jsonl_content
-        )
-
-        runner = CliRunner()
-        result = runner.invoke(main, [str(project_dir), "--format", "invalid"])
-
-        assert result.exit_code != 0
 
     def test_empty_project_directory(self, cli_projects_setup: ProjectsSetup):
         """Empty project directory handled gracefully."""

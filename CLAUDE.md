@@ -8,7 +8,6 @@ This tool processes Claude Code transcript files (stored as JSONL) and generates
 
 ## Key Features
 
-- **Interactive TUI (Terminal User Interface)**: Browse and manage Claude Code sessions with real-time navigation, summaries, and quick actions for HTML export and session resuming
 - **Project Hierarchy Processing**: Process entire `~/.claude/projects/` directory with linked index page
 - **Individual Session Files**: Generate separate HTML files for each session with navigation links
 - **Session Navigation**: Interactive table of contents with session summaries and quick navigation
@@ -23,9 +22,6 @@ This tool processes Claude Code transcript files (stored as JSONL) and generates
 ```bash
 # Process all projects (default)
 claude-code-log
-
-# Interactive TUI
-claude-code-log --tui
 
 # Single file/directory
 claude-code-log path/to/transcript.jsonl
@@ -54,11 +50,7 @@ See @CONTRIBUTING.md for detailed development setup, testing, architecture, and 
 ```bash
 # Unit tests (fast, recommended for development)
 just test
-# or: uv run pytest -n auto -m "not (tui or browser)" -v
-
-# TUI tests
-just test-tui
-# or: uv run pytest -n auto -m tui
+# or: uv run pytest -n auto -m "not browser" -v
 
 # Browser tests
 just test-browser
@@ -68,7 +60,7 @@ just test-browser
 just test-all
 ```
 
-**Tip:** Add `-x` to stop on first failure (e.g., `uv run pytest -n auto -m "not (tui or browser)" -v -x`).
+**Tip:** Add `-x` to stop on first failure (e.g., `uv run pytest -n auto -m "not browser" -v -x`).
 
 ### Code Quality
 

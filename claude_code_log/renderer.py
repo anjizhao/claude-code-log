@@ -2302,9 +2302,9 @@ def get_renderer(format: str, image_export_mode: Optional[str] = None) -> Render
     """Get a renderer instance for the specified format.
 
     Args:
-        format: The output format ("html", "md", or "markdown").
+        format: The output format ("html").
         image_export_mode: Image export mode ("placeholder", "embedded", "referenced").
-            If None, defaults to "embedded" for HTML and "referenced" for Markdown.
+            Defaults to "embedded".
 
     Returns:
         A Renderer instance for the specified format.
@@ -2315,15 +2315,8 @@ def get_renderer(format: str, image_export_mode: Optional[str] = None) -> Render
     if format == "html":
         from .html.renderer import HtmlRenderer
 
-        # For HTML, default to embedded mode (current behavior)
         mode = image_export_mode or "embedded"
         return HtmlRenderer(image_export_mode=mode)
-    elif format in ("md", "markdown"):
-        from .markdown.renderer import MarkdownRenderer
-
-        # For Markdown, default to referenced mode
-        mode = image_export_mode or "referenced"
-        return MarkdownRenderer(image_export_mode=mode)
     raise ValueError(f"Unsupported format: {format}")
 
 

@@ -1,11 +1,11 @@
 # Rendering Architecture
 
-This document describes how Claude Code transcript data flows from raw JSONL entries to final output (HTML, Markdown). The architecture separates concerns into distinct layers:
+This document describes how Claude Code transcript data flows from raw JSONL entries to final HTML output. The architecture separates concerns into distinct layers:
 
 1. **Parsing Layer** - Raw JSONL to typed transcript entries
 2. **Factory Layer** - Transcript entries to `MessageContent` models
 3. **Rendering Layer** - Format-neutral tree building and relationship processing
-4. **Output Layer** - Format-specific rendering (HTML, Markdown)
+4. **Output Layer** - HTML rendering
 
 ---
 
@@ -21,8 +21,8 @@ list[TemplateMessage] with MessageContent
 Tree of TemplateMessage (roots with children)
 + RenderingContext (message registry)
 + Session navigation data
-    ↓ (html/renderer.py or markdown/renderer.py)
-Final output (HTML or Markdown)
+    ↓ (html/renderer.py)
+Final HTML output
 ```
 
 **Key cardinality rules**:
@@ -273,11 +273,6 @@ def title_ToolUseMessage(self, content: ToolUseMessage, message: TemplateMessage
 - `_flatten_preorder()` traverses tree, formats content, builds flat list for template
 - Generates HTML via Jinja2 templates
 
-**MarkdownRenderer** ([markdown/renderer.py](../claude_code_log/markdown/renderer.py)):
-- Implements `format_*` methods inline
-- Writes directly to file/string without templates
-- Simpler structure suited to plain text output
-
 ---
 
 ## 8. HTML Formatter Organization
@@ -335,7 +330,7 @@ Note that `meta.uuid` is the original transcript entry's UUID. Since a single en
 - **models.py**: Pure data structures, no rendering logic
 - **factories/**: Data transformation, no I/O
 - **renderer.py**: Format-neutral processing (pairing, hierarchy, tree)
-- **html/**, **markdown/**: Format-specific output generation
+- **html/**: HTML output generation
 
 ---
 

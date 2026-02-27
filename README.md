@@ -47,9 +47,6 @@ claude-code-log path/to/transcript.jsonl
 
 # Process a specific project directory
 claude-code-log /path/to/project/directory
-
-# Launch the interactive TUI
-claude-code-log --tui
 ```
 
 ## CLI Options
@@ -67,10 +64,7 @@ claude-code-log --tui
 | `--no-cache` | Disable caching and force reprocessing of all files. |
 | `--clear-cache` | Clear all cache data before processing. |
 | `--clear-output` / `--clear-html` | Clear generated HTML files and force regeneration. |
-| `--tui` | Launch the interactive TUI for session browsing. |
 | `--projects-dir PATH` | Custom projects directory (default: `~/.claude/projects/`). |
-| `-f`, `--format {html,md,markdown}` | Output format (default: `html`). |
-| `--image-export-mode {placeholder,embedded,referenced}` | How to handle images. Default: `embedded` for HTML. |
 | `--page-size INT` | Max messages per page for combined transcript (default: 2000). Sessions are never split across pages. |
 | `--show-stats` | Show token usage statistics in generated output (hidden by default). |
 | `--debug` | Show full traceback on errors. |
