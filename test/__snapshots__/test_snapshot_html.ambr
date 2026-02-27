@@ -4981,7 +4981,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:50:07.874907Z'>2025-07-03 15:50:07</span>
                   </div>
                   
@@ -5006,9 +5005,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -5046,7 +5043,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:54:07.874907Z'>2025-07-03 15:54:07</span>
                   </div>
                   
@@ -5071,7 +5067,6 @@
               <span title="ID: tool_001">📝 Edit <span class='tool-summary'>/tmp/decorator_example.py</span></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:56:07.874907Z'>2025-07-03 15:56:07</span>
                   </div>
                   
@@ -5089,7 +5084,6 @@
               <span title="ID: tool_001"></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:58:07.874907Z' data-duration='took 2m 0s'>2025-07-03 15:58:07</span>
                   </div>
                   
@@ -5107,9 +5101,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -5140,7 +5132,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:02:07.874907Z'>2025-07-03 16:02:07</span>
                   </div>
                   
@@ -5165,7 +5156,6 @@
               <span title="ID: tool_002">💻 Bash <span class='tool-summary'>Run the decorator example to show output</span></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:04:07.874907Z'>2025-07-03 16:04:07</span>
                   </div>
                   
@@ -5183,7 +5173,6 @@
               <span title="ID: tool_002"></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:06:07.874907Z' data-duration='took 2m 0s'>2025-07-03 16:06:07</span>
                   </div>
                   
@@ -5203,9 +5192,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -5232,7 +5219,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:10:07.874907Z'>2025-07-03 16:10:07</span>
                   </div>
                   
@@ -5246,7 +5232,7 @@
   
       <button class="timeline-toggle floating-btn" id="toggleTimeline" title="Show timeline">📆</button>
       <button class="filter-messages floating-btn" id="filterMessages" title="Search & Filter">🔍</button>
-      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📋</button>
+      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📑</button>
       <a class="scroll-top floating-btn" title="Scroll to top" href="#title">🔝</a>
   
       <script>
@@ -5880,21 +5866,28 @@
               // Apply initial fold state
               setInitialFoldState();
   
-              // Clipboard helper: copies text with execCommand fallback for file:// contexts
-              function copyText(text) {
-                  if (navigator.clipboard && navigator.clipboard.writeText) {
-                      return navigator.clipboard.writeText(text);
-                  }
-                  // Fallback for file:// and insecure contexts
+              // Clipboard fallback using execCommand for file:// and insecure contexts
+              function copyViaExecCommand(text) {
                   var ta = document.createElement('textarea');
                   ta.value = text;
                   ta.style.position = 'fixed';
                   ta.style.left = '-9999px';
                   document.body.appendChild(ta);
                   ta.select();
-                  try { document.execCommand('copy'); } catch (_) {}
+                  var ok = false;
+                  try { ok = document.execCommand('copy'); } catch (_) {}
                   document.body.removeChild(ta);
-                  return Promise.resolve();
+                  return ok ? Promise.resolve() : Promise.reject();
+              }
+  
+              // Clipboard helper: copies text, falling back to execCommand on rejection
+              function copyText(text) {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                      return navigator.clipboard.writeText(text).catch(function() {
+                          return copyViaExecCommand(text);
+                      });
+                  }
+                  return copyViaExecCommand(text);
               }
   
               // Clipboard helper: copies rich HTML + plain text with fallbacks
@@ -5927,7 +5920,7 @@
                   // Clone and clean: remove preview content, force details open
                   const clone = content.cloneNode(true);
                   clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
-                  clone.querySelectorAll('details > summary').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
   
@@ -5952,7 +5945,7 @@
                       }, 1500);
                   }
   
-                  copyRich(htmlContent, textContent).then(showCopied);
+                  copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
               });
   
               // Inject copy buttons into code blocks
@@ -5972,7 +5965,7 @@
                               btn.textContent = '\uD83D\uDCCB';
                               btn.classList.remove('copied');
                           }, 1500);
-                      });
+                      }).catch(function() {});
                   });
                   pre.appendChild(btn);
               });
@@ -9898,7 +9891,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:00:00Z'>2025-06-14 11:00:00</span>
                   </div>
                   
@@ -9923,9 +9915,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:00:30Z'>2025-06-14 11:00:30</span>
                   </div>
                   
@@ -9982,7 +9972,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:01:00Z'>2025-06-14 11:01:00</span>
                   </div>
                   
@@ -10007,7 +9996,6 @@
               <span title="ID: tool_edge_001">🛠️ FailingTool</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:01:30Z'>2025-06-14 11:01:30</span>
                   </div>
                   
@@ -10030,7 +10018,6 @@
               <span title="ID: tool_edge_001">🚨 Error</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:01:31Z' data-duration='took 1.0s'>2025-06-14 11:01:31</span>
                   </div>
                   
@@ -10048,7 +10035,6 @@
               <span>🤷 Slash Command</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:02:10Z'>2025-06-14 11:02:10</span>
                   </div>
                   
@@ -10068,7 +10054,6 @@
               <span></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:02:20Z'>2025-06-14 11:02:20</span>
                   </div>
                   
@@ -10098,9 +10083,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:03:00Z'>2025-06-14 11:03:00</span>
                   </div>
                   
@@ -10126,7 +10109,6 @@
               <span title="ID: tool_edge_002">🛠️ MultiEdit</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:03:00Z'>2025-06-14 11:03:00</span>
                   </div>
                   
@@ -10144,7 +10126,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:03:30Z'>2025-06-14 11:03:30</span>
                   </div>
                   
@@ -10162,7 +10143,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T11:03:01Z'>2025-06-14 11:03:01</span>
                   </div>
                   
@@ -10195,7 +10175,6 @@
               <span title="ID: toolu_todowrite_002">🛠️ TodoWrite</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-06-14T10:02:00Z'>2025-06-14 10:02:00</span>
                   </div>
                   
@@ -10250,7 +10229,7 @@
   
       <button class="timeline-toggle floating-btn" id="toggleTimeline" title="Show timeline">📆</button>
       <button class="filter-messages floating-btn" id="filterMessages" title="Search & Filter">🔍</button>
-      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📋</button>
+      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📑</button>
       <a class="scroll-top floating-btn" title="Scroll to top" href="#title">🔝</a>
   
       <script>
@@ -10884,21 +10863,28 @@
               // Apply initial fold state
               setInitialFoldState();
   
-              // Clipboard helper: copies text with execCommand fallback for file:// contexts
-              function copyText(text) {
-                  if (navigator.clipboard && navigator.clipboard.writeText) {
-                      return navigator.clipboard.writeText(text);
-                  }
-                  // Fallback for file:// and insecure contexts
+              // Clipboard fallback using execCommand for file:// and insecure contexts
+              function copyViaExecCommand(text) {
                   var ta = document.createElement('textarea');
                   ta.value = text;
                   ta.style.position = 'fixed';
                   ta.style.left = '-9999px';
                   document.body.appendChild(ta);
                   ta.select();
-                  try { document.execCommand('copy'); } catch (_) {}
+                  var ok = false;
+                  try { ok = document.execCommand('copy'); } catch (_) {}
                   document.body.removeChild(ta);
-                  return Promise.resolve();
+                  return ok ? Promise.resolve() : Promise.reject();
+              }
+  
+              // Clipboard helper: copies text, falling back to execCommand on rejection
+              function copyText(text) {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                      return navigator.clipboard.writeText(text).catch(function() {
+                          return copyViaExecCommand(text);
+                      });
+                  }
+                  return copyViaExecCommand(text);
               }
   
               // Clipboard helper: copies rich HTML + plain text with fallbacks
@@ -10931,7 +10917,7 @@
                   // Clone and clean: remove preview content, force details open
                   const clone = content.cloneNode(true);
                   clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
-                  clone.querySelectorAll('details > summary').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
   
@@ -10956,7 +10942,7 @@
                       }, 1500);
                   }
   
-                  copyRich(htmlContent, textContent).then(showCopied);
+                  copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
               });
   
               // Inject copy buttons into code blocks
@@ -10976,7 +10962,7 @@
                               btn.textContent = '\uD83D\uDCCB';
                               btn.classList.remove('copied');
                           }, 1500);
-                      });
+                      }).catch(function() {});
                   });
                   pre.appendChild(btn);
               });
@@ -14953,7 +14939,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:50:07.874717Z'>2025-07-03 15:50:07</span>
                   </div>
                   
@@ -14978,9 +14963,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874717Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -14999,7 +14982,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:54:07.874717Z'>2025-07-03 15:54:07</span>
                   </div>
                   
@@ -15032,7 +15014,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:50:07.874907Z'>2025-07-03 15:50:07</span>
                   </div>
                   
@@ -15057,9 +15038,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -15097,7 +15076,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:54:07.874907Z'>2025-07-03 15:54:07</span>
                   </div>
                   
@@ -15122,7 +15100,6 @@
               <span title="ID: tool_001">📝 Edit <span class='tool-summary'>/tmp/decorator_example.py</span></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:56:07.874907Z'>2025-07-03 15:56:07</span>
                   </div>
                   
@@ -15140,7 +15117,6 @@
               <span title="ID: tool_001"></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:58:07.874907Z' data-duration='took 2m 0s'>2025-07-03 15:58:07</span>
                   </div>
                   
@@ -15158,9 +15134,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -15191,7 +15165,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:02:07.874907Z'>2025-07-03 16:02:07</span>
                   </div>
                   
@@ -15216,7 +15189,6 @@
               <span title="ID: tool_002">💻 Bash <span class='tool-summary'>Run the decorator example to show output</span></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:04:07.874907Z'>2025-07-03 16:04:07</span>
                   </div>
                   
@@ -15234,7 +15206,6 @@
               <span title="ID: tool_002"></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:06:07.874907Z' data-duration='took 2m 0s'>2025-07-03 16:06:07</span>
                   </div>
                   
@@ -15254,9 +15225,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -15283,7 +15252,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:10:07.874907Z'>2025-07-03 16:10:07</span>
                   </div>
                   
@@ -15297,7 +15265,7 @@
   
       <button class="timeline-toggle floating-btn" id="toggleTimeline" title="Show timeline">📆</button>
       <button class="filter-messages floating-btn" id="filterMessages" title="Search & Filter">🔍</button>
-      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📋</button>
+      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📑</button>
       <a class="scroll-top floating-btn" title="Scroll to top" href="#title">🔝</a>
   
       <script>
@@ -15931,21 +15899,28 @@
               // Apply initial fold state
               setInitialFoldState();
   
-              // Clipboard helper: copies text with execCommand fallback for file:// contexts
-              function copyText(text) {
-                  if (navigator.clipboard && navigator.clipboard.writeText) {
-                      return navigator.clipboard.writeText(text);
-                  }
-                  // Fallback for file:// and insecure contexts
+              // Clipboard fallback using execCommand for file:// and insecure contexts
+              function copyViaExecCommand(text) {
                   var ta = document.createElement('textarea');
                   ta.value = text;
                   ta.style.position = 'fixed';
                   ta.style.left = '-9999px';
                   document.body.appendChild(ta);
                   ta.select();
-                  try { document.execCommand('copy'); } catch (_) {}
+                  var ok = false;
+                  try { ok = document.execCommand('copy'); } catch (_) {}
                   document.body.removeChild(ta);
-                  return Promise.resolve();
+                  return ok ? Promise.resolve() : Promise.reject();
+              }
+  
+              // Clipboard helper: copies text, falling back to execCommand on rejection
+              function copyText(text) {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                      return navigator.clipboard.writeText(text).catch(function() {
+                          return copyViaExecCommand(text);
+                      });
+                  }
+                  return copyViaExecCommand(text);
               }
   
               // Clipboard helper: copies rich HTML + plain text with fallbacks
@@ -15978,7 +15953,7 @@
                   // Clone and clean: remove preview content, force details open
                   const clone = content.cloneNode(true);
                   clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
-                  clone.querySelectorAll('details > summary').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
   
@@ -16003,7 +15978,7 @@
                       }, 1500);
                   }
   
-                  copyRich(htmlContent, textContent).then(showCopied);
+                  copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
               });
   
               // Inject copy buttons into code blocks
@@ -16023,7 +15998,7 @@
                               btn.textContent = '\uD83D\uDCCB';
                               btn.classList.remove('copied');
                           }, 1500);
-                      });
+                      }).catch(function() {});
                   });
                   pre.appendChild(btn);
               });
@@ -19949,7 +19924,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:50:07.874907Z'>2025-07-03 15:50:07</span>
                   </div>
                   
@@ -19974,9 +19948,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -20014,7 +19986,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:54:07.874907Z'>2025-07-03 15:54:07</span>
                   </div>
                   
@@ -20039,7 +20010,6 @@
               <span title="ID: tool_001">📝 Edit <span class='tool-summary'>/tmp/decorator_example.py</span></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:56:07.874907Z'>2025-07-03 15:56:07</span>
                   </div>
                   
@@ -20057,7 +20027,6 @@
               <span title="ID: tool_001"></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T15:58:07.874907Z' data-duration='took 2m 0s'>2025-07-03 15:58:07</span>
                   </div>
                   
@@ -20075,9 +20044,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -20108,7 +20075,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:02:07.874907Z'>2025-07-03 16:02:07</span>
                   </div>
                   
@@ -20133,7 +20099,6 @@
               <span title="ID: tool_002">💻 Bash <span class='tool-summary'>Run the decorator example to show output</span></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:04:07.874907Z'>2025-07-03 16:04:07</span>
                   </div>
                   
@@ -20151,7 +20116,6 @@
               <span title="ID: tool_002"></span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:06:07.874907Z' data-duration='took 2m 0s'>2025-07-03 16:06:07</span>
                   </div>
                   
@@ -20171,9 +20135,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -20200,7 +20162,6 @@
               <span>🤷 User</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      
                       <span class='timestamp' data-timestamp='2025-07-03T16:10:07.874907Z'>2025-07-03 16:10:07</span>
                   </div>
                   
@@ -20214,7 +20175,7 @@
   
       <button class="timeline-toggle floating-btn" id="toggleTimeline" title="Show timeline">📆</button>
       <button class="filter-messages floating-btn" id="filterMessages" title="Search & Filter">🔍</button>
-      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📋</button>
+      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📑</button>
       <a class="scroll-top floating-btn" title="Scroll to top" href="#title">🔝</a>
   
       <script>
@@ -20848,21 +20809,28 @@
               // Apply initial fold state
               setInitialFoldState();
   
-              // Clipboard helper: copies text with execCommand fallback for file:// contexts
-              function copyText(text) {
-                  if (navigator.clipboard && navigator.clipboard.writeText) {
-                      return navigator.clipboard.writeText(text);
-                  }
-                  // Fallback for file:// and insecure contexts
+              // Clipboard fallback using execCommand for file:// and insecure contexts
+              function copyViaExecCommand(text) {
                   var ta = document.createElement('textarea');
                   ta.value = text;
                   ta.style.position = 'fixed';
                   ta.style.left = '-9999px';
                   document.body.appendChild(ta);
                   ta.select();
-                  try { document.execCommand('copy'); } catch (_) {}
+                  var ok = false;
+                  try { ok = document.execCommand('copy'); } catch (_) {}
                   document.body.removeChild(ta);
-                  return Promise.resolve();
+                  return ok ? Promise.resolve() : Promise.reject();
+              }
+  
+              // Clipboard helper: copies text, falling back to execCommand on rejection
+              function copyText(text) {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                      return navigator.clipboard.writeText(text).catch(function() {
+                          return copyViaExecCommand(text);
+                      });
+                  }
+                  return copyViaExecCommand(text);
               }
   
               // Clipboard helper: copies rich HTML + plain text with fallbacks
@@ -20895,7 +20863,7 @@
                   // Clone and clean: remove preview content, force details open
                   const clone = content.cloneNode(true);
                   clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
-                  clone.querySelectorAll('details > summary').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
   
@@ -20920,7 +20888,7 @@
                       }, 1500);
                   }
   
-                  copyRich(htmlContent, textContent).then(showCopied);
+                  copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
               });
   
               // Inject copy buttons into code blocks
@@ -20940,7 +20908,7 @@
                               btn.textContent = '\uD83D\uDCCB';
                               btn.classList.remove('copied');
                           }, 1500);
-                      });
+                      }).catch(function() {});
                   });
                   pre.appendChild(btn);
               });
