@@ -675,6 +675,39 @@
             // Apply initial fold state
             setInitialFoldState();
 
+            // Clipboard helper: copies text with execCommand fallback for file:// contexts
+            function copyText(text) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    return navigator.clipboard.writeText(text);
+                }
+                // Fallback for file:// and insecure contexts
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); } catch (_) {}
+                document.body.removeChild(ta);
+                return Promise.resolve();
+            }
+
+            // Clipboard helper: copies rich HTML + plain text with fallbacks
+            function copyRich(html, text) {
+                try {
+                    if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+                        var item = new ClipboardItem({
+                            'text/html': new Blob([html], { type: 'text/html' }),
+                            'text/plain': new Blob([text], { type: 'text/plain' }),
+                        });
+                        return navigator.clipboard.write([item]).catch(function() {
+                            return copyText(text);
+                        });
+                    }
+                } catch (_) {}
+                return copyText(text);
+            }
+
             // Copy button functionality
             document.addEventListener('click', function(e) {
                 const btn = e.target.closest('.copy-btn');
@@ -698,8 +731,12 @@
                 clone.style.position = 'absolute';
                 clone.style.left = '-9999px';
                 document.body.appendChild(clone);
-                const textContent = clone.innerText;
-                document.body.removeChild(clone);
+                var textContent;
+                try {
+                    textContent = clone.innerText;
+                } finally {
+                    document.body.removeChild(clone);
+                }
 
                 function showCopied() {
                     btn.textContent = '\u2705';
@@ -710,30 +747,20 @@
                     }, 1500);
                 }
 
-                // Try rich text copy, fall back to plain text
-                try {
-                    var item = new ClipboardItem({
-                        'text/html': new Blob([htmlContent], { type: 'text/html' }),
-                        'text/plain': new Blob([textContent], { type: 'text/plain' }),
-                    });
-                    navigator.clipboard.write([item]).then(showCopied).catch(function() {
-                        navigator.clipboard.writeText(textContent).then(showCopied);
-                    });
-                } catch (_) {
-                    navigator.clipboard.writeText(textContent).then(showCopied);
-                }
+                copyRich(htmlContent, textContent).then(showCopied);
             });
 
             // Inject copy buttons into code blocks
             document.querySelectorAll('pre > code').forEach(function(code) {
                 const pre = code.parentElement;
+                pre.style.position = 'relative';
                 const btn = document.createElement('button');
                 btn.className = 'code-copy-btn';
                 btn.title = 'Copy code';
                 btn.setAttribute('aria-label', 'Copy code');
                 btn.textContent = '\uD83D\uDCCB';
                 btn.addEventListener('click', function() {
-                    navigator.clipboard.writeText(code.textContent).then(function() {
+                    copyText(code.textContent).then(function() {
                         btn.textContent = '\u2705';
                         btn.classList.add('copied');
                         setTimeout(function() {

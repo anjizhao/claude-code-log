@@ -244,11 +244,7 @@
     opacity: 1;
 }
 
-/* Code block copy button */
-pre:has(> code) {
-    position: relative;
-}
-
+/* Code block copy button (position: relative set via JS for compat) */
 .code-copy-btn {
     position: absolute;
     top: 4px;
