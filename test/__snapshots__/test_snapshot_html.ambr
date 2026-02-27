@@ -2280,8 +2280,53 @@
   .timestamp-row {
       display: flex;
       flex-direction: row;
-      align-items: normal;
+      align-items: center;
       gap: 8px;
+  }
+  
+  /* Copy button */
+  .copy-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.85em;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .copy-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .copy-btn.copied {
+      opacity: 1;
+  }
+  
+  /* Code block copy button (position: relative set via JS for compat) */
+  .code-copy-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.8em;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .code-copy-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .code-copy-btn.copied {
+      opacity: 1;
   }
   
   .pair-duration {
@@ -4960,6 +5005,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -5055,6 +5101,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -5145,6 +5192,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -5184,7 +5232,7 @@
   
       <button class="timeline-toggle floating-btn" id="toggleTimeline" title="Show timeline">📆</button>
       <button class="filter-messages floating-btn" id="filterMessages" title="Search & Filter">🔍</button>
-      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📋</button>
+      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📑</button>
       <a class="scroll-top floating-btn" title="Scroll to top" href="#title">🔝</a>
   
       <script>
@@ -5817,6 +5865,110 @@
   
               // Apply initial fold state
               setInitialFoldState();
+  
+              // Clipboard fallback using execCommand for file:// and insecure contexts
+              function copyViaExecCommand(text) {
+                  var ta = document.createElement('textarea');
+                  ta.value = text;
+                  ta.style.position = 'fixed';
+                  ta.style.left = '-9999px';
+                  document.body.appendChild(ta);
+                  ta.select();
+                  var ok = false;
+                  try { ok = document.execCommand('copy'); } catch (_) {}
+                  document.body.removeChild(ta);
+                  return ok ? Promise.resolve() : Promise.reject();
+              }
+  
+              // Clipboard helper: copies text, falling back to execCommand on rejection
+              function copyText(text) {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                      return navigator.clipboard.writeText(text).catch(function() {
+                          return copyViaExecCommand(text);
+                      });
+                  }
+                  return copyViaExecCommand(text);
+              }
+  
+              // Clipboard helper: copies rich HTML + plain text with fallbacks
+              function copyRich(html, text) {
+                  try {
+                      if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+                          var item = new ClipboardItem({
+                              'text/html': new Blob([html], { type: 'text/html' }),
+                              'text/plain': new Blob([text], { type: 'text/plain' }),
+                          });
+                          return navigator.clipboard.write([item]).catch(function() {
+                              return copyText(text);
+                          });
+                      }
+                  } catch (_) {}
+                  return copyText(text);
+              }
+  
+              // Copy button functionality
+              document.addEventListener('click', function(e) {
+                  const btn = e.target.closest('.copy-btn');
+                  if (!btn) return;
+  
+                  const message = btn.closest('.message');
+                  if (!message) return;
+  
+                  const content = message.querySelector('.content');
+                  if (!content) return;
+  
+                  // Clone and clean: remove preview content, force details open
+                  const clone = content.cloneNode(true);
+                  clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
+                  clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+  
+                  const htmlContent = clone.innerHTML;
+                  // Attach clone temporarily to get accurate innerText
+                  clone.style.position = 'absolute';
+                  clone.style.left = '-9999px';
+                  document.body.appendChild(clone);
+                  var textContent;
+                  try {
+                      textContent = clone.innerText;
+                  } finally {
+                      document.body.removeChild(clone);
+                  }
+  
+                  function showCopied() {
+                      btn.textContent = '\u2705';
+                      btn.classList.add('copied');
+                      setTimeout(function() {
+                          btn.textContent = '\uD83D\uDCCB';
+                          btn.classList.remove('copied');
+                      }, 1500);
+                  }
+  
+                  copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+              });
+  
+              // Inject copy buttons into code blocks
+              document.querySelectorAll('pre > code').forEach(function(code) {
+                  const pre = code.parentElement;
+                  pre.style.position = 'relative';
+                  const btn = document.createElement('button');
+                  btn.className = 'code-copy-btn';
+                  btn.title = 'Copy code';
+                  btn.setAttribute('aria-label', 'Copy code');
+                  btn.textContent = '\uD83D\uDCCB';
+                  btn.addEventListener('click', function() {
+                      copyText(code.textContent).then(function() {
+                          btn.textContent = '\u2705';
+                          btn.classList.add('copied');
+                          setTimeout(function() {
+                              btn.textContent = '\uD83D\uDCCB';
+                              btn.classList.remove('copied');
+                          }, 1500);
+                      }).catch(function() {});
+                  });
+                  pre.appendChild(btn);
+              });
           });
       </script>
       <!-- Search functionality script -->
@@ -7038,8 +7190,53 @@
   .timestamp-row {
       display: flex;
       flex-direction: row;
-      align-items: normal;
+      align-items: center;
       gap: 8px;
+  }
+  
+  /* Copy button */
+  .copy-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.85em;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .copy-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .copy-btn.copied {
+      opacity: 1;
+  }
+  
+  /* Code block copy button (position: relative set via JS for compat) */
+  .code-copy-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.8em;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .code-copy-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .code-copy-btn.copied {
+      opacity: 1;
   }
   
   .pair-duration {
@@ -9718,6 +9915,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-06-14T11:00:30Z'>2025-06-14 11:00:30</span>
                   </div>
                   
@@ -9885,6 +10083,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-06-14T11:03:00Z'>2025-06-14 11:03:00</span>
                   </div>
                   
@@ -10030,7 +10229,7 @@
   
       <button class="timeline-toggle floating-btn" id="toggleTimeline" title="Show timeline">📆</button>
       <button class="filter-messages floating-btn" id="filterMessages" title="Search & Filter">🔍</button>
-      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📋</button>
+      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📑</button>
       <a class="scroll-top floating-btn" title="Scroll to top" href="#title">🔝</a>
   
       <script>
@@ -10663,6 +10862,110 @@
   
               // Apply initial fold state
               setInitialFoldState();
+  
+              // Clipboard fallback using execCommand for file:// and insecure contexts
+              function copyViaExecCommand(text) {
+                  var ta = document.createElement('textarea');
+                  ta.value = text;
+                  ta.style.position = 'fixed';
+                  ta.style.left = '-9999px';
+                  document.body.appendChild(ta);
+                  ta.select();
+                  var ok = false;
+                  try { ok = document.execCommand('copy'); } catch (_) {}
+                  document.body.removeChild(ta);
+                  return ok ? Promise.resolve() : Promise.reject();
+              }
+  
+              // Clipboard helper: copies text, falling back to execCommand on rejection
+              function copyText(text) {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                      return navigator.clipboard.writeText(text).catch(function() {
+                          return copyViaExecCommand(text);
+                      });
+                  }
+                  return copyViaExecCommand(text);
+              }
+  
+              // Clipboard helper: copies rich HTML + plain text with fallbacks
+              function copyRich(html, text) {
+                  try {
+                      if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+                          var item = new ClipboardItem({
+                              'text/html': new Blob([html], { type: 'text/html' }),
+                              'text/plain': new Blob([text], { type: 'text/plain' }),
+                          });
+                          return navigator.clipboard.write([item]).catch(function() {
+                              return copyText(text);
+                          });
+                      }
+                  } catch (_) {}
+                  return copyText(text);
+              }
+  
+              // Copy button functionality
+              document.addEventListener('click', function(e) {
+                  const btn = e.target.closest('.copy-btn');
+                  if (!btn) return;
+  
+                  const message = btn.closest('.message');
+                  if (!message) return;
+  
+                  const content = message.querySelector('.content');
+                  if (!content) return;
+  
+                  // Clone and clean: remove preview content, force details open
+                  const clone = content.cloneNode(true);
+                  clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
+                  clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+  
+                  const htmlContent = clone.innerHTML;
+                  // Attach clone temporarily to get accurate innerText
+                  clone.style.position = 'absolute';
+                  clone.style.left = '-9999px';
+                  document.body.appendChild(clone);
+                  var textContent;
+                  try {
+                      textContent = clone.innerText;
+                  } finally {
+                      document.body.removeChild(clone);
+                  }
+  
+                  function showCopied() {
+                      btn.textContent = '\u2705';
+                      btn.classList.add('copied');
+                      setTimeout(function() {
+                          btn.textContent = '\uD83D\uDCCB';
+                          btn.classList.remove('copied');
+                      }, 1500);
+                  }
+  
+                  copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+              });
+  
+              // Inject copy buttons into code blocks
+              document.querySelectorAll('pre > code').forEach(function(code) {
+                  const pre = code.parentElement;
+                  pre.style.position = 'relative';
+                  const btn = document.createElement('button');
+                  btn.className = 'code-copy-btn';
+                  btn.title = 'Copy code';
+                  btn.setAttribute('aria-label', 'Copy code');
+                  btn.textContent = '\uD83D\uDCCB';
+                  btn.addEventListener('click', function() {
+                      copyText(code.textContent).then(function() {
+                          btn.textContent = '\u2705';
+                          btn.classList.add('copied');
+                          setTimeout(function() {
+                              btn.textContent = '\uD83D\uDCCB';
+                              btn.classList.remove('copied');
+                          }, 1500);
+                      }).catch(function() {});
+                  });
+                  pre.appendChild(btn);
+              });
           });
       </script>
       <!-- Search functionality script -->
@@ -11884,8 +12187,53 @@
   .timestamp-row {
       display: flex;
       flex-direction: row;
-      align-items: normal;
+      align-items: center;
       gap: 8px;
+  }
+  
+  /* Copy button */
+  .copy-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.85em;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .copy-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .copy-btn.copied {
+      opacity: 1;
+  }
+  
+  /* Code block copy button (position: relative set via JS for compat) */
+  .code-copy-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.8em;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .code-copy-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .code-copy-btn.copied {
+      opacity: 1;
   }
   
   .pair-duration {
@@ -14615,6 +14963,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874717Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -14689,6 +15038,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -14784,6 +15134,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -14874,6 +15225,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -14913,7 +15265,7 @@
   
       <button class="timeline-toggle floating-btn" id="toggleTimeline" title="Show timeline">📆</button>
       <button class="filter-messages floating-btn" id="filterMessages" title="Search & Filter">🔍</button>
-      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📋</button>
+      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📑</button>
       <a class="scroll-top floating-btn" title="Scroll to top" href="#title">🔝</a>
   
       <script>
@@ -15546,6 +15898,110 @@
   
               // Apply initial fold state
               setInitialFoldState();
+  
+              // Clipboard fallback using execCommand for file:// and insecure contexts
+              function copyViaExecCommand(text) {
+                  var ta = document.createElement('textarea');
+                  ta.value = text;
+                  ta.style.position = 'fixed';
+                  ta.style.left = '-9999px';
+                  document.body.appendChild(ta);
+                  ta.select();
+                  var ok = false;
+                  try { ok = document.execCommand('copy'); } catch (_) {}
+                  document.body.removeChild(ta);
+                  return ok ? Promise.resolve() : Promise.reject();
+              }
+  
+              // Clipboard helper: copies text, falling back to execCommand on rejection
+              function copyText(text) {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                      return navigator.clipboard.writeText(text).catch(function() {
+                          return copyViaExecCommand(text);
+                      });
+                  }
+                  return copyViaExecCommand(text);
+              }
+  
+              // Clipboard helper: copies rich HTML + plain text with fallbacks
+              function copyRich(html, text) {
+                  try {
+                      if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+                          var item = new ClipboardItem({
+                              'text/html': new Blob([html], { type: 'text/html' }),
+                              'text/plain': new Blob([text], { type: 'text/plain' }),
+                          });
+                          return navigator.clipboard.write([item]).catch(function() {
+                              return copyText(text);
+                          });
+                      }
+                  } catch (_) {}
+                  return copyText(text);
+              }
+  
+              // Copy button functionality
+              document.addEventListener('click', function(e) {
+                  const btn = e.target.closest('.copy-btn');
+                  if (!btn) return;
+  
+                  const message = btn.closest('.message');
+                  if (!message) return;
+  
+                  const content = message.querySelector('.content');
+                  if (!content) return;
+  
+                  // Clone and clean: remove preview content, force details open
+                  const clone = content.cloneNode(true);
+                  clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
+                  clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+  
+                  const htmlContent = clone.innerHTML;
+                  // Attach clone temporarily to get accurate innerText
+                  clone.style.position = 'absolute';
+                  clone.style.left = '-9999px';
+                  document.body.appendChild(clone);
+                  var textContent;
+                  try {
+                      textContent = clone.innerText;
+                  } finally {
+                      document.body.removeChild(clone);
+                  }
+  
+                  function showCopied() {
+                      btn.textContent = '\u2705';
+                      btn.classList.add('copied');
+                      setTimeout(function() {
+                          btn.textContent = '\uD83D\uDCCB';
+                          btn.classList.remove('copied');
+                      }, 1500);
+                  }
+  
+                  copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+              });
+  
+              // Inject copy buttons into code blocks
+              document.querySelectorAll('pre > code').forEach(function(code) {
+                  const pre = code.parentElement;
+                  pre.style.position = 'relative';
+                  const btn = document.createElement('button');
+                  btn.className = 'code-copy-btn';
+                  btn.title = 'Copy code';
+                  btn.setAttribute('aria-label', 'Copy code');
+                  btn.textContent = '\uD83D\uDCCB';
+                  btn.addEventListener('click', function() {
+                      copyText(code.textContent).then(function() {
+                          btn.textContent = '\u2705';
+                          btn.classList.add('copied');
+                          setTimeout(function() {
+                              btn.textContent = '\uD83D\uDCCB';
+                              btn.classList.remove('copied');
+                          }, 1500);
+                      }).catch(function() {});
+                  });
+                  pre.appendChild(btn);
+              });
           });
       </script>
       <!-- Search functionality script -->
@@ -16767,8 +17223,53 @@
   .timestamp-row {
       display: flex;
       flex-direction: row;
-      align-items: normal;
+      align-items: center;
       gap: 8px;
+  }
+  
+  /* Copy button */
+  .copy-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.85em;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .copy-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .copy-btn.copied {
+      opacity: 1;
+  }
+  
+  /* Code block copy button (position: relative set via JS for compat) */
+  .code-copy-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.8em;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .code-copy-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .code-copy-btn.copied {
+      opacity: 1;
   }
   
   .pair-duration {
@@ -19447,6 +19948,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -19542,6 +20044,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -19632,6 +20135,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
+                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -19671,7 +20175,7 @@
   
       <button class="timeline-toggle floating-btn" id="toggleTimeline" title="Show timeline">📆</button>
       <button class="filter-messages floating-btn" id="filterMessages" title="Search & Filter">🔍</button>
-      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📋</button>
+      <button class="toggle-details floating-btn" id="toggleDetails" title="Toggle all details">📑</button>
       <a class="scroll-top floating-btn" title="Scroll to top" href="#title">🔝</a>
   
       <script>
@@ -20304,6 +20808,110 @@
   
               // Apply initial fold state
               setInitialFoldState();
+  
+              // Clipboard fallback using execCommand for file:// and insecure contexts
+              function copyViaExecCommand(text) {
+                  var ta = document.createElement('textarea');
+                  ta.value = text;
+                  ta.style.position = 'fixed';
+                  ta.style.left = '-9999px';
+                  document.body.appendChild(ta);
+                  ta.select();
+                  var ok = false;
+                  try { ok = document.execCommand('copy'); } catch (_) {}
+                  document.body.removeChild(ta);
+                  return ok ? Promise.resolve() : Promise.reject();
+              }
+  
+              // Clipboard helper: copies text, falling back to execCommand on rejection
+              function copyText(text) {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                      return navigator.clipboard.writeText(text).catch(function() {
+                          return copyViaExecCommand(text);
+                      });
+                  }
+                  return copyViaExecCommand(text);
+              }
+  
+              // Clipboard helper: copies rich HTML + plain text with fallbacks
+              function copyRich(html, text) {
+                  try {
+                      if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+                          var item = new ClipboardItem({
+                              'text/html': new Blob([html], { type: 'text/html' }),
+                              'text/plain': new Blob([text], { type: 'text/plain' }),
+                          });
+                          return navigator.clipboard.write([item]).catch(function() {
+                              return copyText(text);
+                          });
+                      }
+                  } catch (_) {}
+                  return copyText(text);
+              }
+  
+              // Copy button functionality
+              document.addEventListener('click', function(e) {
+                  const btn = e.target.closest('.copy-btn');
+                  if (!btn) return;
+  
+                  const message = btn.closest('.message');
+                  if (!message) return;
+  
+                  const content = message.querySelector('.content');
+                  if (!content) return;
+  
+                  // Clone and clean: remove preview content, force details open
+                  const clone = content.cloneNode(true);
+                  clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
+                  clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+  
+                  const htmlContent = clone.innerHTML;
+                  // Attach clone temporarily to get accurate innerText
+                  clone.style.position = 'absolute';
+                  clone.style.left = '-9999px';
+                  document.body.appendChild(clone);
+                  var textContent;
+                  try {
+                      textContent = clone.innerText;
+                  } finally {
+                      document.body.removeChild(clone);
+                  }
+  
+                  function showCopied() {
+                      btn.textContent = '\u2705';
+                      btn.classList.add('copied');
+                      setTimeout(function() {
+                          btn.textContent = '\uD83D\uDCCB';
+                          btn.classList.remove('copied');
+                      }, 1500);
+                  }
+  
+                  copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+              });
+  
+              // Inject copy buttons into code blocks
+              document.querySelectorAll('pre > code').forEach(function(code) {
+                  const pre = code.parentElement;
+                  pre.style.position = 'relative';
+                  const btn = document.createElement('button');
+                  btn.className = 'code-copy-btn';
+                  btn.title = 'Copy code';
+                  btn.setAttribute('aria-label', 'Copy code');
+                  btn.textContent = '\uD83D\uDCCB';
+                  btn.addEventListener('click', function() {
+                      copyText(code.textContent).then(function() {
+                          btn.textContent = '\u2705';
+                          btn.classList.add('copied');
+                          setTimeout(function() {
+                              btn.textContent = '\uD83D\uDCCB';
+                              btn.classList.remove('copied');
+                          }, 1500);
+                      }).catch(function() {});
+                  });
+                  pre.appendChild(btn);
+              });
           });
       </script>
       <!-- Search functionality script -->

@@ -219,8 +219,53 @@
 .timestamp-row {
     display: flex;
     flex-direction: row;
-    align-items: normal;
+    align-items: center;
     gap: 8px;
+}
+
+/* Copy button */
+.copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85em;
+    padding: 2px 4px;
+    border-radius: 4px;
+    opacity: 0.4;
+    transition: opacity 0.15s;
+}
+
+.copy-btn:hover {
+    opacity: 1;
+    background-color: var(--highlight-light);
+}
+
+.copy-btn.copied {
+    opacity: 1;
+}
+
+/* Code block copy button (position: relative set via JS for compat) */
+.code-copy-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.8em;
+    padding: 2px 4px;
+    border-radius: 4px;
+    opacity: 0.4;
+    transition: opacity 0.15s;
+}
+
+.code-copy-btn:hover {
+    opacity: 1;
+    background-color: var(--highlight-light);
+}
+
+.code-copy-btn.copied {
+    opacity: 1;
 }
 
 .pair-duration {
