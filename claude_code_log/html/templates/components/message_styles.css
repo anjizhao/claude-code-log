@@ -259,21 +259,17 @@ pre:has(> code) {
     font-size: 0.8em;
     padding: 2px 4px;
     border-radius: 4px;
-    opacity: 0;
+    opacity: 0.4;
     transition: opacity 0.15s;
 }
 
-pre:hover > .code-copy-btn {
-    opacity: 0.5;
-}
-
 .code-copy-btn:hover {
-    opacity: 1 !important;
+    opacity: 1;
     background-color: var(--highlight-light);
 }
 
 .code-copy-btn.copied {
-    opacity: 1 !important;
+    opacity: 1;
 }
 
 .pair-duration {
