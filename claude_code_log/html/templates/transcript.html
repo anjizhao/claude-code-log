@@ -140,6 +140,9 @@
                 elif msg_emoji and (message.type != 'tool_use' or not starts_with_emoji(message_title)) %}{{ msg_emoji }} {% endif %}{{ message_title | safe }}{% endif %}</span>
             <div class='header-info'>
                 <div class='timestamp-row'>
+                    {% if 'assistant' in msg_css_class or 'thinking' in msg_css_class or (message_title and 'ExitPlanMode' in message_title) or (message.content and message.content.tool_name is defined and message.content.tool_name == 'Task') %}
+                    <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                    {% endif %}
                     <span class='timestamp'{% if message.meta and message.meta.timestamp %} data-timestamp='{{ message.meta.timestamp }}'{% if message.pair_duration %} data-duration='{{ message.pair_duration }}'{% endif %}{% endif %}>{{ formatted_timestamp }}</span>
                 </div>
                 {% if show_stats and message.token_usage %}
@@ -829,6 +832,80 @@
 
             // Apply initial fold state
             setInitialFoldState();
+
+            // Copy button functionality
+            document.addEventListener('click', function(e) {
+                const btn = e.target.closest('.copy-btn');
+                if (!btn) return;
+
+                const message = btn.closest('.message');
+                if (!message) return;
+
+                const content = message.querySelector('.content');
+                if (!content) return;
+
+                // Clone and clean: remove preview content, force details open
+                const clone = content.cloneNode(true);
+                clone.querySelectorAll('.preview-content').forEach(function(el) { el.remove(); });
+                clone.querySelectorAll('details > summary').forEach(function(el) { el.remove(); });
+                clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
+
+                const htmlContent = clone.innerHTML;
+                // Attach clone temporarily to get accurate innerText
+                clone.style.position = 'absolute';
+                clone.style.left = '-9999px';
+                document.body.appendChild(clone);
+                const textContent = clone.innerText;
+                document.body.removeChild(clone);
+
+                const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+                const textBlob = new Blob([textContent], { type: 'text/plain' });
+
+                navigator.clipboard.write([
+                    new ClipboardItem({
+                        'text/html': htmlBlob,
+                        'text/plain': textBlob,
+                    })
+                ]).then(function() {
+                    btn.textContent = '\u2705';
+                    btn.classList.add('copied');
+                    setTimeout(function() {
+                        btn.textContent = '\uD83D\uDCCB';
+                        btn.classList.remove('copied');
+                    }, 1500);
+                }).catch(function() {
+                    // Fallback: copy plain text
+                    navigator.clipboard.writeText(textContent).then(function() {
+                        btn.textContent = '\u2705';
+                        btn.classList.add('copied');
+                        setTimeout(function() {
+                            btn.textContent = '\uD83D\uDCCB';
+                            btn.classList.remove('copied');
+                        }, 1500);
+                    });
+                });
+            });
+
+            // Inject copy buttons into code blocks
+            document.querySelectorAll('pre > code').forEach(function(code) {
+                const pre = code.parentElement;
+                const btn = document.createElement('button');
+                btn.className = 'code-copy-btn';
+                btn.title = 'Copy code';
+                btn.setAttribute('aria-label', 'Copy code');
+                btn.textContent = '\uD83D\uDCCB';
+                btn.addEventListener('click', function() {
+                    navigator.clipboard.writeText(code.textContent).then(function() {
+                        btn.textContent = '\u2705';
+                        btn.classList.add('copied');
+                        setTimeout(function() {
+                            btn.textContent = '\uD83D\uDCCB';
+                            btn.classList.remove('copied');
+                        }, 1500);
+                    });
+                });
+                pre.appendChild(btn);
+            });
         });
     </script>
     <!-- Search functionality script -->
