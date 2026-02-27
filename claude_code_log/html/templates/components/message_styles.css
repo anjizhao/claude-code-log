@@ -54,16 +54,6 @@
     transform: translateY(0);
 }
 
-/* Left section: fold one level */
-.fold-one-level {
-    border-right: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-/* Full-width single button when counts are equal */
-.fold-bar-section.full-width {
-    border-right: none;
-}
-
 /* Icon styling */
 .fold-icon {
     font-size: 1.1em;
