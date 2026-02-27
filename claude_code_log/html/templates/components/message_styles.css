@@ -5,42 +5,32 @@
     border-radius: 8px;
     border-left: var(--white-dimmed) 2px solid;
     background-color: var(--highlight-light);
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
     position: relative;
 }
 
-/* Message with fold bar: remove bottom padding */
-.message:has(.fold-bar) {
-    padding-bottom: 0;
-}
-
-/* Horizontal Fold Bar - integrated into message box */
+/* Fold Bar - compact overlay pill in bottom-right corner */
 .fold-bar {
-    display: flex;
-    margin: 1em calc(-1 * var(--message-padding)) 0;
-    height: 28px;
-    border-radius: 0 0 8px 8px;
-    overflow: hidden;
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    z-index: 1;
     transition: all 0.2s ease;
 }
 
 .fold-bar-section {
-    flex: 1;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
     gap: 0.4em;
     cursor: pointer;
     user-select: none;
-    font-size: 0.9em;
+    font-size: 0.8em;
     font-weight: 500;
-    padding: 0.4em 0.8em 0.4em 0.4em;
+    padding: 0.2em 0.6em;
     transition: all 0.2s ease;
     border-bottom: 1px solid transparent;
-    background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
+    border-radius: 4px;
+    background: #f0f0f088;
+    backdrop-filter: blur(4px);
 }
 
 /* Show border only when folded (content is hidden) */
@@ -50,22 +40,11 @@
 }
 
 .fold-bar-section:hover {
-    background: linear-gradient(to bottom, #fff, #f5f5f5);
-    transform: translateY(1px);
+    background: #e8e8e8;
 }
 
 .fold-bar-section:active {
     transform: translateY(0);
-}
-
-/* Left section: fold one level */
-.fold-one-level {
-    border-right: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-/* Full-width single button when counts are equal */
-.fold-bar-section.full-width {
-    border-right: none;
 }
 
 /* Icon styling */
@@ -298,7 +277,7 @@ pre:hover > .code-copy-btn {
 }
 
 .pair-duration {
-    font-size: 80%;
+    font-size: 0.8em;
     color: var(--text-muted);
     font-style: italic;
 }
@@ -383,14 +362,14 @@ pre:hover > .code-copy-btn {
 
 .system-info .header,
 .system-info .content {
-    font-size: 80%;
+    font-size: 0.8em;
 }
 
 /* Hook summary styling */
 .system-hook {
     border-left-color: var(--warning-dimmed);
     background-color: var(--highlight-dimmed);
-    font-size: 90%;
+    font-size: 0.9em;
 }
 
 .hook-summary {
@@ -507,7 +486,7 @@ pre:hover > .code-copy-btn {
     border-radius: 4px;
     margin: 4px 0;
     font-family: var(--font-monospace);
-    font-size: 80%;
+    font-size: 0.8em;
     line-height: 1.3;
     white-space: pre;
     overflow-x: auto;
@@ -570,7 +549,7 @@ pre:hover > .code-copy-btn {
 }
 
 .message.tool_use pre, .message.tool_result pre {
-    font-size: 80%;
+    font-size: 0.8em;
 }
 
 /* Sidechain message styling */
@@ -606,11 +585,6 @@ pre:hover > .code-copy-btn {
     border-radius: 8px;
     padding: 16px;
     margin: 30px 0 20px 0;
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-left: var(--white-dimmed) 1px solid;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
 }
 
 .session-header .header {
@@ -631,7 +605,7 @@ pre:hover > .code-copy-btn {
     padding: 8px 12px;
     margin: 8px 0;
     border-radius: 4px;
-    font-size: 80%;
+    font-size: 0.8em;
     font-style: italic;
 }
 
@@ -712,18 +686,13 @@ pre > code {
     padding: 8px;
     margin: 8px 0;
     overflow-x: auto;
-    box-shadow: -4px -4px 10px #eeeeee33, 4px 4px 10px #00000007;
-    border-left: var(--white-dimmed) 1px solid;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
 }
 
 /* Tool parameter table styling */
 .tool-params-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 80%;
+    font-size: 0.8em;
 }
 
 .tool-params-table tr {
@@ -790,7 +759,7 @@ pre > code {
 
 .thinking-content {
     font-style: italic;
-    font-size: 80%;
+    font-size: 0.8em;
 }
 
 .thinking-content em {
@@ -799,7 +768,7 @@ pre > code {
 
 .thinking-text {
     font-family: var(--font-ui);
-    font-size: 90%;
+    font-size: 0.9em;
     word-wrap: break-word;
     color: #555;
 }
@@ -810,11 +779,6 @@ pre > code {
     padding: 6px;
     margin: 4px 0;
     font-size: 0.9em;
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-left: var(--white-dimmed) 1px solid;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
 }
 
 /* Session summary styling */
@@ -825,10 +789,6 @@ pre > code {
     margin: 8px 0;
     border-radius: 0 4px 4px 0;
     font-style: italic;
-    box-shadow: -7px -7px 10px #eeeeee44, 7px 7px 10px #00000011;
-    border-top: var(--white-dimmed) 1px solid;
-    border-bottom: #00000017 1px solid;
-    border-right: #00000017 1px solid;
 }
 
 /* Collapsible details styling */
@@ -904,7 +864,6 @@ details summary {
     padding: 0;
     margin: 0;
     color: #555;
-    line-height: 1.3;
     white-space: pre-wrap;
     word-wrap: break-word;
 }
@@ -1017,9 +976,6 @@ details summary {
 }
 
 @media (max-width: 1280px) {
-    .fold-bar {
-        height: auto;
-    }
     .user:not(.compacted),
     .bash-input,
     .bash-output,
