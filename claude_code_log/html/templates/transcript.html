@@ -122,7 +122,16 @@
     {% else %}
     {%- set msg_css_class = css_class_from_message(message) %}
     {% set markdown = message.content.has_markdown if message.content else false %}
-    <div class='message {{ msg_css_class }}{% if message.is_paired %} {{ message.pair_role }}{% endif %}{% for ancestor_index in message.ancestry %} d-{{ ancestor_index }}{% endfor %}' data-message-id='{{ message.message_id }}' id='msg-{{ message.message_id }}'>
+    <div class='message {{ msg_css_class }}{% if message.is_paired %} {{ message.pair_role }}{% endif %}{% if message.is_continuation %} continuation{% endif %}{% for ancestor_index in message.ancestry %} d-{{ ancestor_index }}{% endfor %}' data-message-id='{{ message.message_id }}' id='msg-{{ message.message_id }}'>
+        {% if message.is_continuation %}
+        <div class='content{% if markdown %} markdown{% endif %}'>
+            <div class='continuation-meta'>
+                <span class='timestamp'{% if message.meta and message.meta.timestamp %} data-timestamp='{{ message.meta.timestamp }}'{% endif %}>{{ formatted_timestamp }}</span>
+                {% if show_stats and message.token_usage %}<span class='token-usage'>{{ message.token_usage }}</span>{% endif %}
+            </div>
+            {{ html_content | safe }}
+        </div>
+        {% else %}
         <div class='header'>
             {% set msg_emoji = get_message_emoji(message) -%}
             <span{% if message.title_hint %} title="{{ message.title_hint }}"{% endif %}>{% if message_title %}{%
@@ -138,6 +147,7 @@
             </div>
         </div>
         <div class='content{% if markdown %} markdown{% endif %}'>{{ html_content | safe }}</div>
+        {% endif %}
         {% if message.has_children %}
         <div class='fold-bar' data-message-id='{{ message.message_id }}' data-border-color='{{ msg_css_class }}'>
             <div class='fold-bar-section' data-action='fold-one' data-target='{{ message.message_id }}' data-title-unfolded='Fold {{ message.get_immediate_children_label() }}' data-title-folded='Unfold {{ message.get_immediate_children_label() }}' title='Fold {{ message.get_immediate_children_label() }}'>

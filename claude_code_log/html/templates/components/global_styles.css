@@ -137,6 +137,7 @@ pre {
 /* Common header styling */
 .header {
     font-weight: 600;
+    margin-top: -4px;
     margin-bottom: 8px;
     display: flex;
     justify-content: space-between;

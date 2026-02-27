@@ -234,6 +234,23 @@
     color: #888;
 }
 
+/* Continuation messages (consecutive same-type assistant/thinking) */
+.continuation-meta {
+    position: absolute;
+    top: var(--message-padding);
+    right: var(--message-padding);
+    z-index: 1;
+    color: #888;
+}
+
+.message .content p:first-of-type {
+    margin-top: 0;
+}
+
+.message .content p:last-of-type {
+    margin-bottom: 0;
+}
+
 /* Paired message styling */
 .message.pair_first {
     margin-bottom: 0;
