@@ -2069,35 +2069,29 @@
       position: relative;
   }
   
-  /* Message with fold bar: remove bottom padding */
-  .message:has(.fold-bar) {
-      padding-bottom: 0;
-  }
-  
-  /* Horizontal Fold Bar - integrated into message box */
+  /* Fold Bar - compact overlay pill in bottom-right corner */
   .fold-bar {
-      display: flex;
-      margin: 1em calc(-1 * var(--message-padding)) 0;
-      height: 28px;
-      border-radius: 0 0 8px 8px;
-      overflow: hidden;
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      z-index: 1;
       transition: all 0.2s ease;
   }
   
   .fold-bar-section {
-      flex: 1;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      justify-content: flex-end;
       gap: 0.4em;
       cursor: pointer;
       user-select: none;
-      font-size: 0.9em;
+      font-size: 0.8em;
       font-weight: 500;
-      padding: 0.4em 0.8em 0.4em 0.4em;
+      padding: 0.2em 0.6em;
       transition: all 0.2s ease;
       border-bottom: 1px solid transparent;
-      background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
+      border-radius: 4px;
+      background: #f0f0f088;
+      backdrop-filter: blur(4px);
   }
   
   /* Show border only when folded (content is hidden) */
@@ -2107,8 +2101,7 @@
   }
   
   .fold-bar-section:hover {
-      background: linear-gradient(to bottom, #fff, #f5f5f5);
-      transform: translateY(1px);
+      background: #e8e8e8;
   }
   
   .fold-bar-section:active {
@@ -2991,9 +2984,6 @@
   }
   
   @media (max-width: 1280px) {
-      .fold-bar {
-          height: auto;
-      }
       .user:not(.compacted),
       .bash-input,
       .bash-output,
@@ -6837,35 +6827,29 @@
       position: relative;
   }
   
-  /* Message with fold bar: remove bottom padding */
-  .message:has(.fold-bar) {
-      padding-bottom: 0;
-  }
-  
-  /* Horizontal Fold Bar - integrated into message box */
+  /* Fold Bar - compact overlay pill in bottom-right corner */
   .fold-bar {
-      display: flex;
-      margin: 1em calc(-1 * var(--message-padding)) 0;
-      height: 28px;
-      border-radius: 0 0 8px 8px;
-      overflow: hidden;
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      z-index: 1;
       transition: all 0.2s ease;
   }
   
   .fold-bar-section {
-      flex: 1;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      justify-content: flex-end;
       gap: 0.4em;
       cursor: pointer;
       user-select: none;
-      font-size: 0.9em;
+      font-size: 0.8em;
       font-weight: 500;
-      padding: 0.4em 0.8em 0.4em 0.4em;
+      padding: 0.2em 0.6em;
       transition: all 0.2s ease;
       border-bottom: 1px solid transparent;
-      background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
+      border-radius: 4px;
+      background: #f0f0f088;
+      backdrop-filter: blur(4px);
   }
   
   /* Show border only when folded (content is hidden) */
@@ -6875,8 +6859,7 @@
   }
   
   .fold-bar-section:hover {
-      background: linear-gradient(to bottom, #fff, #f5f5f5);
-      transform: translateY(1px);
+      background: #e8e8e8;
   }
   
   .fold-bar-section:active {
@@ -7759,9 +7742,6 @@
   }
   
   @media (max-width: 1280px) {
-      .fold-bar {
-          height: auto;
-      }
       .user:not(.compacted),
       .bash-input,
       .bash-output,
@@ -11693,35 +11673,29 @@
       position: relative;
   }
   
-  /* Message with fold bar: remove bottom padding */
-  .message:has(.fold-bar) {
-      padding-bottom: 0;
-  }
-  
-  /* Horizontal Fold Bar - integrated into message box */
+  /* Fold Bar - compact overlay pill in bottom-right corner */
   .fold-bar {
-      display: flex;
-      margin: 1em calc(-1 * var(--message-padding)) 0;
-      height: 28px;
-      border-radius: 0 0 8px 8px;
-      overflow: hidden;
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      z-index: 1;
       transition: all 0.2s ease;
   }
   
   .fold-bar-section {
-      flex: 1;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      justify-content: flex-end;
       gap: 0.4em;
       cursor: pointer;
       user-select: none;
-      font-size: 0.9em;
+      font-size: 0.8em;
       font-weight: 500;
-      padding: 0.4em 0.8em 0.4em 0.4em;
+      padding: 0.2em 0.6em;
       transition: all 0.2s ease;
       border-bottom: 1px solid transparent;
-      background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
+      border-radius: 4px;
+      background: #f0f0f088;
+      backdrop-filter: blur(4px);
   }
   
   /* Show border only when folded (content is hidden) */
@@ -11731,8 +11705,7 @@
   }
   
   .fold-bar-section:hover {
-      background: linear-gradient(to bottom, #fff, #f5f5f5);
-      transform: translateY(1px);
+      background: #e8e8e8;
   }
   
   .fold-bar-section:active {
@@ -12615,9 +12588,6 @@
   }
   
   @media (max-width: 1280px) {
-      .fold-bar {
-          height: auto;
-      }
       .user:not(.compacted),
       .bash-input,
       .bash-output,
@@ -16586,35 +16556,29 @@
       position: relative;
   }
   
-  /* Message with fold bar: remove bottom padding */
-  .message:has(.fold-bar) {
-      padding-bottom: 0;
-  }
-  
-  /* Horizontal Fold Bar - integrated into message box */
+  /* Fold Bar - compact overlay pill in bottom-right corner */
   .fold-bar {
-      display: flex;
-      margin: 1em calc(-1 * var(--message-padding)) 0;
-      height: 28px;
-      border-radius: 0 0 8px 8px;
-      overflow: hidden;
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      z-index: 1;
       transition: all 0.2s ease;
   }
   
   .fold-bar-section {
-      flex: 1;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      justify-content: flex-end;
       gap: 0.4em;
       cursor: pointer;
       user-select: none;
-      font-size: 0.9em;
+      font-size: 0.8em;
       font-weight: 500;
-      padding: 0.4em 0.8em 0.4em 0.4em;
+      padding: 0.2em 0.6em;
       transition: all 0.2s ease;
       border-bottom: 1px solid transparent;
-      background: linear-gradient(to bottom, #f8f8f844, #f0f0f0);
+      border-radius: 4px;
+      background: #f0f0f088;
+      backdrop-filter: blur(4px);
   }
   
   /* Show border only when folded (content is hidden) */
@@ -16624,8 +16588,7 @@
   }
   
   .fold-bar-section:hover {
-      background: linear-gradient(to bottom, #fff, #f5f5f5);
-      transform: translateY(1px);
+      background: #e8e8e8;
   }
   
   .fold-bar-section:active {
@@ -17508,9 +17471,6 @@
   }
   
   @media (max-width: 1280px) {
-      .fold-bar {
-          height: auto;
-      }
       .user:not(.compacted),
       .bash-input,
       .bash-output,
