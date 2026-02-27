@@ -858,32 +858,27 @@
                 const textContent = clone.innerText;
                 document.body.removeChild(clone);
 
-                const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-                const textBlob = new Blob([textContent], { type: 'text/plain' });
-
-                navigator.clipboard.write([
-                    new ClipboardItem({
-                        'text/html': htmlBlob,
-                        'text/plain': textBlob,
-                    })
-                ]).then(function() {
+                function showCopied() {
                     btn.textContent = '\u2705';
                     btn.classList.add('copied');
                     setTimeout(function() {
                         btn.textContent = '\uD83D\uDCCB';
                         btn.classList.remove('copied');
                     }, 1500);
-                }).catch(function() {
-                    // Fallback: copy plain text
-                    navigator.clipboard.writeText(textContent).then(function() {
-                        btn.textContent = '\u2705';
-                        btn.classList.add('copied');
-                        setTimeout(function() {
-                            btn.textContent = '\uD83D\uDCCB';
-                            btn.classList.remove('copied');
-                        }, 1500);
+                }
+
+                // Try rich text copy, fall back to plain text
+                try {
+                    var item = new ClipboardItem({
+                        'text/html': new Blob([htmlContent], { type: 'text/html' }),
+                        'text/plain': new Blob([textContent], { type: 'text/plain' }),
                     });
-                });
+                    navigator.clipboard.write([item]).then(showCopied).catch(function() {
+                        navigator.clipboard.writeText(textContent).then(showCopied);
+                    });
+                } catch (_) {
+                    navigator.clipboard.writeText(textContent).then(showCopied);
+                }
             });
 
             // Inject copy buttons into code blocks
