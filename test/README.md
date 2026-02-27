@@ -132,12 +132,9 @@ open scripts/style_guide_output/index.html
 
 ### Test Categories
 
-The project uses a categorized test system to avoid async event loop conflicts between different testing frameworks:
-
 #### Test Categories
 
 - **Unit Tests** (no mark): Fast, standalone tests with no external dependencies
-- **TUI Tests** (`@pytest.mark.tui`): Tests for the Textual-based Terminal User Interface
 - **Browser Tests** (`@pytest.mark.browser`): Playwright-based tests that run in real browsers
 - **Integration Tests** (`@pytest.mark.integration`): Tests with realistic JSONL data from `test_data/real_projects/`
 - **Snapshot Tests**: HTML regression tests using syrupy (runs with unit tests)
@@ -170,11 +167,7 @@ git diff test/__snapshots__/
 ```bash
 # Run only unit tests (fast, recommended for development)
 just test
-# or: uv run pytest -n auto -m "not (tui or browser or integration)" -v
-
-# Run TUI tests (isolated event loop)
-just test-tui
-# or: uv run pytest -n auto -m tui -v
+# or: uv run pytest -n auto -m "not (browser or integration)" -v
 
 # Run browser tests (requires Chromium)
 just test-browser
@@ -199,14 +192,8 @@ just test-cov
 
 #### Why Test Categories?
 
-The test suite is categorized because:
-
-- **TUI tests** use Textual's async event loop (`run_test()`)
-- **Browser tests** use Playwright's internal asyncio
+- **Browser tests** use Playwright's internal asyncio (separated to avoid event loop conflicts)
 - **Integration tests** process real-world data (slower, more comprehensive)
-- **pytest-asyncio** manages async test execution
-
-Running all tests together can cause "RuntimeError: This event loop is already running" conflicts. The categorization ensures reliable test execution by isolating different async frameworks.
 
 ### Test Coverage
 

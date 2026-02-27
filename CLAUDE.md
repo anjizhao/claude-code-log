@@ -36,7 +36,7 @@ claude-code-log --from-date "last week"
 
 **Output Files Generated:**
 - `~/.claude/projects/index.html` - Master index with project cards
-- `~/.claude/projects/project-name/combined_transcripts.html` - Combined project page
+- `~/.claude/projects/project-name/index.html` - Project session index
 - `~/.claude/projects/project-name/session-{id}.html` - Individual session pages
 
 ## Development

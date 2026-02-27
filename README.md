@@ -76,11 +76,11 @@ When processing all projects (the default), the tool generates HTML files alongs
 ~/.claude/projects/
 ├── index.html                        # Top-level index with project cards
 ├── -Users-you-code-project-a/
-│   ├── combined_transcripts.html     # All sessions for this project
+│   ├── index.html                   # Project session index
 │   ├── session-{id}.html            # Individual session pages
 │   └── *.jsonl                       # Source transcript files
 ├── -Users-you-code-project-b/
-│   ├── combined_transcripts.html
+│   ├── index.html
 │   ├── session-{id}.html
 │   └── *.jsonl
 └── ...

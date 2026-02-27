@@ -19,30 +19,6 @@ _TMP_PATH_PATTERN = (
 _TMP_PATH_REPLACEMENT = "/[TMP_PATH]"
 
 
-class NormalisedMarkdownSerializer(AmberSnapshotExtension):
-    """
-    Custom serializer that normalises dynamic content in Markdown output.
-
-    Normalises only truly dynamic content:
-    - Library version comments (changes between releases)
-    - Pytest tmp paths (varies per test run)
-    """
-
-    @classmethod
-    def serialize(cls, data: SerializableData, **kwargs: Any) -> str:
-        if isinstance(data, str):
-            normalised = cls._normalise_markdown(data)
-            return normalised
-        return str(super().serialize(data, **kwargs))
-
-    @classmethod
-    def _normalise_markdown(cls, md: str) -> str:
-        """Apply normalisation rules to Markdown content."""
-        md = re.sub(_VERSION_PATTERN, _VERSION_REPLACEMENT, md)
-        md = re.sub(_TMP_PATH_PATTERN, _TMP_PATH_REPLACEMENT, md)
-        return md
-
-
 class NormalisedHTMLSerializer(AmberSnapshotExtension):
     """
     Custom serializer that normalises dynamic content in HTML output.
