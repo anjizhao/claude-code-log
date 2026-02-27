@@ -223,7 +223,9 @@ def _clear_html_files(input_path: Path, all_projects: bool) -> None:
 @click.option(
     "--skip-combined",
     is_flag=True,
-    help="Skip generating combined transcript; create a project-level session index instead",
+    default=True,
+    hidden=True,
+    help="Skip generating combined transcript; create a project-level session index instead (now the default)",
 )
 @click.option(
     "--no-cache",

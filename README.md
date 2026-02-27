@@ -59,8 +59,7 @@ claude-code-log /path/to/project/directory
 | `--from-date TEXT` | Filter messages from this date. Supports natural language (e.g. `"yesterday"`, `"2 hours ago"`, `"2025-06-08"`). |
 | `--to-date TEXT` | Filter messages up to this date. Same format as `--from-date`. |
 | `--all-projects` | Process all projects in `~/.claude/projects/`. This is the default when no input path is given. |
-| `--no-individual-sessions` | Skip generating individual session HTML files (only create combined transcript). |
-| `--skip-combined` | Skip generating combined transcript; create a project-level session index instead. |
+| `--no-individual-sessions` | Skip generating individual session HTML files. |
 | `--no-cache` | Disable caching and force reprocessing of all files. |
 | `--clear-cache` | Clear all cache data before processing. |
 | `--clear-output` / `--clear-html` | Clear generated HTML files and force regeneration. |

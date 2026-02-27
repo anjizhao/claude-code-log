@@ -275,9 +275,9 @@ class TestCLIWithProjectsDir:
         )
         assert result.exit_code == 0
 
-        # Verify HTML files were created
+        # Verify HTML files were created (session index or session files)
         html_exists = any(
-            (project_dir / "combined_transcripts.html").exists()
+            list(project_dir.glob("*.html"))
             for project_dir in temp_projects_copy.iterdir()
             if project_dir.is_dir()
         )
@@ -960,26 +960,9 @@ class TestNoIndividualSessionsFlag:
 
         assert result.exit_code == 0, f"CLI failed: {result.output}"
 
-        # Combined transcript should exist
-        assert (project / "combined_transcripts.html").exists()
-
         # Individual session files should NOT exist
         session_files = list(project.glob("session-*.html"))
         assert len(session_files) == 0
-
-    def test_combined_transcript_still_generated(
-        self, temp_projects_copy: Path
-    ) -> None:
-        """Combined transcript is generated even with flag."""
-        runner = CliRunner()
-        project = temp_projects_copy / "-Users-dain-workspace-JSSoundRecorder"
-        if not project.exists():
-            pytest.skip("JSSoundRecorder test data not available")
-
-        result = runner.invoke(main, [str(project), "--no-individual-sessions"])
-
-        assert result.exit_code == 0
-        assert (project / "combined_transcripts.html").exists()
 
     def test_flag_with_all_projects(self, temp_projects_copy: Path) -> None:
         """Flag works with --all-projects - no session files should be generated."""
@@ -1003,10 +986,9 @@ class TestNoIndividualSessionsFlag:
 
         assert result.exit_code == 0, f"CLI failed: {result.output}"
 
-        # Verify combined transcripts are generated but no session files
+        # Verify no session files
         project = temp_projects_copy / "-Users-dain-workspace-JSSoundRecorder"
         if project.exists():
-            assert (project / "combined_transcripts.html").exists()
             session_files = list(project.glob("session-*.html"))
             assert len(session_files) == 0, (
                 f"Expected no session files with --no-individual-sessions, found: {session_files}"
@@ -1027,8 +1009,6 @@ class TestDateFilteringIntegration:
         result = runner.invoke(main, [str(project), "--from-date", "2025-01-01"])
 
         assert result.exit_code == 0
-        # HTML should exist (may be empty of messages)
-        assert (project / "combined_transcripts.html").exists()
 
     def test_date_filtering_with_all_projects(self, temp_projects_copy: Path) -> None:
         """Date filtering works with --all-projects."""
@@ -1061,7 +1041,6 @@ class TestDateFilteringIntegration:
         )
 
         assert result.exit_code == 0
-        assert (project / "combined_transcripts.html").exists()
 
 
 @pytest.mark.integration
@@ -1294,7 +1273,6 @@ class TestNoCacheFlag:
         result = runner.invoke(main, [str(project), "--no-cache"])
 
         assert result.exit_code == 0
-        assert (project / "combined_transcripts.html").exists()
         # Cache should NOT be created
         assert not cache_dir.exists()
 
@@ -1395,7 +1373,6 @@ class TestCombinedFlagScenarios:
         )
 
         assert result.exit_code == 0
-        assert (project / "combined_transcripts.html").exists()
         assert len(list(project.glob("session-*.html"))) == 0
 
     def test_output_with_date_filter(self, temp_projects_copy: Path) -> None:
@@ -1427,7 +1404,6 @@ class TestCombinedFlagScenarios:
         )
 
         assert result.exit_code == 0
-        assert (project / "combined_transcripts.html").exists()
         assert not (project / "cache").exists()
 
     def test_all_flags_combined(self, temp_projects_copy: Path) -> None:
@@ -1603,7 +1579,6 @@ class TestHtmlOutput:
         result = runner.invoke(main, [str(project)])
 
         assert result.exit_code == 0, f"CLI failed: {result.output}"
-        assert (project / "combined_transcripts.html").exists()
 
     def test_version_comment_in_output(self, temp_projects_copy: Path) -> None:
         """Verify version comment is present in output files."""
