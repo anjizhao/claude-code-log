@@ -252,21 +252,17 @@
     font-size: 0.85em;
     padding: 2px 4px;
     border-radius: 4px;
-    opacity: 0;
+    opacity: 0.4;
     transition: opacity 0.15s;
 }
 
-.message:hover .copy-btn {
-    opacity: 0.5;
-}
-
 .copy-btn:hover {
-    opacity: 1 !important;
+    opacity: 1;
     background-color: var(--highlight-light);
 }
 
 .copy-btn.copied {
-    opacity: 1 !important;
+    opacity: 1;
 }
 
 /* Code block copy button */
