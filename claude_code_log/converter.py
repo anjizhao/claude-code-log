@@ -212,6 +212,7 @@ def load_transcript(
                         in [
                             "file-history-snapshot",  # Internal Claude Code file backup metadata
                             "progress",  # Real-time progress updates (hook_progress, bash_progress)
+                            "pr-link",  # PR link metadata (created/linked PRs)
                         ]
                     ):
                         # Silently skip internal message types we don't render
