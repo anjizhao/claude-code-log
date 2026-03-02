@@ -126,6 +126,9 @@
         {% if message.is_continuation %}
         <div class='content{% if markdown %} markdown{% endif %}'>
             <div class='continuation-meta'>
+                {%- if 'assistant' in msg_css_class or 'thinking' in msg_css_class %}
+                <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                {%- endif %}
                 <span class='timestamp'{% if message.meta and message.meta.timestamp %} data-timestamp='{{ message.meta.timestamp }}'{% endif %}>{{ formatted_timestamp }}</span>
                 {% if show_stats and message.token_usage %}<span class='token-usage'>{{ message.token_usage }}</span>{% endif %}
             </div>

@@ -281,11 +281,12 @@
 
 /* Continuation messages (consecutive same-type assistant/thinking) */
 .continuation-meta {
-    position: absolute;
-    top: var(--message-padding);
-    right: var(--message-padding);
-    z-index: 1;
+    float: right;
+    margin-left: 1em;
     color: #888;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .message .content p:first-of-type {
