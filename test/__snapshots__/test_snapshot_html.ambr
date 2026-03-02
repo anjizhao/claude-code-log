@@ -149,7 +149,6 @@
   /* Common header styling */
   .header {
       font-weight: 600;
-      margin-top: -4px;
       margin-bottom: 8px;
       display: flex;
       justify-content: space-between;
@@ -1976,7 +1975,6 @@
   /* Common header styling */
   .header {
       font-weight: 600;
-      margin-top: -4px;
       margin-bottom: 8px;
       display: flex;
       justify-content: space-between;
@@ -2069,6 +2067,10 @@
       border-left: var(--white-dimmed) 2px solid;
       background-color: var(--highlight-light);
       position: relative;
+  }
+  
+  .message > .header {
+      margin-top: -4px;
   }
   
   /* Fold Bar - compact overlay pill in bottom-right corner */
@@ -2352,11 +2354,11 @@
       gap: 8px;
   }
   
-  .message .content p:first-of-type {
+  .message.continuation .content p:first-of-type {
       margin-top: 0;
   }
   
-  .message .content p:last-of-type {
+  .message.continuation .content p:last-of-type {
       margin-bottom: 0;
   }
   
@@ -2713,6 +2715,7 @@
   /* Content styling */
   .content {
       word-wrap: break-word;
+      overflow: hidden;
   }
   
   .content>pre {
@@ -5965,6 +5968,7 @@
                   clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
   
                   const htmlContent = clone.innerHTML;
                   // Attach clone temporarily to get accurate innerText
@@ -6927,7 +6931,6 @@
   /* Common header styling */
   .header {
       font-weight: 600;
-      margin-top: -4px;
       margin-bottom: 8px;
       display: flex;
       justify-content: space-between;
@@ -7020,6 +7023,10 @@
       border-left: var(--white-dimmed) 2px solid;
       background-color: var(--highlight-light);
       position: relative;
+  }
+  
+  .message > .header {
+      margin-top: -4px;
   }
   
   /* Fold Bar - compact overlay pill in bottom-right corner */
@@ -7303,11 +7310,11 @@
       gap: 8px;
   }
   
-  .message .content p:first-of-type {
+  .message.continuation .content p:first-of-type {
       margin-top: 0;
   }
   
-  .message .content p:last-of-type {
+  .message.continuation .content p:last-of-type {
       margin-bottom: 0;
   }
   
@@ -7664,6 +7671,7 @@
   /* Content styling */
   .content {
       word-wrap: break-word;
+      overflow: hidden;
   }
   
   .content>pre {
@@ -11005,6 +11013,7 @@
                   clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
   
                   const htmlContent = clone.innerHTML;
                   // Attach clone temporarily to get accurate innerText
@@ -11967,7 +11976,6 @@
   /* Common header styling */
   .header {
       font-weight: 600;
-      margin-top: -4px;
       margin-bottom: 8px;
       display: flex;
       justify-content: space-between;
@@ -12060,6 +12068,10 @@
       border-left: var(--white-dimmed) 2px solid;
       background-color: var(--highlight-light);
       position: relative;
+  }
+  
+  .message > .header {
+      margin-top: -4px;
   }
   
   /* Fold Bar - compact overlay pill in bottom-right corner */
@@ -12343,11 +12355,11 @@
       gap: 8px;
   }
   
-  .message .content p:first-of-type {
+  .message.continuation .content p:first-of-type {
       margin-top: 0;
   }
   
-  .message .content p:last-of-type {
+  .message.continuation .content p:last-of-type {
       margin-bottom: 0;
   }
   
@@ -12704,6 +12716,7 @@
   /* Content styling */
   .content {
       word-wrap: break-word;
+      overflow: hidden;
   }
   
   .content>pre {
@@ -16088,6 +16101,7 @@
                   clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
   
                   const htmlContent = clone.innerHTML;
                   // Attach clone temporarily to get accurate innerText
@@ -17050,7 +17064,6 @@
   /* Common header styling */
   .header {
       font-weight: 600;
-      margin-top: -4px;
       margin-bottom: 8px;
       display: flex;
       justify-content: space-between;
@@ -17143,6 +17156,10 @@
       border-left: var(--white-dimmed) 2px solid;
       background-color: var(--highlight-light);
       position: relative;
+  }
+  
+  .message > .header {
+      margin-top: -4px;
   }
   
   /* Fold Bar - compact overlay pill in bottom-right corner */
@@ -17426,11 +17443,11 @@
       gap: 8px;
   }
   
-  .message .content p:first-of-type {
+  .message.continuation .content p:first-of-type {
       margin-top: 0;
   }
   
-  .message .content p:last-of-type {
+  .message.continuation .content p:last-of-type {
       margin-bottom: 0;
   }
   
@@ -17787,6 +17804,7 @@
   /* Content styling */
   .content {
       word-wrap: break-word;
+      overflow: hidden;
   }
   
   .content>pre {
@@ -21039,6 +21057,7 @@
                   clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
   
                   const htmlContent = clone.innerHTML;
                   // Attach clone temporarily to get accurate innerText

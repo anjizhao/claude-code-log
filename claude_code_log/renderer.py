@@ -623,15 +623,16 @@ def generate_template_messages(
     with log_timing("Build message tree", t_start):
         root_messages = _build_message_tree(template_messages)
 
-    # Mark consecutive assistant/thinking siblings so the template can hide
-    # redundant titles (e.g., repeated "Assistant" headers)
-    _mark_continuation_messages(root_messages)
-
     # Clean up sidechain duplicates on the tree structure
     # - Remove first UserTextMessage (duplicate of Task input prompt)
     # - Remove last AssistantTextMessage (duplicate of Task output)
     with log_timing("Cleanup sidechain duplicates", t_start):
         _cleanup_sidechain_duplicates(root_messages)
+
+    # Mark consecutive assistant/thinking siblings so the template can hide
+    # redundant titles (e.g., repeated "Assistant" headers).
+    # Must run AFTER cleanup to avoid stale flags from removed siblings.
+    _mark_continuation_messages(root_messages)
 
     return root_messages, session_nav, ctx
 
