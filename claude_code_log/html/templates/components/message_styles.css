@@ -8,6 +8,10 @@
     position: relative;
 }
 
+.message > .header {
+    margin-top: -4px;
+}
+
 /* Fold Bar - compact overlay pill in bottom-right corner */
 .fold-bar {
     position: absolute;
@@ -277,6 +281,24 @@
 .token-usage {
     font-size: 0.75em;
     color: #888;
+}
+
+/* Continuation messages (consecutive same-type assistant/thinking) */
+.continuation-meta {
+    float: right;
+    margin-left: 1em;
+    color: #888;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.message.continuation .content p:first-of-type {
+    margin-top: 0;
+}
+
+.message.continuation .content p:last-of-type {
+    margin-bottom: 0;
 }
 
 /* Paired message styling */
@@ -632,6 +654,7 @@
 /* Content styling */
 .content {
     word-wrap: break-word;
+    overflow: hidden;
 }
 
 .content>pre {
