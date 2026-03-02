@@ -8,10 +8,7 @@ import pytest
 if TYPE_CHECKING:
     from claude_code_log.cache import CacheManager
 
-from test.snapshot_serializers import (
-    NormalisedHTMLSerializer,
-    NormalisedMarkdownSerializer,
-)
+from test.snapshot_serializers import NormalisedHTMLSerializer
 
 
 # ========== Cache Test Fixtures ==========
@@ -61,12 +58,6 @@ def test_data_dir() -> Path:
 def html_snapshot(snapshot):
     """Snapshot fixture with HTML normalisation for regression testing."""
     return snapshot.use_extension(NormalisedHTMLSerializer)
-
-
-@pytest.fixture
-def markdown_snapshot(snapshot):
-    """Snapshot fixture with Markdown normalisation for regression testing."""
-    return snapshot.use_extension(NormalisedMarkdownSerializer)
 
 
 @pytest.fixture(scope="session")

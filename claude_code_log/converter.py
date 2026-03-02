@@ -41,11 +41,8 @@ from .renderer import get_renderer, is_html_outdated
 
 
 def get_file_extension(format: str) -> str:
-    """Get the file extension for a format.
-
-    Normalizes 'markdown' to 'md' for consistent file extensions.
-    """
-    return "md" if format in ("md", "markdown") else format
+    """Get the file extension for a format."""
+    return format
 
 
 # =============================================================================
@@ -976,7 +973,7 @@ def convert_jsonl_to(
     """Convert JSONL transcript(s) to the specified format.
 
     Args:
-        format: Output format ("html", "md", or "markdown").
+        format: Output format ("html").
         input_path: Path to JSONL file or directory.
         output_path: Optional output path.
         from_date: Optional start date filter.
@@ -986,7 +983,6 @@ def convert_jsonl_to(
         silent: Whether to suppress output.
         image_export_mode: Image export mode ("placeholder", "embedded", "referenced").
         page_size: Maximum messages per page for combined transcript pagination.
-            If None, uses format default (embedded for HTML, referenced for Markdown).
         skip_combined: Skip combined transcript, generate project session index instead.
     """
     if not input_path.exists():
@@ -1847,7 +1843,7 @@ def process_projects_hierarchy(
     skip_combined: bool = False,
     show_stats: bool = False,
 ) -> Path:
-    """Process the entire ~/.claude/projects/ hierarchy and create linked output files.
+    """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files.
 
     Args:
         projects_path: Path to the projects directory
@@ -1855,8 +1851,8 @@ def process_projects_hierarchy(
         to_date: Optional date filter end
         use_cache: Whether to use SQLite cache
         generate_individual_sessions: Whether to generate per-session HTML files
-        output_format: Output format (html, md, markdown)
-        image_export_mode: Image export mode for markdown
+        output_format: Output format (only "html" supported)
+        image_export_mode: Image export mode
         silent: If True, suppress verbose per-file logging (show summary only)
         page_size: Maximum messages per page for combined transcript pagination
         skip_combined: Skip combined transcript, generate project session index instead

@@ -22,9 +22,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "mistune>=3.1.4",
     "toml>=0.10.2",
-    "textual==6.5.0",
     "packaging>=25.0",
-    "gitpython>=3.1.45",
     "pygments>=2.19.2",
 ]
 
@@ -47,7 +45,6 @@ testpaths = ["test"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
-    "tui: TUI tests using Textual framework (requires isolated event loop)",
     "browser: Browser integration tests using Playwright (requires Chromium)",
     "snapshot: Snapshot tests that must run serially (syrupy file ordering)",
     "integration: Integration tests with realistic JSONL data",
