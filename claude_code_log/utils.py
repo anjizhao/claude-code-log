@@ -152,7 +152,7 @@ def should_use_as_session_starter(text_content: str) -> bool:
 
 
 # Constants
-FIRST_USER_MESSAGE_PREVIEW_LENGTH = 1000
+FIRST_USER_MESSAGE_PREVIEW_LENGTH = 500
 
 
 def create_session_preview(text_content: str) -> str:
