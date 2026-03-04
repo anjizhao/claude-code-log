@@ -329,7 +329,17 @@ def load_directory_transcripts(
         messages = load_transcript(
             jsonl_file, cache_manager, from_date, to_date, silent
         )
-        all_messages.extend(messages)
+        # Filter out custom-title entries that belong to a different session.
+        # A /fork writes a cross-reference custom-title into the parent
+        # session's file, which can overwrite the forked session's own
+        # /rename title when all files are combined.
+        session_id = jsonl_file.stem
+        all_messages.extend(
+            m
+            for m in messages
+            if not isinstance(m, CustomTitleTranscriptEntry)
+            or m.sessionId == session_id
+        )
 
     # Sort all messages chronologically
     def get_timestamp(entry: TranscriptEntry) -> str:
@@ -412,6 +422,10 @@ def deduplicate_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntr
         elif isinstance(message, SummaryTranscriptEntry):
             # Summaries have no timestamp or uuid - use leafUuid to keep them distinct
             content_key = message.leafUuid
+        elif isinstance(message, CustomTitleTranscriptEntry):
+            # Custom titles have no timestamp - use the title text so different
+            # titles (e.g. fork auto-title vs /rename) are not deduplicated
+            content_key = message.customTitle
 
         # Create deduplication key
         dedup_key = (message_type, timestamp, is_meta, session_id, content_key)
