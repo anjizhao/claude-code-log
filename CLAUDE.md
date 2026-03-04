@@ -43,6 +43,10 @@ claude-code-log --from-date "last week"
 
 See @CONTRIBUTING.md for detailed development setup, testing, architecture, and release process.
 
+### Worktree Usage
+
+When working in a git worktree, use `uv run --directory /path/to/worktree` (not `cd /path && uv run`) to ensure `uv` picks up the worktree's source code rather than the repo root's.
+
 ### Claude-Specific Testing Tips
 
 **Always use `-n auto` for parallel test execution:**

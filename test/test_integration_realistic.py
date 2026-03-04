@@ -262,8 +262,8 @@ class TestCLIWithProjectsDir:
         assert result.exit_code == 0
         assert "clear" in result.output.lower()
 
-        # Verify SQLite database was deleted
-        assert not cache_db.exists(), "SQLite cache database should be deleted"
+        # Cache DB is recreated by regeneration after clearing
+        assert cache_db.exists(), "SQLite cache should be recreated after clear + regeneration"
 
     def test_clear_html_with_projects_dir(self, temp_projects_copy: Path) -> None:
         """Test HTML clearing with custom projects directory."""
@@ -297,19 +297,15 @@ class TestCLIWithProjectsDir:
         assert result.exit_code == 0
         assert "clear" in result.output.lower() or "removed" in result.output.lower()
 
-        # Verify all HTML files were actually deleted
-        remaining_html: list[Path] = []
+        # HTML files are regenerated after clearing
+        regenerated_html: list[Path] = []
         for project_dir in temp_projects_copy.iterdir():
             if not project_dir.is_dir():
                 continue
-            combined = project_dir / "combined_transcripts.html"
-            if combined.exists():
-                remaining_html.append(combined)
-            # Also check for session HTML files
-            remaining_html.extend(project_dir.glob("session-*.html"))
+            regenerated_html.extend(project_dir.glob("*.html"))
 
-        assert not remaining_html, (
-            f"HTML files should be deleted but found: {remaining_html}"
+        assert regenerated_html, (
+            "HTML files should be regenerated after clear + regeneration"
         )
 
 

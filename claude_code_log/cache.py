@@ -778,6 +778,48 @@ class CacheManager:
             latest_timestamp=project_row["latest_timestamp"],
         )
 
+    def invalidate_html_cache_since(self, since_timestamp: str) -> int:
+        """Delete HTML cache entries for sessions active since the given timestamp.
+
+        Invalidates html_cache rows where the linked session has
+        last_timestamp >= since_timestamp. Also invalidates the project
+        index/combined entry (source_session_id IS NULL) so the index
+        gets rebuilt too.
+
+        Args:
+            since_timestamp: ISO 8601 timestamp cutoff.
+
+        Returns:
+            Number of html_cache entries deleted.
+        """
+        if self._project_id is None:
+            return 0
+
+        normalized = self._normalize_timestamp(since_timestamp)
+        if normalized is None:
+            return 0
+
+        with self._get_connection() as conn:
+            # Delete HTML cache entries for sessions active since the cutoff
+            cursor = conn.execute(
+                """DELETE FROM html_cache
+                   WHERE project_id = ?
+                   AND (
+                       -- Session HTML: join to sessions table to check timestamp
+                       source_session_id IN (
+                           SELECT session_id FROM sessions
+                           WHERE project_id = ? AND last_timestamp >= ?
+                       )
+                       -- Project index / combined transcript entry
+                       OR source_session_id IS NULL
+                   )""",
+                (self._project_id, self._project_id, normalized),
+            )
+            count = cursor.rowcount
+            conn.commit()
+
+        return count
+
     def clear_cache(self) -> None:
         """Clear all cache data for this project."""
         if self._project_id is None:

@@ -233,6 +233,12 @@ def _clear_html_files(input_path: Path, all_projects: bool) -> None:
     help="Disable caching and force reprocessing of all files",
 )
 @click.option(
+    "--regenerate",
+    type=int,
+    default=None,
+    help="Force HTML regeneration for sessions active within N seconds (e.g., 86400 = 1 day). Use after template/CSS changes.",
+)
+@click.option(
     "--clear-cache",
     is_flag=True,
     help="Clear all cache directories before processing",
@@ -277,6 +283,7 @@ def main(
     all_projects: bool,
     no_individual_sessions: bool,
     skip_combined: bool,
+    regenerate: Optional[int],
     no_cache: bool,
     clear_cache: bool,
     clear_output: bool,
@@ -298,19 +305,15 @@ def main(
             input_path = projects_dir or get_default_projects_dir()
             all_projects = True
 
-        # Handle cache clearing
+        # Handle cache clearing (then continue to regenerate)
         if clear_cache:
             _clear_caches(input_path, all_projects)
-            if clear_cache and not (from_date or to_date or input_path.is_file()):
-                click.echo("Cache cleared successfully.")
-                return
+            click.echo("Cache cleared. Regenerating...")
 
-        # Handle output files clearing
+        # Handle output files clearing (then continue to regenerate)
         if clear_output:
             _clear_html_files(input_path, all_projects)
-            if clear_output and not (from_date or to_date or input_path.is_file()):
-                click.echo("HTML files cleared successfully.")
-                return
+            click.echo("HTML files cleared. Regenerating...")
 
         # Handle --all-projects flag or default behavior
         if all_projects:
@@ -329,6 +332,7 @@ def main(
                 page_size=page_size,
                 skip_combined=skip_combined,
                 show_stats=show_stats,
+                regenerate=regenerate,
             )
 
             # Count processed projects
@@ -379,6 +383,7 @@ def main(
             page_size=page_size,
             skip_combined=skip_combined,
             show_stats=show_stats,
+            regenerate=regenerate,
         )
         if input_path.is_file():
             click.echo(f"Successfully converted {input_path} to {output_path}")

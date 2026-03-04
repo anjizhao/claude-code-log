@@ -279,7 +279,7 @@ class TestCLIMainCommand:
     def test_clear_html_flag(
         self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
     ):
-        """--clear-html flag clears HTML files."""
+        """--clear-html flag clears HTML files and regenerates."""
         project_dir = create_project_with_jsonl(
             cli_projects_setup.projects_dir, "test-project", sample_jsonl_content
         )
@@ -289,12 +289,16 @@ class TestCLIMainCommand:
         # Generate HTML
         result1 = runner.invoke(main, [str(project_dir)])
         assert result1.exit_code == 0
-        assert len(list(project_dir.glob("*.html"))) > 0
+        html_before = set(f.name for f in project_dir.glob("*.html"))
+        assert len(html_before) > 0
 
-        # Clear HTML
+        # Clear HTML and regenerate
         result2 = runner.invoke(main, [str(project_dir), "--clear-html"])
         assert result2.exit_code == 0
-        assert len(list(project_dir.glob("*.html"))) == 0
+        assert "HTML files cleared. Regenerating..." in result2.output
+        # HTML files should be regenerated after clearing
+        html_after = set(f.name for f in project_dir.glob("*.html"))
+        assert len(html_after) > 0
 
     def test_no_cache_flag(
         self, cli_projects_setup: ProjectsSetup, sample_jsonl_content: list[dict]
