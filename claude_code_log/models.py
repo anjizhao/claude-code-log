@@ -476,6 +476,30 @@ class UserMemoryMessage(MessageContent):
 
 
 @dataclass
+class TaskNotificationMessage(MessageContent):
+    """Content for task notification messages from background agents.
+
+    These are user messages containing <task-notification> XML blocks
+    with the agent's result as markdown. Parsed by
+    create_task_notification_message() in user_factory.py, formatted by
+    format_task_notification_content() in html/user_formatters.py.
+    """
+
+    result_text: str  # Markdown content from <result>
+    summary: str  # From <summary> (e.g. 'Agent "Fetch docs" completed')
+    task_id: str  # From <task-id>
+    usage_info: Optional[str] = None  # Raw text from <usage> block
+
+    @property
+    def message_type(self) -> str:
+        return "user"
+
+    @property
+    def has_markdown(self) -> bool:
+        return True
+
+
+@dataclass
 class UserSlashCommandMessage(MessageContent):
     """Content for slash command expanded prompts (isMeta=True).
 

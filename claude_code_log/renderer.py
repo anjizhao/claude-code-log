@@ -40,6 +40,7 @@ from .models import (
     SessionHeaderMessage,
     SlashCommandMessage,
     SystemMessage,
+    TaskNotificationMessage,
     TaskOutput,
     ThinkingMessage,
     ToolResultMessage,
@@ -2160,6 +2161,13 @@ class Renderer:
         self, _content: UserMemoryMessage, _: TemplateMessage
     ) -> str:
         return "Memory"
+
+    def title_TaskNotificationMessage(
+        self, content: TaskNotificationMessage, _: TemplateMessage
+    ) -> str:
+        if content.summary:
+            return content.summary
+        return "Agent task completed"
 
     def title_UserSlashCommandMessage(
         self, _content: UserSlashCommandMessage, _: TemplateMessage

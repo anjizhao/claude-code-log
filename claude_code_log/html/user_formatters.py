@@ -22,6 +22,7 @@ from ..models import (
     IdeSelection,
     ImageContent,
     SlashCommandMessage,
+    TaskNotificationMessage,
     UserMemoryMessage,
     UserSlashCommandMessage,
     UserTextMessage,
@@ -271,6 +272,60 @@ def format_user_memory_content(content: UserMemoryMessage) -> str:
     return f"<pre>{escaped_text}</pre>"
 
 
+def format_task_notification_content(content: TaskNotificationMessage) -> str:
+    """Format task notification from a background agent as HTML.
+
+    Renders the agent's result as markdown with a metadata header showing
+    the task summary and usage statistics.
+
+    Args:
+        content: TaskNotificationMessage with result_text, summary, usage_info
+
+    Returns:
+        HTML string with metadata header and markdown-rendered result
+    """
+    parts: list[str] = []
+
+    # Usage metadata line
+    meta_parts: list[str] = []
+    if content.usage_info:
+        # Parse usage XML fields
+        import re
+
+        tokens_match = re.search(
+            r"<total_tokens>(\d+)</total_tokens>", content.usage_info
+        )
+        tools_match = re.search(r"<tool_uses>(\d+)</tool_uses>", content.usage_info)
+        duration_match = re.search(
+            r"<duration_ms>(\d+)</duration_ms>", content.usage_info
+        )
+        if tokens_match:
+            tokens = int(tokens_match.group(1))
+            meta_parts.append(f"{tokens:,} tokens")
+        if tools_match:
+            meta_parts.append(f"{tools_match.group(1)} tool uses")
+        if duration_match:
+            duration_s = int(duration_match.group(1)) / 1000
+            meta_parts.append(f"{duration_s:.1f}s")
+
+    if meta_parts:
+        meta_str = escape_html(" · ".join(meta_parts))
+        parts.append(
+            f"<div class='task-notification-meta'>{meta_str}</div>"
+        )
+
+    # Render the result as markdown
+    result_html = render_markdown_collapsible(
+        content.result_text,
+        "task-notification-result",
+        line_threshold=30,
+        preview_line_count=10,
+    )
+    parts.append(result_html)
+
+    return "\n".join(parts)
+
+
 def format_user_slash_command_content(content: UserSlashCommandMessage) -> str:
     """Format slash command expanded prompt (isMeta) as HTML.
 
@@ -387,5 +442,6 @@ __all__ = [
     "format_user_text_model_content",
     "format_compacted_summary_content",
     "format_user_memory_content",
+    "format_task_notification_content",
     "format_ide_notification_content",
 ]

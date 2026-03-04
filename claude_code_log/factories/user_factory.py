@@ -9,6 +9,7 @@ This module handles creation of MessageContent from user transcript entries:
 - UserSlashCommandMessage: Expanded slash command prompts (isMeta)
 - CompactedSummaryMessage: Compacted conversation summaries
 - UserMemoryMessage: User memory content
+- TaskNotificationMessage: Background agent task notifications
 - UserSteeringMessage: User steering prompts (queue-operation 'remove')
 
 Also provides:
@@ -35,6 +36,7 @@ from ..models import (
     ImageContent,
     MessageMeta,
     SlashCommandMessage,
+    TaskNotificationMessage,
     TextContent,
     UserMemoryMessage,
     UserSlashCommandMessage,
@@ -65,6 +67,14 @@ def is_bash_input(text_content: str) -> bool:
 def is_bash_output(text_content: str) -> bool:
     """Check if a message contains bash command output."""
     return "<bash-stdout>" in text_content or "<bash-stderr>" in text_content
+
+
+def is_task_notification(text_content: str) -> bool:
+    """Check if a message contains a task notification from a background agent."""
+    return (
+        "<task-notification>" in text_content
+        and "</task-notification>" in text_content
+    )
 
 
 # =============================================================================
@@ -357,6 +367,57 @@ def create_user_memory_message(
 
 
 # =============================================================================
+# Task Notification Creation
+# =============================================================================
+
+# Regex patterns for extracting task notification fields
+_TASK_RESULT_PATTERN = re.compile(r"<result>(.*?)</result>", re.DOTALL)
+_TASK_SUMMARY_PATTERN = re.compile(r"<summary>(.*?)</summary>", re.DOTALL)
+_TASK_ID_PATTERN = re.compile(r"<task-id>(.*?)</task-id>", re.DOTALL)
+_TASK_USAGE_PATTERN = re.compile(r"<usage>(.*?)</usage>", re.DOTALL)
+
+
+def create_task_notification_message(
+    meta: MessageMeta,
+    text: str,
+) -> Optional[TaskNotificationMessage]:
+    """Create TaskNotificationMessage from text containing task-notification tags.
+
+    Parses the <task-notification> XML block to extract the agent's result
+    (as markdown), summary, task ID, and usage info.
+
+    Args:
+        text: Raw text containing task-notification XML
+        meta: Message metadata
+
+    Returns:
+        TaskNotificationMessage if result found, None otherwise
+    """
+    result_match = _TASK_RESULT_PATTERN.search(text)
+    if not result_match:
+        return None
+
+    result_text = result_match.group(1).strip()
+
+    summary_match = _TASK_SUMMARY_PATTERN.search(text)
+    summary = summary_match.group(1).strip() if summary_match else ""
+
+    task_id_match = _TASK_ID_PATTERN.search(text)
+    task_id = task_id_match.group(1).strip() if task_id_match else ""
+
+    usage_match = _TASK_USAGE_PATTERN.search(text)
+    usage_info = usage_match.group(1).strip() if usage_match else None
+
+    return TaskNotificationMessage(
+        result_text=result_text,
+        summary=summary,
+        task_id=task_id,
+        usage_info=usage_info,
+        meta=meta,
+    )
+
+
+# =============================================================================
 # User Message Content Creation
 # =============================================================================
 
@@ -368,6 +429,7 @@ UserMessageContent = Union[
     BashOutputMessage,
     CompactedSummaryMessage,
     UserMemoryMessage,
+    TaskNotificationMessage,
     UserSlashCommandMessage,
     UserTextMessage,
 ]
@@ -438,6 +500,11 @@ def create_user_message(
     # Check for user memory input
     if user_memory := create_user_memory_message(meta, first_text):
         return user_memory
+
+    # Check for task notification from background agent
+    if is_task_notification(text_content):
+        if task_notif := create_task_notification_message(meta, text_content):
+            return task_notif
 
     # Build items list preserving order, extracting IDE notifications from text
     items: list[TextContent | ImageContent | IdeNotificationContent] = []

@@ -17,6 +17,7 @@ from ..models import (
     SessionHeaderMessage,
     SlashCommandMessage,
     SystemMessage,
+    TaskNotificationMessage,
     ThinkingMessage,
     ToolUseMessage,
     TranscriptEntry,
@@ -75,6 +76,7 @@ from .user_formatters import (
     format_command_output_content,
     format_compacted_summary_content,
     format_slash_command_content,
+    format_task_notification_content,
     format_user_memory_content,
     format_user_slash_command_content,
     format_user_text_model_content,
@@ -244,6 +246,11 @@ class HtmlRenderer(Renderer):
         self, content: UserMemoryMessage, _: TemplateMessage
     ) -> str:
         return format_user_memory_content(content)
+
+    def format_TaskNotificationMessage(
+        self, content: TaskNotificationMessage, _: TemplateMessage
+    ) -> str:
+        return format_task_notification_content(content)
 
     # -------------------------------------------------------------------------
     # Assistant Content Formatters
