@@ -816,6 +816,21 @@ class CacheManager:
                 (self._project_id, self._project_id, normalized),
             )
             count = cursor.rowcount
+
+            # Also invalidate paginated pages that contain affected sessions
+            # (html_pages/page_sessions track combined transcript pagination)
+            cursor2 = conn.execute(
+                """DELETE FROM html_pages
+                   WHERE project_id = ?
+                   AND id IN (
+                       SELECT DISTINCT ps.page_id FROM page_sessions ps
+                       JOIN sessions s ON ps.session_id = s.session_id
+                       WHERE s.project_id = ? AND s.last_timestamp >= ?
+                   )""",
+                (self._project_id, self._project_id, normalized),
+            )
+            count += cursor2.rowcount
+
             conn.commit()
 
         return count
