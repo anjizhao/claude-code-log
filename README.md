@@ -61,8 +61,9 @@ claude-code-log /path/to/project/directory
 | `--all-projects` | Process all projects in `~/.claude/projects/`. This is the default when no input path is given. |
 | `--no-individual-sessions` | Skip generating individual session HTML files. |
 | `--no-cache` | Disable caching and force reprocessing of all files. |
-| `--clear-cache` | Clear all cache data before processing. |
-| `--clear-output` / `--clear-html` | Clear generated HTML files and force regeneration. |
+| `--regenerate N` | Force HTML regeneration for sessions active within the last N seconds (e.g. `86400` = 1 day). Use after template/CSS changes. |
+| `--clear-cache` | Clear all cache data and regenerate. |
+| `--clear-output` / `--clear-html` | Clear generated HTML files and regenerate. |
 | `--projects-dir PATH` | Custom projects directory (default: `~/.claude/projects/`). |
 | `--page-size INT` | Max messages per page for combined transcript (default: 2000). Sessions are never split across pages. |
 | `--show-stats` | Show token usage statistics in generated output (hidden by default). |

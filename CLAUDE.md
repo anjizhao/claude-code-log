@@ -39,6 +39,16 @@ claude-code-log --from-date "last week"
 - `~/.claude/projects/project-name/index.html` - Project session index
 - `~/.claude/projects/project-name/session-{id}.html` - Individual session pages
 
+## Regeneration
+
+Normal runs are incremental: only sessions with new transcript data get rebuilt. Use these flags when you need to force regeneration:
+
+- **Template/CSS changes**: `claude-code-log --regenerate 86400` (rebuilds HTML for sessions active in the last 24h, without re-parsing JSONL)
+- **Full rebuild**: `claude-code-log --clear-cache` (deletes all cached data, then re-parses and regenerates everything)
+- **HTML-only rebuild**: `claude-code-log --clear-output` (deletes all HTML files, then regenerates from cached data)
+
+`--regenerate N` only invalidates the HTML cache (not the JSONL message cache), so it's fast. `--clear-cache` is the nuclear option.
+
 ## Development
 
 See @CONTRIBUTING.md for detailed development setup, testing, architecture, and release process.
