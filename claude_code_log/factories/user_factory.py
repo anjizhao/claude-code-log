@@ -475,7 +475,12 @@ def create_user_message(
     if not content_list:
         return None
 
-    # Check for special message patterns first (before generic parsing)
+    # Check for task notification first - its result body can contain any tags
+    if is_task_notification(text_content):
+        if task_notif := create_task_notification_message(meta, text_content):
+            return task_notif
+
+    # Check for special message patterns (before generic parsing)
     if is_command_message(text_content):
         return create_slash_command_message(meta, text_content)
 
@@ -509,11 +514,6 @@ def create_user_message(
     # Check for user memory input
     if user_memory := create_user_memory_message(meta, first_text):
         return user_memory
-
-    # Check for task notification from background agent
-    if is_task_notification(text_content):
-        if task_notif := create_task_notification_message(meta, text_content):
-            return task_notif
 
     # Build items list preserving order, extracting IDE notifications from text
     items: list[TextContent | ImageContent | IdeNotificationContent] = []
