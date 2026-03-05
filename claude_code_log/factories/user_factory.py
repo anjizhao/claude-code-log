@@ -408,13 +408,19 @@ def create_task_notification_message(
 
     result_text = result_match.group(1).strip()
 
-    summary_match = _TASK_SUMMARY_PATTERN.search(notif_text)
+    # Parse metadata from the portion before <result> to avoid matching
+    # tags that might appear inside the result's markdown content
+    pre_result = notif_text[: result_match.start()]
+
+    summary_match = _TASK_SUMMARY_PATTERN.search(pre_result)
     summary = summary_match.group(1).strip() if summary_match else ""
 
-    task_id_match = _TASK_ID_PATTERN.search(notif_text)
+    task_id_match = _TASK_ID_PATTERN.search(pre_result)
     task_id = task_id_match.group(1).strip() if task_id_match else ""
 
-    usage_match = _TASK_USAGE_PATTERN.search(notif_text)
+    # Usage appears after </result>, so search the portion after it
+    post_result = notif_text[result_match.end() :]
+    usage_match = _TASK_USAGE_PATTERN.search(post_result)
     usage_info = usage_match.group(1).strip() if usage_match else None
 
     return TaskNotificationMessage(
