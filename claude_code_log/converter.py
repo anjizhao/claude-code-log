@@ -1928,6 +1928,14 @@ def process_projects_hierarchy(
     # Per-project stats for summary output
     project_stats: List[tuple[str, GenerationStats]] = []
 
+    # Pre-compute regeneration cutoff once (used per-project in loop)
+    regenerate_cutoff_iso: Optional[str] = None
+    if regenerate is not None:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=regenerate)
+        regenerate_cutoff_iso = cutoff.isoformat()
+
     for project_dir in sorted(project_dirs):
         project_start_time = time.time()
         stats = GenerationStats()
@@ -1942,11 +1950,8 @@ def process_projects_hierarchy(
                     stats.add_warning(f"Failed to initialize cache: {e}")
 
             # Invalidate HTML cache for recent sessions if --regenerate was used
-            if regenerate is not None and cache_manager is not None:
-                from datetime import datetime, timedelta, timezone
-
-                cutoff = datetime.now(timezone.utc) - timedelta(seconds=regenerate)
-                cache_manager.invalidate_html_cache_since(cutoff.isoformat())
+            if regenerate_cutoff_iso is not None and cache_manager is not None:
+                cache_manager.invalidate_html_cache_since(regenerate_cutoff_iso)
 
             # Phase 1: Fast check if anything needs updating (mtime comparison only)
             # Exclude agent files - they are loaded via session references, not directly

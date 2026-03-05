@@ -804,18 +804,22 @@ class CacheManager:
             cursor = conn.execute(
                 """DELETE FROM html_cache
                    WHERE project_id = ?
-                   AND (
-                       -- Session HTML: join to sessions table to check timestamp
-                       source_session_id IN (
-                           SELECT session_id FROM sessions
-                           WHERE project_id = ? AND last_timestamp >= ?
-                       )
-                       -- Project index / combined transcript entry
-                       OR source_session_id IS NULL
+                   AND source_session_id IN (
+                       SELECT session_id FROM sessions
+                       WHERE project_id = ? AND last_timestamp >= ?
                    )""",
                 (self._project_id, self._project_id, normalized),
             )
             count = cursor.rowcount
+
+            # Only invalidate project index/combined entry if any sessions matched
+            if count > 0:
+                cursor_index = conn.execute(
+                    """DELETE FROM html_cache
+                       WHERE project_id = ? AND source_session_id IS NULL""",
+                    (self._project_id,),
+                )
+                count += cursor_index.rowcount
 
             # Also invalidate paginated pages that contain affected sessions
             # (html_pages/page_sessions track combined transcript pagination)
