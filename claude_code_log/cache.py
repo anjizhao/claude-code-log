@@ -800,7 +800,21 @@ class CacheManager:
             return 0
 
         with self._get_connection() as conn:
-            # Delete HTML cache entries for sessions active since the cutoff
+            # Check if any sessions match the cutoff (independent of html_cache rows)
+            has_matching_sessions = (
+                conn.execute(
+                    """SELECT 1 FROM sessions
+                   WHERE project_id = ? AND last_timestamp >= ?
+                   LIMIT 1""",
+                    (self._project_id, normalized),
+                ).fetchone()
+                is not None
+            )
+
+            if not has_matching_sessions:
+                return 0
+
+            # Delete per-session HTML cache entries
             cursor = conn.execute(
                 """DELETE FROM html_cache
                    WHERE project_id = ?
@@ -812,14 +826,13 @@ class CacheManager:
             )
             count = cursor.rowcount
 
-            # Only invalidate project index/combined entry if any sessions matched
-            if count > 0:
-                cursor_index = conn.execute(
-                    """DELETE FROM html_cache
-                       WHERE project_id = ? AND source_session_id IS NULL""",
-                    (self._project_id,),
-                )
-                count += cursor_index.rowcount
+            # Invalidate project index/combined entry so it gets rebuilt
+            cursor_index = conn.execute(
+                """DELETE FROM html_cache
+                   WHERE project_id = ? AND source_session_id IS NULL""",
+                (self._project_id,),
+            )
+            count += cursor_index.rowcount
 
             # Also invalidate paginated pages that contain affected sessions
             # (html_pages/page_sessions track combined transcript pagination)
