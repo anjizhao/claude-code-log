@@ -263,7 +263,9 @@ class TestCLIWithProjectsDir:
         assert "clear" in result.output.lower()
 
         # Cache DB is recreated by regeneration after clearing
-        assert cache_db.exists(), "SQLite cache should be recreated after clear + regeneration"
+        assert cache_db.exists(), (
+            "SQLite cache should be recreated after clear + regeneration"
+        )
 
     def test_clear_html_with_projects_dir(self, temp_projects_copy: Path) -> None:
         """Test HTML clearing with custom projects directory."""
