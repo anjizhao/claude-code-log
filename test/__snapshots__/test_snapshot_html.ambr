@@ -5969,6 +5969,7 @@
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
   
                   const htmlContent = clone.innerHTML;
                   // Attach clone temporarily to get accurate innerText
@@ -11014,6 +11015,7 @@
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
   
                   const htmlContent = clone.innerHTML;
                   // Attach clone temporarily to get accurate innerText
@@ -16102,6 +16104,7 @@
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
   
                   const htmlContent = clone.innerHTML;
                   // Attach clone temporarily to get accurate innerText
@@ -21058,6 +21061,7 @@
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
   
                   const htmlContent = clone.innerHTML;
                   // Attach clone temporarily to get accurate innerText

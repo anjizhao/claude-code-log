@@ -8,6 +8,7 @@ Part of the thematic formatter organization:
 - tool_formatters.py: tool use/result content
 """
 
+import re
 from typing import Callable, Optional
 
 from .ansi_colors import convert_ansi_to_html
@@ -289,9 +290,6 @@ def format_task_notification_content(content: TaskNotificationMessage) -> str:
     # Usage metadata line
     meta_parts: list[str] = []
     if content.usage_info:
-        # Parse usage XML fields
-        import re
-
         tokens_match = re.search(
             r"<total_tokens>(\d+)</total_tokens>", content.usage_info
         )

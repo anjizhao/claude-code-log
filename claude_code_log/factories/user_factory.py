@@ -371,6 +371,9 @@ def create_user_memory_message(
 # =============================================================================
 
 # Regex patterns for extracting task notification fields
+_TASK_NOTIFICATION_PATTERN = re.compile(
+    r"<task-notification>(.*?)</task-notification>", re.DOTALL
+)
 _TASK_RESULT_PATTERN = re.compile(r"<result>(.*?)</result>", re.DOTALL)
 _TASK_SUMMARY_PATTERN = re.compile(r"<summary>(.*?)</summary>", re.DOTALL)
 _TASK_ID_PATTERN = re.compile(r"<task-id>(.*?)</task-id>", re.DOTALL)
@@ -383,29 +386,35 @@ def create_task_notification_message(
 ) -> Optional[TaskNotificationMessage]:
     """Create TaskNotificationMessage from text containing task-notification tags.
 
-    Parses the <task-notification> XML block to extract the agent's result
-    (as markdown), summary, task ID, and usage info.
+    Extracts the <task-notification> block first, then parses its inner fields
+    (result, summary, task-id, usage) scoped to that block.
 
     Args:
-        text: Raw text containing task-notification XML
         meta: Message metadata
+        text: Raw text containing task-notification XML
 
     Returns:
         TaskNotificationMessage if result found, None otherwise
     """
-    result_match = _TASK_RESULT_PATTERN.search(text)
+    # Extract the task-notification block first to scope inner searches
+    notif_match = _TASK_NOTIFICATION_PATTERN.search(text)
+    if not notif_match:
+        return None
+    notif_text = notif_match.group(1)
+
+    result_match = _TASK_RESULT_PATTERN.search(notif_text)
     if not result_match:
         return None
 
     result_text = result_match.group(1).strip()
 
-    summary_match = _TASK_SUMMARY_PATTERN.search(text)
+    summary_match = _TASK_SUMMARY_PATTERN.search(notif_text)
     summary = summary_match.group(1).strip() if summary_match else ""
 
-    task_id_match = _TASK_ID_PATTERN.search(text)
+    task_id_match = _TASK_ID_PATTERN.search(notif_text)
     task_id = task_id_match.group(1).strip() if task_id_match else ""
 
-    usage_match = _TASK_USAGE_PATTERN.search(text)
+    usage_match = _TASK_USAGE_PATTERN.search(notif_text)
     usage_info = usage_match.group(1).strip() if usage_match else None
 
     return TaskNotificationMessage(

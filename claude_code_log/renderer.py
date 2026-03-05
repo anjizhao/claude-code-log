@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import html as html_mod
 import re
 import time
 from dataclasses import dataclass, field, replace
@@ -2166,7 +2167,7 @@ class Renderer:
         self, content: TaskNotificationMessage, _: TemplateMessage
     ) -> str:
         if content.summary:
-            return content.summary
+            return html_mod.escape(content.summary)
         return "Agent task completed"
 
     def title_UserSlashCommandMessage(
