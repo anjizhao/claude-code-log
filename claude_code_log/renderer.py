@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import html as html_mod
 import re
 import time
 from dataclasses import dataclass, field, replace
@@ -40,6 +41,7 @@ from .models import (
     SessionHeaderMessage,
     SlashCommandMessage,
     SystemMessage,
+    TaskNotificationMessage,
     TaskOutput,
     ThinkingMessage,
     ToolResultMessage,
@@ -2160,6 +2162,13 @@ class Renderer:
         self, _content: UserMemoryMessage, _: TemplateMessage
     ) -> str:
         return "Memory"
+
+    def title_TaskNotificationMessage(
+        self, content: TaskNotificationMessage, _: TemplateMessage
+    ) -> str:
+        if content.summary:
+            return html_mod.escape(content.summary)
+        return "Agent task completed"
 
     def title_UserSlashCommandMessage(
         self, _content: UserSlashCommandMessage, _: TemplateMessage

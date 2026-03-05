@@ -9,6 +9,7 @@ This module handles creation of MessageContent from user transcript entries:
 - UserSlashCommandMessage: Expanded slash command prompts (isMeta)
 - CompactedSummaryMessage: Compacted conversation summaries
 - UserMemoryMessage: User memory content
+- TaskNotificationMessage: Background agent task notifications
 - UserSteeringMessage: User steering prompts (queue-operation 'remove')
 
 Also provides:
@@ -35,6 +36,7 @@ from ..models import (
     ImageContent,
     MessageMeta,
     SlashCommandMessage,
+    TaskNotificationMessage,
     TextContent,
     UserMemoryMessage,
     UserSlashCommandMessage,
@@ -65,6 +67,14 @@ def is_bash_input(text_content: str) -> bool:
 def is_bash_output(text_content: str) -> bool:
     """Check if a message contains bash command output."""
     return "<bash-stdout>" in text_content or "<bash-stderr>" in text_content
+
+
+def is_task_notification(text_content: str) -> bool:
+    """Check if a message contains a task notification from a background agent."""
+    return (
+        "<task-notification>" in text_content
+        and "</task-notification>" in text_content
+    )
 
 
 # =============================================================================
@@ -357,6 +367,72 @@ def create_user_memory_message(
 
 
 # =============================================================================
+# Task Notification Creation
+# =============================================================================
+
+# Regex patterns for extracting task notification fields
+_TASK_NOTIFICATION_PATTERN = re.compile(
+    r"<task-notification>(.*?)</task-notification>", re.DOTALL
+)
+_TASK_RESULT_PATTERN = re.compile(r"<result>(.*?)</result>", re.DOTALL)
+_TASK_SUMMARY_PATTERN = re.compile(r"<summary>(.*?)</summary>", re.DOTALL)
+_TASK_ID_PATTERN = re.compile(r"<task-id>(.*?)</task-id>", re.DOTALL)
+_TASK_USAGE_PATTERN = re.compile(r"<usage>(.*?)</usage>", re.DOTALL)
+
+
+def create_task_notification_message(
+    meta: MessageMeta,
+    text: str,
+) -> Optional[TaskNotificationMessage]:
+    """Create TaskNotificationMessage from text containing task-notification tags.
+
+    Extracts the <task-notification> block first, then parses its inner fields
+    (result, summary, task-id, usage) scoped to that block.
+
+    Args:
+        meta: Message metadata
+        text: Raw text containing task-notification XML
+
+    Returns:
+        TaskNotificationMessage if result found, None otherwise
+    """
+    # Extract the task-notification block first to scope inner searches
+    notif_match = _TASK_NOTIFICATION_PATTERN.search(text)
+    if not notif_match:
+        return None
+    notif_text = notif_match.group(1)
+
+    result_match = _TASK_RESULT_PATTERN.search(notif_text)
+    if not result_match:
+        return None
+
+    result_text = result_match.group(1).strip()
+
+    # Parse metadata from the portion before <result> to avoid matching
+    # tags that might appear inside the result's markdown content
+    pre_result = notif_text[: result_match.start()]
+
+    summary_match = _TASK_SUMMARY_PATTERN.search(pre_result)
+    summary = summary_match.group(1).strip() if summary_match else ""
+
+    task_id_match = _TASK_ID_PATTERN.search(pre_result)
+    task_id = task_id_match.group(1).strip() if task_id_match else ""
+
+    # Usage appears after </result>, so search the portion after it
+    post_result = notif_text[result_match.end() :]
+    usage_match = _TASK_USAGE_PATTERN.search(post_result)
+    usage_info = usage_match.group(1).strip() if usage_match else None
+
+    return TaskNotificationMessage(
+        result_text=result_text,
+        summary=summary,
+        task_id=task_id,
+        usage_info=usage_info,
+        meta=meta,
+    )
+
+
+# =============================================================================
 # User Message Content Creation
 # =============================================================================
 
@@ -368,6 +444,7 @@ UserMessageContent = Union[
     BashOutputMessage,
     CompactedSummaryMessage,
     UserMemoryMessage,
+    TaskNotificationMessage,
     UserSlashCommandMessage,
     UserTextMessage,
 ]
@@ -404,7 +481,12 @@ def create_user_message(
     if not content_list:
         return None
 
-    # Check for special message patterns first (before generic parsing)
+    # Check for task notification first - its result body can contain any tags
+    if is_task_notification(text_content):
+        if task_notif := create_task_notification_message(meta, text_content):
+            return task_notif
+
+    # Check for special message patterns (before generic parsing)
     if is_command_message(text_content):
         return create_slash_command_message(meta, text_content)
 
