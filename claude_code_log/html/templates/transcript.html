@@ -142,7 +142,7 @@
                 elif msg_emoji and (message.type != 'tool_use' or not starts_with_emoji(message_title)) %}{{ msg_emoji }} {% endif %}{{ message_title | safe }}{% endif %}</span>
             <div class='header-info'>
                 <div class='timestamp-row'>
-                    {%- if 'assistant' in msg_css_class or 'thinking' in msg_css_class or (message.content and message.content.tool_name is defined and message.content.tool_name in ('Task', 'ExitPlanMode')) %}
+                    {%- if 'assistant' in msg_css_class or 'thinking' in msg_css_class or (message.content and message.content.tool_name is defined and message.content.tool_name in ('Task', 'ExitPlanMode')) or (message.content and message.content.result_text is defined) %}
                     <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
                     {%- endif %}
                     <span class='timestamp'{% if message.meta and message.meta.timestamp %} data-timestamp='{{ message.meta.timestamp }}'{% if message.pair_duration %} data-duration='{{ message.pair_duration }}'{% endif %}{% endif %}>{{ formatted_timestamp }}</span>
@@ -746,6 +746,7 @@
                 clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                 clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
                 clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
+                clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
 
                 const htmlContent = clone.innerHTML;
                 // Attach clone temporarily to get accurate innerText
