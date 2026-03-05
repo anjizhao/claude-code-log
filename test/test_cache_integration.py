@@ -165,28 +165,22 @@ class TestCacheIntegrationCLI:
 
         runner = CliRunner()
 
-        # Run with caching enabled (default)
-        result1 = runner.invoke(main, [str(project_dir)])
-        assert result1.exit_code == 0
-
-        # Check if SQLite cache was created at the isolated location
-        assert db_path.exists()
-
-        # Clear the cache
-        runner.invoke(main, [str(project_dir), "--clear-cache"])
+        # Delete the cache DB entirely to start fresh
+        if db_path.exists():
+            db_path.unlink()
 
         # Run with --no-cache flag
-        result2 = runner.invoke(main, [str(project_dir), "--no-cache"])
-        assert result2.exit_code == 0
+        result = runner.invoke(main, [str(project_dir), "--no-cache"])
+        assert result.exit_code == 0
 
-        # Cache should be empty (project should not be populated)
+        # Cache should not have been populated
         cache_manager = CacheManager(project_dir, "1.0.0", db_path=db_path)
         cached_data = cache_manager.get_cached_project_data()
         assert cached_data is not None
         assert cached_data.total_message_count == 0
 
     def test_cli_clear_cache_flag(self, setup_test_project):
-        """Test --clear-cache flag clears cache data."""
+        """Test --clear-cache flag clears cache data and regenerates."""
         project_dir = setup_test_project
 
         runner = CliRunner()
@@ -201,15 +195,16 @@ class TestCacheIntegrationCLI:
         assert cached_data is not None
         assert cached_data.total_message_count > 0
 
-        # Clear cache
+        # Clear cache and regenerate
         result2 = runner.invoke(main, [str(project_dir), "--clear-cache"])
         assert result2.exit_code == 0
+        assert "Cache cleared. Regenerating..." in result2.output
 
-        # Verify cache is cleared (no files or sessions)
+        # Cache should be rebuilt after clear + regeneration
         cache_manager = CacheManager(project_dir, "1.0.0")
         cached_data = cache_manager.get_cached_project_data()
         assert cached_data is not None
-        assert len(cached_data.cached_files) == 0
+        assert cached_data.total_message_count > 0
 
     def test_cli_all_projects_caching(
         self, temp_projects_setup: ProjectSetup, sample_jsonl_data

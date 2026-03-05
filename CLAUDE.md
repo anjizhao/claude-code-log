@@ -39,9 +39,23 @@ claude-code-log --from-date "last week"
 - `~/.claude/projects/project-name/index.html` - Project session index
 - `~/.claude/projects/project-name/session-{id}.html` - Individual session pages
 
+## Regeneration
+
+Normal runs are fully incremental: transcript (JSONL) file changes are detected automatically via mtime comparison, triggering re-parsing and HTML regeneration for affected sessions. No flags needed for transcript updates.
+
+The flags below are for when the *rendering code* changes (templates, CSS, formatters) but transcripts haven't:
+
+- **`--regenerate N`**: Invalidates HTML cache for sessions active in the last N seconds, then regenerates. Fast (skips JSONL re-parsing). Use during development after template/CSS changes.
+- **`--clear-cache`**: Deletes all cached data (JSONL parse cache + HTML cache), then re-parses and regenerates everything. Nuclear option.
+- **`--clear-output`**: Deletes all HTML files on disk, then regenerates from cached data. Use if HTML files are corrupted or out of sync with the cache DB.
+
 ## Development
 
 See @CONTRIBUTING.md for detailed development setup, testing, architecture, and release process.
+
+### Worktree Usage
+
+When working in a git worktree, use `uv run --directory /path/to/worktree` (not `cd /path && uv run`) to ensure `uv` picks up the worktree's source code rather than the repo root's.
 
 ### Claude-Specific Testing Tips
 

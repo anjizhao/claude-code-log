@@ -984,6 +984,7 @@ def convert_jsonl_to(
     page_size: int = 2000,
     skip_combined: bool = False,
     show_stats: bool = False,
+    regenerate: Optional[int] = None,
 ) -> Path:
     """Convert JSONL transcript(s) to the specified format.
 
@@ -999,6 +1000,8 @@ def convert_jsonl_to(
         image_export_mode: Image export mode ("placeholder", "embedded", "referenced").
         page_size: Maximum messages per page for combined transcript pagination.
         skip_combined: Skip combined transcript, generate project session index instead.
+        regenerate: If set, invalidate HTML cache for sessions active within this many
+            seconds. Forces HTML regeneration without clearing the message cache.
     """
     if not input_path.exists():
         raise FileNotFoundError(f"Input path not found: {input_path}")
@@ -1011,6 +1014,15 @@ def convert_jsonl_to(
             cache_manager = CacheManager(input_path, library_version)
         except Exception as e:
             print(f"Warning: Failed to initialize cache manager: {e}")
+
+    # Invalidate HTML cache for recent sessions if --regenerate was used
+    if regenerate is not None and cache_manager is not None:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=regenerate)
+        count = cache_manager.invalidate_html_cache_since(cutoff.isoformat())
+        if not silent and count > 0:
+            print(f"Invalidated {count} HTML cache entries for regeneration")
 
     ext = get_file_extension(format)
 
@@ -1857,6 +1869,7 @@ def process_projects_hierarchy(
     page_size: int = 2000,
     skip_combined: bool = False,
     show_stats: bool = False,
+    regenerate: Optional[int] = None,
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files.
 
@@ -1915,6 +1928,14 @@ def process_projects_hierarchy(
     # Per-project stats for summary output
     project_stats: List[tuple[str, GenerationStats]] = []
 
+    # Pre-compute regeneration cutoff once (used per-project in loop)
+    regenerate_cutoff_iso: Optional[str] = None
+    if regenerate is not None:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=regenerate)
+        regenerate_cutoff_iso = cutoff.isoformat()
+
     for project_dir in sorted(project_dirs):
         project_start_time = time.time()
         stats = GenerationStats()
@@ -1927,6 +1948,10 @@ def process_projects_hierarchy(
                     cache_manager = CacheManager(project_dir, library_version)
                 except Exception as e:
                     stats.add_warning(f"Failed to initialize cache: {e}")
+
+            # Invalidate HTML cache for recent sessions if --regenerate was used
+            if regenerate_cutoff_iso is not None and cache_manager is not None:
+                cache_manager.invalidate_html_cache_since(regenerate_cutoff_iso)
 
             # Phase 1: Fast check if anything needs updating (mtime comparison only)
             # Exclude agent files - they are loaded via session references, not directly

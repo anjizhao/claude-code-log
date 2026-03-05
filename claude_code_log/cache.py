@@ -778,6 +778,80 @@ class CacheManager:
             latest_timestamp=project_row["latest_timestamp"],
         )
 
+    def invalidate_html_cache_since(self, since_timestamp: str) -> int:
+        """Delete HTML cache entries for sessions active since the given timestamp.
+
+        Invalidates html_cache rows where the linked session has
+        last_timestamp >= since_timestamp. Also invalidates the project
+        index/combined entry (source_session_id IS NULL) so the index
+        gets rebuilt too.
+
+        Args:
+            since_timestamp: ISO 8601 timestamp cutoff.
+
+        Returns:
+            Number of html_cache entries deleted.
+        """
+        if self._project_id is None:
+            return 0
+
+        normalized = self._normalize_timestamp(since_timestamp)
+        if normalized is None:
+            return 0
+
+        with self._get_connection() as conn:
+            # Check if any sessions match the cutoff (independent of html_cache rows)
+            has_matching_sessions = (
+                conn.execute(
+                    """SELECT 1 FROM sessions
+                   WHERE project_id = ? AND last_timestamp >= ?
+                   LIMIT 1""",
+                    (self._project_id, normalized),
+                ).fetchone()
+                is not None
+            )
+
+            if not has_matching_sessions:
+                return 0
+
+            # Delete per-session HTML cache entries
+            cursor = conn.execute(
+                """DELETE FROM html_cache
+                   WHERE project_id = ?
+                   AND source_session_id IN (
+                       SELECT session_id FROM sessions
+                       WHERE project_id = ? AND last_timestamp >= ?
+                   )""",
+                (self._project_id, self._project_id, normalized),
+            )
+            count = cursor.rowcount
+
+            # Invalidate project index/combined entry so it gets rebuilt
+            cursor_index = conn.execute(
+                """DELETE FROM html_cache
+                   WHERE project_id = ? AND source_session_id IS NULL""",
+                (self._project_id,),
+            )
+            count += cursor_index.rowcount
+
+            # Also invalidate paginated pages that contain affected sessions
+            # (html_pages/page_sessions track combined transcript pagination)
+            cursor2 = conn.execute(
+                """DELETE FROM html_pages
+                   WHERE project_id = ?
+                   AND id IN (
+                       SELECT DISTINCT ps.page_id FROM page_sessions ps
+                       JOIN sessions s ON ps.session_id = s.session_id
+                       WHERE s.project_id = ? AND s.last_timestamp >= ?
+                   )""",
+                (self._project_id, self._project_id, normalized),
+            )
+            count += cursor2.rowcount
+
+            conn.commit()
+
+        return count
+
     def clear_cache(self) -> None:
         """Clear all cache data for this project."""
         if self._project_id is None:
