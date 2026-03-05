@@ -41,13 +41,13 @@ claude-code-log --from-date "last week"
 
 ## Regeneration
 
-Normal runs are incremental: only sessions with new transcript data get rebuilt. Use these flags when you need to force regeneration:
+Normal runs are fully incremental: transcript (JSONL) file changes are detected automatically via mtime comparison, triggering re-parsing and HTML regeneration for affected sessions. No flags needed for transcript updates.
 
-- **Template/CSS changes**: `claude-code-log --regenerate 86400` (rebuilds HTML for sessions active in the last 24h, without re-parsing JSONL)
-- **Full rebuild**: `claude-code-log --clear-cache` (deletes all cached data, then re-parses and regenerates everything)
-- **HTML-only rebuild**: `claude-code-log --clear-output` (deletes all HTML files, then regenerates from cached data)
+The flags below are for when the *rendering code* changes (templates, CSS, formatters) but transcripts haven't:
 
-`--regenerate N` only invalidates the HTML cache (not the JSONL message cache), so it's fast. `--clear-cache` is the nuclear option.
+- **`--regenerate N`**: Invalidates HTML cache for sessions active in the last N seconds, then regenerates. Fast (skips JSONL re-parsing). Use during development after template/CSS changes.
+- **`--clear-cache`**: Deletes all cached data (JSONL parse cache + HTML cache), then re-parses and regenerates everything. Nuclear option.
+- **`--clear-output`**: Deletes all HTML files on disk, then regenerates from cached data. Use if HTML files are corrupted or out of sync with the cache DB.
 
 ## Development
 

@@ -49,6 +49,12 @@ claude-code-log path/to/transcript.jsonl
 claude-code-log /path/to/project/directory
 ```
 
+## Caching & Regeneration
+
+Normal runs are fully incremental: transcript file changes are detected automatically and only affected sessions are re-parsed and regenerated. No special flags needed.
+
+The `--regenerate`, `--clear-cache`, and `--clear-output` flags are for when the *rendering code* changes (templates, CSS) but transcripts haven't. See the CLI options table below for details.
+
 ## CLI Options
 
 | Option | Description |
