@@ -106,7 +106,7 @@
     {{ render_session_nav(sessions, "toc", show_stats=show_stats) }}
     {% endif %}
 
-    {% for message, message_title, html_content, formatted_timestamp in messages %}
+    {% for message, message_title, html_content, raw_markdown, formatted_timestamp in messages %}
     {% if is_session_header(message) %}
     <div class="session-divider"></div>
     <div class='message session-header' data-message-id='{{ message.message_id }}' data-session-id='{{ message.session_id }}' id='msg-{{ message.message_id }}'>
@@ -128,7 +128,7 @@
         <div class='content{% if markdown %} markdown{% endif %}'>
             <div class='continuation-meta'>
                 {%- if 'assistant' in msg_css_class or 'thinking' in msg_css_class %}
-                <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button>{%- if raw_markdown %}<button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button>{%- endif %}</span>
                 {%- endif %}
                 <span class='timestamp'{% if message.meta and message.meta.timestamp %} data-timestamp='{{ message.meta.timestamp }}'{% endif %}>{{ formatted_timestamp }}</span>
                 {% if show_stats and message.token_usage %}<span class='token-usage'>{{ message.token_usage }}</span>{% endif %}
@@ -144,7 +144,7 @@
             <div class='header-info'>
                 <div class='timestamp-row'>
                     {%- if 'assistant' in msg_css_class or 'thinking' in msg_css_class or (message.content and message.content.tool_name is defined and message.content.tool_name in ('Task', 'ExitPlanMode')) or (message.content and message.content.result_text is defined) %}
-                    <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                    <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button>{%- if raw_markdown %}<button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button>{%- endif %}</span>
                     {%- endif %}
                     <span class='timestamp'{% if message.meta and message.meta.timestamp %} data-timestamp='{{ message.meta.timestamp }}'{% if message.pair_duration %} data-duration='{{ message.pair_duration }}'{% endif %}{% endif %}>{{ formatted_timestamp }}</span>
                 </div>
@@ -155,6 +155,7 @@
         </div>
         <div class='content{% if markdown %} markdown{% endif %}'>{{ html_content | safe }}</div>
         {% endif %}
+        {% if raw_markdown %}<script type="text/plain" class="raw-markdown">{{ raw_markdown | safe }}</script>{% endif %}
         {% if message.has_children %}
         <div class='fold-bar' data-message-id='{{ message.message_id }}' data-border-color='{{ msg_css_class }}'>
             <div class='fold-bar-section' data-action='fold-one' data-target='{{ message.message_id }}' data-title-unfolded='Fold {{ message.get_immediate_children_label() }}' data-title-folded='Unfold {{ message.get_immediate_children_label() }}' title='Fold {{ message.get_immediate_children_label() }}'>
@@ -746,6 +747,7 @@
                 clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                 clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                 clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                clone.querySelectorAll('.copy-md-btn').forEach(function(el) { el.remove(); });
                 clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
                 clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
 
@@ -771,6 +773,30 @@
                 }
 
                 copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+            });
+
+            // Copy as Markdown button functionality
+            document.addEventListener('click', function(e) {
+                const btn = e.target.closest('.copy-md-btn');
+                if (!btn) return;
+
+                const message = btn.closest('.message');
+                if (!message) return;
+
+                const rawMd = message.querySelector('script.raw-markdown');
+                if (!rawMd) return;
+
+                function showCopied() {
+                    btn.textContent = '\u2705';
+                    btn.classList.add('copied');
+                    setTimeout(function() {
+                        btn.textContent = 'md';
+                        btn.classList.remove('copied');
+                    }, 1500);
+                }
+
+                var md = rawMd.textContent.replace(/<\\\/script/gi, '</script');
+                copyText(md).then(showCopied).catch(function() {});
             });
 
             // Inject copy buttons into code blocks

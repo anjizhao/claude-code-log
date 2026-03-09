@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Tuple, cast
 
@@ -19,6 +20,7 @@ from ..models import (
     SystemMessage,
     TaskNotificationMessage,
     ThinkingMessage,
+    ToolResultMessage,
     ToolUseMessage,
     TranscriptEntry,
     UnknownMessage,
@@ -468,13 +470,45 @@ class HtmlRenderer(Renderer):
         """Title → '🌐 WebFetch <url>'."""
         return self._tool_title(message, "🌐", input.url)
 
+    @staticmethod
+    def _extract_raw_markdown(msg: TemplateMessage) -> str:
+        """Extract raw markdown text from a message's content model.
+
+        Returns the original markdown source for messages that support
+        "Copy as Markdown" (assistant text, thinking, task output, etc.).
+        Returns empty string for messages without copyable markdown.
+
+        The result is escaped for safe embedding in <script type="text/plain">
+        tags (</script> is split to prevent premature tag closure).
+        """
+        content = msg.content
+        raw = ""
+        if isinstance(content, AssistantTextMessage):
+            raw = "\n\n".join(
+                item.text for item in content.items if hasattr(item, "text")
+            )
+        elif isinstance(content, ThinkingMessage):
+            raw = content.thinking
+        elif isinstance(content, TaskNotificationMessage):
+            raw = content.result_text
+        elif isinstance(content, ToolResultMessage):
+            if isinstance(content.output, TaskOutput):
+                raw = content.output.result
+            elif isinstance(content.output, ExitPlanModeOutput):
+                raw = content.output.message
+        # Escape </script> to prevent premature tag closure in HTML
+        if raw and "</script" in raw.lower():
+            raw = re.sub(r"</script", r"<\\/script", raw, flags=re.IGNORECASE)
+        return raw
+
     def _flatten_preorder(
         self, roots: list[TemplateMessage]
-    ) -> list[Tuple[TemplateMessage, str, str, str]]:
+    ) -> list[Tuple[TemplateMessage, str, str, str, str]]:
         """Flatten message tree via pre-order traversal, formatting each message.
 
         Traverses the tree depth-first (pre-order), computes title and formats
-        content to HTML, building a flat list of (message, title, html, timestamp) tuples.
+        content to HTML, building a flat list of
+        (message, title, html, raw_markdown, timestamp) tuples.
 
         Also tracks and reports timing statistics for Markdown and Pygments operations
         when DEBUG_TIMING is enabled.
@@ -483,9 +517,10 @@ class HtmlRenderer(Renderer):
             roots: Root messages (typically session headers) with children populated
 
         Returns:
-            Flat list of (message, title, html_content, formatted_timestamp) tuples
+            Flat list of (message, title, html_content, raw_markdown,
+            formatted_timestamp) tuples
         """
-        flat: list[Tuple[TemplateMessage, str, str, str]] = []
+        flat: list[Tuple[TemplateMessage, str, str, str, str]] = []
 
         # Initialize timing tracking for expensive operations
         markdown_timings: list[Tuple[float, str]] = []
@@ -498,8 +533,9 @@ class HtmlRenderer(Renderer):
             set_timing_var("_current_msg_id", msg.message_id)
             title = self.title_content(msg)
             html = self.format_content(msg)
+            raw_md = self._extract_raw_markdown(msg)
             formatted_ts = format_timestamp(msg.meta.timestamp if msg.meta else None)
-            flat.append((msg, title, html, formatted_ts))
+            flat.append((msg, title, html, raw_md, formatted_ts))
             for child in msg.children:
                 visit(child)
 

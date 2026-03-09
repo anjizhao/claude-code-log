@@ -84,11 +84,12 @@ def test_deduplication_task_result_vs_sidechain():
 
         # Verify deduplication occurred:
         # The sidechain assistant's final message should be dropped entirely
-        # The actual content "I created the test file successfully" should only appear once
-        # in the Task result, not in the sidechain assistant
+        # The content appears twice: once in the rendered Task result HTML,
+        # and once in the raw-markdown <script> tag for copy-as-markdown.
+        # Without dedup it would appear 4 times (2x rendered + 2x raw-markdown).
         content_count = html.count("I created the test file successfully")
-        assert content_count == 1, (
-            f"Expected content to appear once, found {content_count} times"
+        assert content_count == 2, (
+            f"Expected content to appear twice (HTML + raw markdown), found {content_count} times"
         )
 
 

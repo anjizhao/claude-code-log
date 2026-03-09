@@ -227,6 +227,13 @@
     gap: 8px;
 }
 
+/* Copy button group */
+.copy-buttons {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
 /* Copy button */
 .copy-btn {
     background: none;
@@ -245,6 +252,30 @@
 }
 
 .copy-btn.copied {
+    opacity: 1;
+}
+
+/* Copy as Markdown button */
+.copy-md-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.7em;
+    font-family: var(--font-monospace);
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 2px 4px;
+    border-radius: 4px;
+    opacity: 0.4;
+    transition: opacity 0.15s;
+}
+
+.copy-md-btn:hover {
+    opacity: 1;
+    background-color: var(--highlight-light);
+}
+
+.copy-md-btn.copied {
     opacity: 1;
 }
 
