@@ -8,6 +8,7 @@
       <meta charset='UTF-8'>
       <meta name='viewport' content='width=device-width, initial-scale=1.0'>
       <title>Claude Code Projects - alpha</title>
+      <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0.5 10 7.25' shape-rendering='crispEdges'><rect x='1' y='1' width='8' height='5' fill='%23D4785A'/><rect x='0' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='9' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='2' y='3' width='1' height='1' fill='%23000'/><rect x='7' y='3' width='1' height='1' fill='%23000'/><rect x='1' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='3' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='6' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='8' y='6' width='1' height='1.75' fill='%23D4785A'/></svg>">
       
       <style>
   /* Global styles shared across all templates */
@@ -1831,6 +1832,7 @@
       <meta charset='UTF-8'>
       <meta name='viewport' content='width=device-width, initial-scale=1.0'>
       <title>Test Session</title>
+      <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0.5 10 7.25' shape-rendering='crispEdges'><rect x='1' y='1' width='8' height='5' fill='%23D4785A'/><rect x='0' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='9' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='2' y='3' width='1' height='1' fill='%23000'/><rect x='7' y='3' width='1' height='1' fill='%23000'/><rect x='1' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='3' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='6' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='8' y='6' width='1' height='1.75' fill='%23D4785A'/></svg>">
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -2288,6 +2290,13 @@
       gap: 8px;
   }
   
+  /* Copy button group */
+  .copy-buttons {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+  }
+  
   /* Copy button */
   .copy-btn {
       background: none;
@@ -2306,6 +2315,30 @@
   }
   
   .copy-btn.copied {
+      opacity: 1;
+  }
+  
+  /* Copy as Markdown button */
+  .copy-md-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.7em;
+      font-family: var(--font-monospace);
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .copy-md-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .copy-md-btn.copied {
       opacity: 1;
   }
   
@@ -5013,6 +5046,7 @@
           <div class='content'><pre>Hello Claude! Can you help me understand how Python decorators work?</pre></div>
           
           
+          
           <div class='fold-bar' data-message-id='d-1' data-border-color='user'>
               <div class='fold-bar-section' data-action='fold-one' data-target='d-1' data-title-unfolded='Fold 1 assistant' data-title-folded='Unfold 1 assistant' title='Fold 1 assistant'>
                   <span class='fold-icon'>▼</span>
@@ -5031,7 +5065,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -5059,6 +5093,31 @@
   </code></pre>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">I'd be happy to help you understand Python decorators! A decorator is a design pattern that allows you to modify or extend the behavior of functions or classes without permanently modifying their code.
+  
+  Here's a simple example:
+  
+  ```python
+  def my_decorator(func):
+      def wrapper():
+          print("Something before the function")
+          func()
+          print("Something after the function")
+      return wrapper
+  
+  @my_decorator
+  def say_hello():
+      print("Hello!")
+  
+  say_hello()
+  ```
+  
+  This will output:
+  ```
+  Something before the function
+  Hello!
+  Something after the function
+  ```</script>
           
       </div>
       
@@ -5077,6 +5136,7 @@
               </div>
           </div>
           <div class='content'><pre>Great! Can you also show me how to create a decorator that takes parameters?</pre></div>
+          
           
           
           <div class='fold-bar' data-message-id='d-3' data-border-color='user'>
@@ -5105,6 +5165,7 @@
           <div class='content'><div class='edit-tool-content'><div class='edit-diff'><div class='diff-line diff-added'><span class='diff-marker'>+</span>def repeat(times):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    def decorator(func):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        def wrapper(*args, **kwargs):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            for _ in range(times):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>                result = func(*args, **kwargs)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            return result</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        return wrapper</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    return decorator</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>@repeat(3)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>def greet(name):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    print(f&quot;Hello, {name}!&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>greet(&quot;Alice&quot;)</div></div></div></div>
           
           
+          
       </div>
       
       
@@ -5124,6 +5185,7 @@
           <div class='content'><pre>File created successfully at: /tmp/decorator_example.py</pre></div>
           
           
+          
       </div>
       
       
@@ -5135,7 +5197,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -5156,6 +5218,18 @@
   <p>When you run this code, it will print &quot;Hello, Alice!&quot; three times.</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">Perfect! I've created an example of a parameterized decorator. Here's how it works:
+  
+  1. **`repeat(times)`** - This is the decorator factory that takes parameters
+  2. **`decorator(func)`** - This is the actual decorator that gets returned
+  3. **`wrapper(*args, **kwargs)`** - This is the wrapper function that does the work
+  
+  The key insight is that we have **three levels of functions**:
+  - The outermost function takes the decorator parameters
+  - The middle function takes the function to be decorated
+  - The innermost function is the actual wrapper that gets called
+  
+  When you run this code, it will print "Hello, Alice!" three times.</script>
           
       </div>
       
@@ -5174,6 +5248,7 @@
               </div>
           </div>
           <div class='content'><pre>Can you run that example to show the output?</pre></div>
+          
           
           
           <div class='fold-bar' data-message-id='d-7' data-border-color='user'>
@@ -5202,6 +5277,7 @@
           <div class='content'><div class='bash-tool-content'><pre class='bash-tool-command'>python /tmp/decorator_example.py</pre></div></div>
           
           
+          
       </div>
       
       
@@ -5223,6 +5299,7 @@
   Hello, Alice!</pre></div>
           
           
+          
       </div>
       
       
@@ -5234,7 +5311,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -5251,6 +5328,16 @@
   <p>The pattern is always the same: decorator factory → decorator → wrapper function.</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">Perfect! As you can see, the `@repeat(3)` decorator successfully made the `greet` function execute three times, printing "Hello, Alice!" three times.
+  
+  This demonstrates the power of parameterized decorators - you can customize their behavior by passing arguments to the decorator factory. Some common use cases include:
+  
+  - **Timing decorators**: `@time_it(units='ms')`
+  - **Retry decorators**: `@retry(max_attempts=3, delay=1)`
+  - **Authentication decorators**: `@require_role('admin')`
+  - **Caching decorators**: `@cache(ttl=300)`
+  
+  The pattern is always the same: decorator factory → decorator → wrapper function.</script>
           
       </div>
       
@@ -5269,6 +5356,7 @@
               </div>
           </div>
           <div class='content'><pre>This is really helpful! Let me try to implement a timing decorator myself. Can you help me if I get stuck?</pre></div>
+          
           
           
       </div>
@@ -5968,6 +6056,7 @@
                   clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.copy-md-btn').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
   
@@ -5993,6 +6082,30 @@
                   }
   
                   copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+              });
+  
+              // Copy as Markdown button functionality
+              document.addEventListener('click', function(e) {
+                  const btn = e.target.closest('.copy-md-btn');
+                  if (!btn) return;
+  
+                  const message = btn.closest('.message');
+                  if (!message) return;
+  
+                  const rawMd = message.querySelector('script.raw-markdown');
+                  if (!rawMd) return;
+  
+                  function showCopied() {
+                      btn.textContent = '\u2705';
+                      btn.classList.add('copied');
+                      setTimeout(function() {
+                          btn.textContent = 'md';
+                          btn.classList.remove('copied');
+                      }, 1500);
+                  }
+  
+                  var md = rawMd.textContent.replace(/<\\\/script/gi, '</script');
+                  copyText(md).then(showCopied).catch(function() {});
               });
   
               // Inject copy buttons into code blocks
@@ -6788,6 +6901,7 @@
       <meta charset='UTF-8'>
       <meta name='viewport' content='width=device-width, initial-scale=1.0'>
       <title>Edge Cases</title>
+      <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0.5 10 7.25' shape-rendering='crispEdges'><rect x='1' y='1' width='8' height='5' fill='%23D4785A'/><rect x='0' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='9' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='2' y='3' width='1' height='1' fill='%23000'/><rect x='7' y='3' width='1' height='1' fill='%23000'/><rect x='1' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='3' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='6' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='8' y='6' width='1' height='1.75' fill='%23D4785A'/></svg>">
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -7245,6 +7359,13 @@
       gap: 8px;
   }
   
+  /* Copy button group */
+  .copy-buttons {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+  }
+  
   /* Copy button */
   .copy-btn {
       background: none;
@@ -7263,6 +7384,30 @@
   }
   
   .copy-btn.copied {
+      opacity: 1;
+  }
+  
+  /* Copy as Markdown button */
+  .copy-md-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.7em;
+      font-family: var(--font-monospace);
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .copy-md-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .copy-md-btn.copied {
       opacity: 1;
   }
   
@@ -9970,6 +10115,7 @@
           <div class='content'><pre>Here&#x27;s a message with some **markdown** formatting, `inline code`, and even a [link](https://example.com). Let&#x27;s see how it renders!</pre></div>
           
           
+          
           <div class='fold-bar' data-message-id='d-1' data-border-color='user'>
               <div class='fold-bar-section' data-action='fold-one' data-target='d-1' data-title-unfolded='Fold 1 assistant' data-title-folded='Unfold 1 assistant' title='Fold 1 assistant'>
                   <span class='fold-icon'>▼</span>
@@ -9988,7 +10134,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-06-14T11:00:30Z'>2025-06-14 11:00:30</span>
                   </div>
                   
@@ -10035,6 +10181,32 @@
   <p>The markdown renderer handles all of this automatically!</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">Great example! Markdown formatting is indeed supported. Here are some more examples:
+  
+  ## Headers work too
+  
+  ### Sublevel headers
+  
+  - Bullet points
+  - **Bold text**
+  - *Italic text*
+  - `inline code`
+  
+  > Block quotes look nice
+  
+  ```python
+  # Code blocks with syntax highlighting
+  def hello_world():
+      print("Hello, world!")
+      return 42
+  ```
+  
+  | Tables | Also | Work |
+  |--------|------|------|
+  | Cell 1 | Cell 2 | Cell 3 |
+  | Data   | More  | Info  |
+  
+  The markdown renderer handles all of this automatically!</script>
           
       </div>
       
@@ -10053,6 +10225,7 @@
               </div>
           </div>
           <div class='content'><pre>Let&#x27;s test a very long message to see how it handles text wrapping and layout. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem.</pre></div>
+          
           
           
           <div class='fold-bar' data-message-id='d-3' data-border-color='user'>
@@ -10086,6 +10259,7 @@
           </table></div>
           
           
+          
       </div>
       
       
@@ -10103,6 +10277,7 @@
               </div>
           </div>
           <div class='content'><pre>Error: Tool execution failed with error: Command not found</pre></div>
+          
           
           
       </div>
@@ -10124,6 +10299,7 @@
           <div class='content'><code>test-command</code><br><strong>Args:</strong> --verbose --output /tmp/test.log<br><strong>Content:</strong><pre>This is the actual command content with some JSON structure and escaped characters: &quot;quotes&quot; and 
   line breaks
   </pre></div>
+          
           
           
       </div>
@@ -10150,6 +10326,7 @@
   Timestamp: 2025-06-14T11:02:20Z</pre></div>
           
           
+          
           <div class='fold-bar' data-message-id='d-7' data-border-color='user command-output'>
               <div class='fold-bar-section' data-action='fold-one' data-target='d-7' data-title-unfolded='Fold 1 assistant' data-title-folded='Unfold 1 assistant' title='Fold 1 assistant'>
                   <span class='fold-icon'>▼</span>
@@ -10168,7 +10345,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-06-14T11:03:00Z'>2025-06-14 11:03:00</span>
                   </div>
                   
@@ -10177,6 +10354,7 @@
           <div class='content markdown'><div class="assistant-text markdown"><p>I see the long Lorem ipsum text wraps nicely! Long text handling is important for readability. The CSS should handle word wrapping automatically.</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">I see the long Lorem ipsum text wraps nicely! Long text handling is important for readability. The CSS should handle word wrapping automatically.</script>
           
           <div class='fold-bar' data-message-id='d-8' data-border-color='assistant'>
               <div class='fold-bar-section' data-action='fold-one' data-target='d-8' data-title-unfolded='Fold 1 tool' data-title-folded='Unfold 1 tool' title='Fold 1 tool'>
@@ -10204,6 +10382,7 @@
           <div class='content'><div class='multiedit-tool-content'><div class='multiedit-file-path'>📝 /tmp/complex_example.py</div><div class='multiedit-count'>Applying 1 edits</div><div class='multiedit-item'><div class='multiedit-item-header'>Edit #1</div><div class='edit-diff'><div class='diff-line diff-added'><span class='diff-marker'>+</span>#!/usr/bin/env python3</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>&quot;&quot;&quot;</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>Complex example with multiple operations.</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>&quot;&quot;&quot;</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>import json</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>import sys</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>from typing import List, Dict, Any</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>def process_data(items: List[Dict[str, Any]]) -&gt; None:</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    &quot;&quot;&quot;</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    Process a list of data items.</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    &quot;&quot;&quot;</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    for item in items:</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        print(f&quot;Processing: {item[&#x27;name&#x27;]}&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        if item.get(&#x27;active&#x27;, False):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            print(f&quot;  Status: Active&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        else:</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            print(f&quot;  Status: Inactive&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>if __name__ == &quot;__main__&quot;:</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    sample_data = [</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        {&quot;name&quot;: &quot;Item 1&quot;, &quot;active&quot;: True},</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        {&quot;name&quot;: &quot;Item 2&quot;, &quot;active&quot;: False},</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        {&quot;name&quot;: &quot;Item 3&quot;, &quot;active&quot;: True}</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    ]</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    process_data(sample_data)</div></div></div></div></div>
           
           
+          
       </div>
       
       
@@ -10223,6 +10402,7 @@
           <div class='content'><pre>Testing special characters: café, naïve, résumé, 中文, العربية, русский, 🎉 emojis 🚀 and symbols ∑∆√π∞</pre></div>
           
           
+          
       </div>
       
       
@@ -10240,6 +10420,7 @@
               </div>
           </div>
           <div class='content'><pre>wow error</pre></div>
+          
           
           
       </div>
@@ -10315,6 +10496,7 @@
                       </td>
               </tr>
           </table></div>
+          
           
           
       </div>
@@ -11014,6 +11196,7 @@
                   clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.copy-md-btn').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
   
@@ -11039,6 +11222,30 @@
                   }
   
                   copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+              });
+  
+              // Copy as Markdown button functionality
+              document.addEventListener('click', function(e) {
+                  const btn = e.target.closest('.copy-md-btn');
+                  if (!btn) return;
+  
+                  const message = btn.closest('.message');
+                  if (!message) return;
+  
+                  const rawMd = message.querySelector('script.raw-markdown');
+                  if (!rawMd) return;
+  
+                  function showCopied() {
+                      btn.textContent = '\u2705';
+                      btn.classList.add('copied');
+                      setTimeout(function() {
+                          btn.textContent = 'md';
+                          btn.classList.remove('copied');
+                      }, 1500);
+                  }
+  
+                  var md = rawMd.textContent.replace(/<\\\/script/gi, '</script');
+                  copyText(md).then(showCopied).catch(function() {});
               });
   
               // Inject copy buttons into code blocks
@@ -11834,6 +12041,7 @@
       <meta charset='UTF-8'>
       <meta name='viewport' content='width=device-width, initial-scale=1.0'>
       <title>Claude Transcripts - test_multi_session_html0</title>
+      <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0.5 10 7.25' shape-rendering='crispEdges'><rect x='1' y='1' width='8' height='5' fill='%23D4785A'/><rect x='0' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='9' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='2' y='3' width='1' height='1' fill='%23000'/><rect x='7' y='3' width='1' height='1' fill='%23000'/><rect x='1' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='3' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='6' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='8' y='6' width='1' height='1.75' fill='%23D4785A'/></svg>">
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -12291,6 +12499,13 @@
       gap: 8px;
   }
   
+  /* Copy button group */
+  .copy-buttons {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+  }
+  
   /* Copy button */
   .copy-btn {
       background: none;
@@ -12309,6 +12524,30 @@
   }
   
   .copy-btn.copied {
+      opacity: 1;
+  }
+  
+  /* Copy as Markdown button */
+  .copy-md-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.7em;
+      font-family: var(--font-monospace);
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .copy-md-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .copy-md-btn.copied {
       opacity: 1;
   }
   
@@ -15067,6 +15306,7 @@
           <div class='content'><pre>This is from a different session file to test multi-session handling.</pre></div>
           
           
+          
           <div class='fold-bar' data-message-id='d-1' data-border-color='user'>
               <div class='fold-bar-section' data-action='fold-one' data-target='d-1' data-title-unfolded='Fold 1 assistant' data-title-folded='Unfold 1 assistant' title='Fold 1 assistant'>
                   <span class='fold-icon'>▼</span>
@@ -15085,7 +15325,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874717Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -15094,6 +15334,7 @@
           <div class='content markdown'><div class="assistant-text markdown"><p>Indeed! This message is from a different JSONL file, which should help test the session divider logic. Only the first session should show a divider.</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">Indeed! This message is from a different JSONL file, which should help test the session divider logic. Only the first session should show a divider.</script>
           
       </div>
       
@@ -15112,6 +15353,7 @@
               </div>
           </div>
           <div class='content'><pre>Perfect! This should appear without any session divider above it.</pre></div>
+          
           
           
       </div>
@@ -15148,6 +15390,7 @@
           <div class='content'><pre>Hello Claude! Can you help me understand how Python decorators work?</pre></div>
           
           
+          
           <div class='fold-bar' data-message-id='d-3' data-border-color='user'>
               <div class='fold-bar-section' data-action='fold-one' data-target='d-3' data-title-unfolded='Fold 1 assistant' data-title-folded='Unfold 1 assistant' title='Fold 1 assistant'>
                   <span class='fold-icon'>▼</span>
@@ -15166,7 +15409,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -15194,6 +15437,31 @@
   </code></pre>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">I'd be happy to help you understand Python decorators! A decorator is a design pattern that allows you to modify or extend the behavior of functions or classes without permanently modifying their code.
+  
+  Here's a simple example:
+  
+  ```python
+  def my_decorator(func):
+      def wrapper():
+          print("Something before the function")
+          func()
+          print("Something after the function")
+      return wrapper
+  
+  @my_decorator
+  def say_hello():
+      print("Hello!")
+  
+  say_hello()
+  ```
+  
+  This will output:
+  ```
+  Something before the function
+  Hello!
+  Something after the function
+  ```</script>
           
       </div>
       
@@ -15212,6 +15480,7 @@
               </div>
           </div>
           <div class='content'><pre>Great! Can you also show me how to create a decorator that takes parameters?</pre></div>
+          
           
           
           <div class='fold-bar' data-message-id='d-7' data-border-color='user'>
@@ -15240,6 +15509,7 @@
           <div class='content'><div class='edit-tool-content'><div class='edit-diff'><div class='diff-line diff-added'><span class='diff-marker'>+</span>def repeat(times):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    def decorator(func):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        def wrapper(*args, **kwargs):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            for _ in range(times):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>                result = func(*args, **kwargs)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            return result</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        return wrapper</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    return decorator</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>@repeat(3)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>def greet(name):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    print(f&quot;Hello, {name}!&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>greet(&quot;Alice&quot;)</div></div></div></div>
           
           
+          
       </div>
       
       
@@ -15259,6 +15529,7 @@
           <div class='content'><pre>File created successfully at: /tmp/decorator_example.py</pre></div>
           
           
+          
       </div>
       
       
@@ -15270,7 +15541,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -15291,6 +15562,18 @@
   <p>When you run this code, it will print &quot;Hello, Alice!&quot; three times.</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">Perfect! I've created an example of a parameterized decorator. Here's how it works:
+  
+  1. **`repeat(times)`** - This is the decorator factory that takes parameters
+  2. **`decorator(func)`** - This is the actual decorator that gets returned
+  3. **`wrapper(*args, **kwargs)`** - This is the wrapper function that does the work
+  
+  The key insight is that we have **three levels of functions**:
+  - The outermost function takes the decorator parameters
+  - The middle function takes the function to be decorated
+  - The innermost function is the actual wrapper that gets called
+  
+  When you run this code, it will print "Hello, Alice!" three times.</script>
           
       </div>
       
@@ -15309,6 +15592,7 @@
               </div>
           </div>
           <div class='content'><pre>Can you run that example to show the output?</pre></div>
+          
           
           
           <div class='fold-bar' data-message-id='d-11' data-border-color='user'>
@@ -15337,6 +15621,7 @@
           <div class='content'><div class='bash-tool-content'><pre class='bash-tool-command'>python /tmp/decorator_example.py</pre></div></div>
           
           
+          
       </div>
       
       
@@ -15358,6 +15643,7 @@
   Hello, Alice!</pre></div>
           
           
+          
       </div>
       
       
@@ -15369,7 +15655,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -15386,6 +15672,16 @@
   <p>The pattern is always the same: decorator factory → decorator → wrapper function.</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">Perfect! As you can see, the `@repeat(3)` decorator successfully made the `greet` function execute three times, printing "Hello, Alice!" three times.
+  
+  This demonstrates the power of parameterized decorators - you can customize their behavior by passing arguments to the decorator factory. Some common use cases include:
+  
+  - **Timing decorators**: `@time_it(units='ms')`
+  - **Retry decorators**: `@retry(max_attempts=3, delay=1)`
+  - **Authentication decorators**: `@require_role('admin')`
+  - **Caching decorators**: `@cache(ttl=300)`
+  
+  The pattern is always the same: decorator factory → decorator → wrapper function.</script>
           
       </div>
       
@@ -15404,6 +15700,7 @@
               </div>
           </div>
           <div class='content'><pre>This is really helpful! Let me try to implement a timing decorator myself. Can you help me if I get stuck?</pre></div>
+          
           
           
       </div>
@@ -16103,6 +16400,7 @@
                   clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.copy-md-btn').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
   
@@ -16128,6 +16426,30 @@
                   }
   
                   copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+              });
+  
+              // Copy as Markdown button functionality
+              document.addEventListener('click', function(e) {
+                  const btn = e.target.closest('.copy-md-btn');
+                  if (!btn) return;
+  
+                  const message = btn.closest('.message');
+                  if (!message) return;
+  
+                  const rawMd = message.querySelector('script.raw-markdown');
+                  if (!rawMd) return;
+  
+                  function showCopied() {
+                      btn.textContent = '\u2705';
+                      btn.classList.add('copied');
+                      setTimeout(function() {
+                          btn.textContent = 'md';
+                          btn.classList.remove('copied');
+                      }, 1500);
+                  }
+  
+                  var md = rawMd.textContent.replace(/<\\\/script/gi, '</script');
+                  copyText(md).then(showCopied).catch(function() {});
               });
   
               // Inject copy buttons into code blocks
@@ -16923,6 +17245,7 @@
       <meta charset='UTF-8'>
       <meta name='viewport' content='width=device-width, initial-scale=1.0'>
       <title>Test Transcript</title>
+      <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0.5 10 7.25' shape-rendering='crispEdges'><rect x='1' y='1' width='8' height='5' fill='%23D4785A'/><rect x='0' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='9' y='2.75' width='1' height='1.5' fill='%23D4785A'/><rect x='2' y='3' width='1' height='1' fill='%23000'/><rect x='7' y='3' width='1' height='1' fill='%23000'/><rect x='1' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='3' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='6' y='6' width='1' height='1.75' fill='%23D4785A'/><rect x='8' y='6' width='1' height='1.75' fill='%23D4785A'/></svg>">
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -17380,6 +17703,13 @@
       gap: 8px;
   }
   
+  /* Copy button group */
+  .copy-buttons {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+  }
+  
   /* Copy button */
   .copy-btn {
       background: none;
@@ -17398,6 +17728,30 @@
   }
   
   .copy-btn.copied {
+      opacity: 1;
+  }
+  
+  /* Copy as Markdown button */
+  .copy-md-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.7em;
+      font-family: var(--font-monospace);
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0.4;
+      transition: opacity 0.15s;
+  }
+  
+  .copy-md-btn:hover {
+      opacity: 1;
+      background-color: var(--highlight-light);
+  }
+  
+  .copy-md-btn.copied {
       opacity: 1;
   }
   
@@ -20105,6 +20459,7 @@
           <div class='content'><pre>Hello Claude! Can you help me understand how Python decorators work?</pre></div>
           
           
+          
           <div class='fold-bar' data-message-id='d-1' data-border-color='user'>
               <div class='fold-bar-section' data-action='fold-one' data-target='d-1' data-title-unfolded='Fold 1 assistant' data-title-folded='Unfold 1 assistant' title='Fold 1 assistant'>
                   <span class='fold-icon'>▼</span>
@@ -20123,7 +20478,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T15:52:07.874907Z'>2025-07-03 15:52:07</span>
                   </div>
                   
@@ -20151,6 +20506,31 @@
   </code></pre>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">I'd be happy to help you understand Python decorators! A decorator is a design pattern that allows you to modify or extend the behavior of functions or classes without permanently modifying their code.
+  
+  Here's a simple example:
+  
+  ```python
+  def my_decorator(func):
+      def wrapper():
+          print("Something before the function")
+          func()
+          print("Something after the function")
+      return wrapper
+  
+  @my_decorator
+  def say_hello():
+      print("Hello!")
+  
+  say_hello()
+  ```
+  
+  This will output:
+  ```
+  Something before the function
+  Hello!
+  Something after the function
+  ```</script>
           
       </div>
       
@@ -20169,6 +20549,7 @@
               </div>
           </div>
           <div class='content'><pre>Great! Can you also show me how to create a decorator that takes parameters?</pre></div>
+          
           
           
           <div class='fold-bar' data-message-id='d-3' data-border-color='user'>
@@ -20197,6 +20578,7 @@
           <div class='content'><div class='edit-tool-content'><div class='edit-diff'><div class='diff-line diff-added'><span class='diff-marker'>+</span>def repeat(times):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    def decorator(func):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        def wrapper(*args, **kwargs):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            for _ in range(times):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>                result = func(*args, **kwargs)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>            return result</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>        return wrapper</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    return decorator</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>@repeat(3)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>def greet(name):</div><div class='diff-line diff-added'><span class='diff-marker'>+</span>    print(f&quot;Hello, {name}!&quot;)</div><div class='diff-line diff-added'><span class='diff-marker'>+</span></div><div class='diff-line diff-added'><span class='diff-marker'>+</span>greet(&quot;Alice&quot;)</div></div></div></div>
           
           
+          
       </div>
       
       
@@ -20216,6 +20598,7 @@
           <div class='content'><pre>File created successfully at: /tmp/decorator_example.py</pre></div>
           
           
+          
       </div>
       
       
@@ -20227,7 +20610,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T16:00:07.874907Z'>2025-07-03 16:00:07</span>
                   </div>
                   
@@ -20248,6 +20631,18 @@
   <p>When you run this code, it will print &quot;Hello, Alice!&quot; three times.</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">Perfect! I've created an example of a parameterized decorator. Here's how it works:
+  
+  1. **`repeat(times)`** - This is the decorator factory that takes parameters
+  2. **`decorator(func)`** - This is the actual decorator that gets returned
+  3. **`wrapper(*args, **kwargs)`** - This is the wrapper function that does the work
+  
+  The key insight is that we have **three levels of functions**:
+  - The outermost function takes the decorator parameters
+  - The middle function takes the function to be decorated
+  - The innermost function is the actual wrapper that gets called
+  
+  When you run this code, it will print "Hello, Alice!" three times.</script>
           
       </div>
       
@@ -20266,6 +20661,7 @@
               </div>
           </div>
           <div class='content'><pre>Can you run that example to show the output?</pre></div>
+          
           
           
           <div class='fold-bar' data-message-id='d-7' data-border-color='user'>
@@ -20294,6 +20690,7 @@
           <div class='content'><div class='bash-tool-content'><pre class='bash-tool-command'>python /tmp/decorator_example.py</pre></div></div>
           
           
+          
       </div>
       
       
@@ -20315,6 +20712,7 @@
   Hello, Alice!</pre></div>
           
           
+          
       </div>
       
       
@@ -20326,7 +20724,7 @@
               <span>🤖 Assistant</span>
               <div class='header-info'>
                   <div class='timestamp-row'>
-                      <button class='copy-btn' title='Copy message' aria-label='Copy message'>📋</button>
+                      <span class='copy-buttons'><button class='copy-btn' title='Copy rich text' aria-label='Copy rich text'>📋</button><button class='copy-md-btn' title='Copy as Markdown' aria-label='Copy as Markdown'>md</button></span>
                       <span class='timestamp' data-timestamp='2025-07-03T16:08:07.874907Z'>2025-07-03 16:08:07</span>
                   </div>
                   
@@ -20343,6 +20741,16 @@
   <p>The pattern is always the same: decorator factory → decorator → wrapper function.</p>
   </div></div>
           
+          <script type="text/plain" class="raw-markdown">Perfect! As you can see, the `@repeat(3)` decorator successfully made the `greet` function execute three times, printing "Hello, Alice!" three times.
+  
+  This demonstrates the power of parameterized decorators - you can customize their behavior by passing arguments to the decorator factory. Some common use cases include:
+  
+  - **Timing decorators**: `@time_it(units='ms')`
+  - **Retry decorators**: `@retry(max_attempts=3, delay=1)`
+  - **Authentication decorators**: `@require_role('admin')`
+  - **Caching decorators**: `@cache(ttl=300)`
+  
+  The pattern is always the same: decorator factory → decorator → wrapper function.</script>
           
       </div>
       
@@ -20361,6 +20769,7 @@
               </div>
           </div>
           <div class='content'><pre>This is really helpful! Let me try to implement a timing decorator myself. Can you help me if I get stuck?</pre></div>
+          
           
           
       </div>
@@ -21060,6 +21469,7 @@
                   clone.querySelectorAll('.collapsible-details > summary, .collapsible-code > summary').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('details').forEach(function(el) { el.setAttribute('open', ''); });
                   clone.querySelectorAll('.code-copy-btn').forEach(function(el) { el.remove(); });
+                  clone.querySelectorAll('.copy-md-btn').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.continuation-meta').forEach(function(el) { el.remove(); });
                   clone.querySelectorAll('.task-notification-meta').forEach(function(el) { el.remove(); });
   
@@ -21085,6 +21495,30 @@
                   }
   
                   copyRich(htmlContent, textContent).then(showCopied).catch(function() {});
+              });
+  
+              // Copy as Markdown button functionality
+              document.addEventListener('click', function(e) {
+                  const btn = e.target.closest('.copy-md-btn');
+                  if (!btn) return;
+  
+                  const message = btn.closest('.message');
+                  if (!message) return;
+  
+                  const rawMd = message.querySelector('script.raw-markdown');
+                  if (!rawMd) return;
+  
+                  function showCopied() {
+                      btn.textContent = '\u2705';
+                      btn.classList.add('copied');
+                      setTimeout(function() {
+                          btn.textContent = 'md';
+                          btn.classList.remove('copied');
+                      }, 1500);
+                  }
+  
+                  var md = rawMd.textContent.replace(/<\\\/script/gi, '</script');
+                  copyText(md).then(showCopied).catch(function() {});
               });
   
               // Inject copy buttons into code blocks
