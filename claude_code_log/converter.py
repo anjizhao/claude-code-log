@@ -214,6 +214,8 @@ def load_transcript(
                             "progress",  # Real-time progress updates (hook_progress, bash_progress)
                             "pr-link",  # PR link metadata (created/linked PRs)
                             "last-prompt",  # Last user prompt in session (metadata only)
+                            "agent-name",  # Agent display name metadata
+                            "agent-color",  # Agent color metadata
                         ]
                     ):
                         # Silently skip internal message types we don't render
