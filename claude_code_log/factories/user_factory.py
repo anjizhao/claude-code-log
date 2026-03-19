@@ -72,8 +72,7 @@ def is_bash_output(text_content: str) -> bool:
 def is_task_notification(text_content: str) -> bool:
     """Check if a message contains a task notification from a background agent."""
     return (
-        "<task-notification>" in text_content
-        and "</task-notification>" in text_content
+        "<task-notification>" in text_content and "</task-notification>" in text_content
     )
 
 

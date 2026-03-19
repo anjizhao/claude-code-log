@@ -308,9 +308,7 @@ def format_task_notification_content(content: TaskNotificationMessage) -> str:
 
     if meta_parts:
         meta_str = escape_html(" · ".join(meta_parts))
-        parts.append(
-            f"<div class='task-notification-meta'>{meta_str}</div>"
-        )
+        parts.append(f"<div class='task-notification-meta'>{meta_str}</div>")
 
     # Render the result as markdown
     result_html = render_markdown_collapsible(
