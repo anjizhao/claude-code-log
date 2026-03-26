@@ -1,4 +1,4 @@
-# Restoring Archived Sessions
+# Managing Archived Sessions
 
 When you run `claude-code-log`, you may see output like:
 
@@ -79,6 +79,50 @@ You can view archived sessions as HTML or Markdown without restoring them:
 - `h` - Open HTML in browser
 - `m` - Open Markdown in browser
 - `v` - View Markdown in embedded viewer
+
+## Permanently Deleting Sessions
+
+To fully remove a session (both the JSONL file and all cached data), you need to delete from three places: the JSONL file on disk, and the `messages`, `sessions`, and `cached_files` tables in the cache DB.
+
+### 1. Find the session
+
+```sql
+sqlite3 ~/.claude/projects/claude-code-log-cache.db
+
+-- Find sessions for a project
+SELECT s.session_id, s.first_timestamp, s.message_count
+FROM sessions s
+JOIN projects p ON s.project_id = p.id
+WHERE p.project_path LIKE '%your-project-name%';
+```
+
+### 2. Find the cached_files entry
+
+```sql
+SELECT DISTINCT cf.id, cf.file_path
+FROM cached_files cf
+JOIN messages m ON m.file_id = cf.id
+WHERE m.session_id = 'your-session-id';
+```
+
+### 3. Delete everything
+
+```bash
+# Delete the JSONL file (skip if already deleted)
+rm ~/.claude/projects/{project-name}/{session-id}.jsonl
+
+# Delete from the cache DB (replace SESSION_ID and FILE_ID with actual values)
+sqlite3 ~/.claude/projects/claude-code-log-cache.db \
+  "DELETE FROM messages WHERE session_id = 'SESSION_ID';
+   DELETE FROM sessions WHERE session_id = 'SESSION_ID';
+   DELETE FROM cached_files WHERE id = FILE_ID;"
+```
+
+Also delete the generated HTML file if one exists:
+
+```bash
+rm ~/.claude/projects/{project-name}/session-{session-id}.html
+```
 
 ## Limitations
 
