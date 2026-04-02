@@ -216,6 +216,8 @@ def load_transcript(
                             "last-prompt",  # Last user prompt in session (metadata only)
                             "agent-name",  # Agent display name metadata
                             "agent-color",  # Agent color metadata
+                            "permission-mode",  # Permission mode changes
+                            "attachment",  # Tool/MCP metadata (deferred_tools_delta, mcp_instructions_delta)
                         ]
                     ):
                         # Silently skip internal message types we don't render
