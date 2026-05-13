@@ -412,8 +412,15 @@ def deduplicate_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntr
         content_key = ""
         is_user_text = False
         if isinstance(message, AssistantTranscriptEntry):
-            # For assistant messages, use the message id
-            content_key = message.message.id
+            # For assistant messages, use the message id plus the sequence of
+            # content block types. A single API response is sometimes written
+            # as multiple JSONL entries sharing the same message.id and
+            # timestamp (e.g. one entry with a thinking block, a second with
+            # the text block). Those entries are complementary and must not
+            # be deduped. Version-stutter duplicates have identical content
+            # so their type sequences still match.
+            content_types = ",".join(item.type for item in message.message.content)
+            content_key = f"{message.message.id}|{content_types}"
         elif isinstance(message, UserTranscriptEntry):
             # For user messages, check for tool results
             for item in message.message.content:

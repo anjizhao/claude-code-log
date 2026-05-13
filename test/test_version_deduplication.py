@@ -7,6 +7,8 @@ from claude_code_log.models import (
     AssistantMessageModel,
     UserTranscriptEntry,
     UserMessageModel,
+    TextContent,
+    ThinkingContent,
     ToolUseContent,
     ToolResultContent,
 )
@@ -368,3 +370,70 @@ class TestVersionDeduplication:
 
             # Should have kept msg1 which has the IDE notification
             assert "test.md" in html, "Expected IDE notification to be present"
+
+    def test_split_thinking_and_text_not_deduplicated(self):
+        """A single API response can be written as two JSONL entries that
+        share the same message.id and timestamp - one with a thinking block,
+        one with a text block. Those are complementary and must both render.
+        """
+        timestamp = "2026-05-13T16:57:28.373Z"
+        shared_message_id = "msg_01AgwonxVrTDoJniTb9UKPqM"
+
+        thinking_entry = AssistantTranscriptEntry(
+            type="assistant",
+            uuid="uuid-thinking",
+            parentUuid="parent-001",
+            timestamp=timestamp,
+            version="2.1.112",
+            isSidechain=False,
+            userType="external",
+            cwd="/test",
+            sessionId="session-test",
+            message=AssistantMessageModel(
+                id=shared_message_id,
+                type="message",
+                role="assistant",
+                model="claude-opus-4-7",
+                content=[
+                    ThinkingContent(
+                        type="thinking",
+                        thinking="I need to update the fabric proxy reply.",
+                    ),
+                ],
+                stop_reason="end_turn",
+            ),
+        )
+
+        text_entry = AssistantTranscriptEntry(
+            type="assistant",
+            uuid="uuid-text",
+            parentUuid="uuid-thinking",
+            timestamp=timestamp,
+            version="2.1.112",
+            isSidechain=False,
+            userType="external",
+            cwd="/test",
+            sessionId="session-test",
+            message=AssistantMessageModel(
+                id=shared_message_id,
+                type="message",
+                role="assistant",
+                model="claude-opus-4-7",
+                content=[
+                    TextContent(
+                        type="text",
+                        text="Shorter version: link to the doc.",
+                    ),
+                ],
+                stop_reason="end_turn",
+            ),
+        )
+
+        deduped = deduplicate_messages([thinking_entry, text_entry])
+        assert len(deduped) == 2, (
+            f"Expected both entries to be kept, got {len(deduped)}"
+        )
+
+        html = generate_html(deduped, "Split Content Test")
+        assert "I need to update the fabric proxy reply." in html
+        assert "Shorter version: link to the doc." in html
