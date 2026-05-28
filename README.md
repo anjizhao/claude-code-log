@@ -6,21 +6,10 @@ A CLI tool that converts Claude Code transcript JSONL files into readable HTML p
 
 ## Installation
 
-This fork is not published to PyPI. To get the features and fixes added here, install from source and run from your local clone.
-
-Install from source:
+This fork is not published to PyPI. To get the features and fixes added here, clone the repo and run it from your local clone with `uv run --directory`:
 
 ```bash
 git clone https://github.com/anjizhao/claude-code-log.git
-cd claude-code-log
-uv sync
-```
-
-### Running from a local clone
-
-Run from anywhere using `uv run --directory`, which points uv at the cloned project:
-
-```bash
 uv run --directory /path/to/claude-code-log claude-code-log [options]
 ```
 
