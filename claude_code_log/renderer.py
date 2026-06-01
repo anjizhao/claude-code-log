@@ -2126,8 +2126,12 @@ class Renderer:
     # Override in subclasses for format-specific titles (e.g., HTML with icons).
 
     def title_SystemMessage(self, content: SystemMessage, _: TemplateMessage) -> str:
-        level = content.level or "unknown"
-        return f"System {level.title()}"
+        title = (
+            content.level.title()
+            if content and content.level and content.level.title()
+            else "unknown"
+        )
+        return f"System {title}"
 
     def title_HookSummaryMessage(
         self, _content: HookSummaryMessage, _: TemplateMessage
