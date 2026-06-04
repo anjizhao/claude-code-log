@@ -263,6 +263,12 @@ def _clear_html_files(input_path: Path, all_projects: bool) -> None:
     help="Maximum messages per page for combined transcript (default: 2000). Sessions are never split across pages.",
 )
 @click.option(
+    "--projects-since",
+    type=str,
+    default=None,
+    help='Only refresh projects with activity since this date (e.g., "1 week ago", "7d", "2026-01-01"). Older projects still appear in the master index using cached data; their HTML pages are not refreshed. Only applies when processing all projects.',
+)
+@click.option(
     "--show-stats",
     is_flag=True,
     default=False,
@@ -290,6 +296,7 @@ def main(
     projects_dir: Optional[Path],
     show_stats: bool,
     page_size: int,
+    projects_since: Optional[str],
     debug: bool,
 ) -> None:
     """Convert Claude transcript JSONL files to HTML.
@@ -333,6 +340,7 @@ def main(
                 skip_combined=skip_combined,
                 show_stats=show_stats,
                 regenerate=regenerate,
+                projects_since=projects_since,
             )
 
             # Count processed projects
