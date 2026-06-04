@@ -1882,6 +1882,7 @@ def process_projects_hierarchy(
     skip_combined: bool = False,
     show_stats: bool = False,
     regenerate: Optional[int] = None,
+    projects_since: Optional[str] = None,
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files.
 
@@ -1896,6 +1897,9 @@ def process_projects_hierarchy(
         silent: If True, suppress verbose per-file logging (show summary only)
         page_size: Maximum messages per page for combined transcript pagination
         skip_combined: Skip combined transcript, generate project session index instead
+        projects_since: If set (e.g. "1 week ago", "7d"), projects whose newest
+            JSONL is older than this date are not refreshed. They still appear in
+            the master index using cached data; their HTML pages are left as-is.
     """
     import time
 
@@ -1948,6 +1952,18 @@ def process_projects_hierarchy(
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=regenerate)
         regenerate_cutoff_iso = cutoff.isoformat()
 
+    # Pre-compute --projects-since cutoff as a unix timestamp for fast mtime comparison.
+    projects_since_cutoff: Optional[float] = None
+    if projects_since:
+        parsed = dateparser.parse(
+            projects_since,
+            settings={"TIMEZONE": "UTC", "RETURN_AS_TIMEZONE_AWARE": True},
+        )
+        if not parsed:
+            raise ValueError(f"Could not parse projects-since: {projects_since}")
+        projects_since_cutoff = parsed.timestamp()
+    projects_skipped_by_age = 0
+
     for project_dir in sorted(project_dirs):
         project_start_time = time.time()
         stats = GenerationStats()
@@ -1972,138 +1988,167 @@ def process_projects_hierarchy(
                 for f in project_dir.glob("*.jsonl")
                 if not f.name.startswith("agent-")
             ]
-            # Valid session IDs are from existing JSONL files (file stem = session ID)
-            valid_session_ids = {f.stem for f in jsonl_files}
-            modified_files = (
-                cache_manager.get_modified_files(jsonl_files) if cache_manager else []
-            )
-            # Pass valid_session_ids to skip archived sessions (JSONL deleted)
-            stale_sessions = (
-                cache_manager.get_stale_sessions(
-                    valid_session_ids,
-                    show_stats=show_stats,
-                    skip_combined=skip_combined,
-                )
-                if cache_manager
-                else []
-            )
-            # Count archived sessions (cached but JSONL deleted)
-            archived_count = (
-                cache_manager.get_archived_session_count(valid_session_ids)
-                if cache_manager
-                else 0
-            )
-            total_archived += archived_count
-            if skip_combined:
-                output_path = project_dir / "index.html"
-            else:
-                output_path = project_dir / "combined_transcripts.html"
-            # Check combined_stale using the appropriate cache:
-            # - Paginated projects store data in html_pages table (via save_page_cache)
-            # - Non-paginated projects store data in html_cache table (via update_html_cache)
-            if skip_combined:
-                if cache_manager is not None:
-                    combined_stale = cache_manager.is_html_stale(
-                        output_path.name,
-                        None,
-                        show_stats=show_stats,
-                        skip_combined=skip_combined,
-                    )[0]
-                else:
-                    combined_stale = (
-                        is_html_outdated(output_path) or not output_path.exists()
-                    )
-            elif cache_manager is not None:
-                existing_page_count = cache_manager.get_page_count()
-                if existing_page_count > 0:
-                    # Paginated project: check page 1 staleness
-                    combined_stale = cache_manager.is_page_stale(
-                        1, page_size, show_stats=show_stats
-                    )[0]
-                else:
-                    # Non-paginated project: check html_cache
-                    combined_stale = cache_manager.is_html_stale(
-                        output_path.name,
-                        None,
-                        show_stats=show_stats,
-                    )[0]
-            else:
-                combined_stale = True
 
-            # Determine if we need to do any work
-            needs_work = (
-                bool(modified_files)
-                or bool(stale_sessions)
-                or combined_stale
-                or not output_path.exists()
-            )
-
-            # Build archived suffix for output (shown on both cached and work paths)
-            archived_suffix = (
-                f", {archived_count} archived" if archived_count > 0 else ""
-            )
-
-            if not needs_work:
-                # Fast path: nothing to do, just collect stats for index
-                stats.files_loaded_from_cache = len(jsonl_files)
-                stats.total_time = time.time() - project_start_time
-                # Show progress
-                print(
-                    f"  {project_dir.name}: cached{archived_suffix} ({stats.total_time:.1f}s)"
-                )
-            else:
-                # Slow path: update cache and regenerate output
-                stats.files_updated = len(modified_files) if modified_files else 0
-                stats.files_loaded_from_cache = len(jsonl_files) - stats.files_updated
-                stats.sessions_regenerated = len(stale_sessions)
-
-                # Track if cache was updated (for index regeneration)
-                if modified_files:
-                    any_cache_updated = True
-                    projects_with_updates += 1
-                elif combined_stale or stale_sessions:
-                    any_cache_updated = True
-
-                # Generate output for this project (handles cache updates internally)
-                output_path = convert_jsonl_to(
-                    output_format,
-                    project_dir,
-                    None,
-                    from_date,
-                    to_date,
-                    generate_individual_sessions,
-                    use_cache,
-                    silent=silent,
-                    image_export_mode=image_export_mode,
-                    page_size=page_size,
-                    skip_combined=skip_combined,
-                    show_stats=show_stats,
-                )
-
-                # Track timing
-                stats.total_time = time.time() - project_start_time
-                # Show progress
-                progress_parts: List[str] = []
-                if stats.files_updated > 0:
-                    progress_parts.append(f"{stats.files_updated} files updated")
-                if stats.sessions_regenerated > 0:
-                    progress_parts.append(f"{stats.sessions_regenerated} sessions")
-                detail = ", ".join(progress_parts) if progress_parts else "regenerated"
-                print(
-                    f"  {project_dir.name}: {detail}{archived_suffix} ({stats.total_time:.1f}s)"
-                )
-
-            # Get project info for index - use cached data if available
-            # Exclude agent files (they are loaded via session references)
-            jsonl_files = [
-                f
-                for f in project_dir.glob("*.jsonl")
-                if not f.name.startswith("agent-")
-            ]
-            jsonl_count = len(jsonl_files)
-            last_modified: float = (
+            # --projects-since: if this project's newest JSONL is older than the
+            # cutoff, skip all refresh work. The project still appears in the
+            # master index via cached data; its HTML pages on disk are untouched.
+            max_jsonl_mtime = (
                 max(f.stat().st_mtime for f in jsonl_files) if jsonl_files else 0.0
             )
+            skip_due_to_age = (
+                projects_since_cutoff is not None
+                and max_jsonl_mtime > 0
+                and max_jsonl_mtime < projects_since_cutoff
+            )
+
+            if skip_due_to_age:
+                projects_skipped_by_age += 1
+                output_path = project_dir / (
+                    "index.html" if skip_combined else "combined_transcripts.html"
+                )
+                stats.files_loaded_from_cache = len(jsonl_files)
+                stats.total_time = time.time() - project_start_time
+                age_days = (time.time() - max_jsonl_mtime) / 86400
+                print(
+                    f"  {project_dir.name}: skipped ({age_days:.0f}d old, --projects-since)"
+                )
+                # Fall through to Phase 3 to populate the index entry from cache.
+                modified_files = []
+                stale_sessions: list[str] = []
+                archived_count = 0
+            else:
+                # Valid session IDs are from existing JSONL files (file stem = session ID)
+                valid_session_ids = {f.stem for f in jsonl_files}
+                modified_files = (
+                    cache_manager.get_modified_files(jsonl_files)
+                    if cache_manager
+                    else []
+                )
+                # Pass valid_session_ids to skip archived sessions (JSONL deleted)
+                stale_sessions = (
+                    cache_manager.get_stale_sessions(
+                        valid_session_ids,
+                        show_stats=show_stats,
+                        skip_combined=skip_combined,
+                    )
+                    if cache_manager
+                    else []
+                )
+                # Count archived sessions (cached but JSONL deleted)
+                archived_count = (
+                    cache_manager.get_archived_session_count(valid_session_ids)
+                    if cache_manager
+                    else 0
+                )
+                total_archived += archived_count
+                if skip_combined:
+                    output_path = project_dir / "index.html"
+                else:
+                    output_path = project_dir / "combined_transcripts.html"
+                # Check combined_stale using the appropriate cache:
+                # - Paginated projects store data in html_pages table (via save_page_cache)
+                # - Non-paginated projects store data in html_cache table (via update_html_cache)
+                if skip_combined:
+                    if cache_manager is not None:
+                        combined_stale = cache_manager.is_html_stale(
+                            output_path.name,
+                            None,
+                            show_stats=show_stats,
+                            skip_combined=skip_combined,
+                        )[0]
+                    else:
+                        combined_stale = (
+                            is_html_outdated(output_path) or not output_path.exists()
+                        )
+                elif cache_manager is not None:
+                    existing_page_count = cache_manager.get_page_count()
+                    if existing_page_count > 0:
+                        # Paginated project: check page 1 staleness
+                        combined_stale = cache_manager.is_page_stale(
+                            1, page_size, show_stats=show_stats
+                        )[0]
+                    else:
+                        # Non-paginated project: check html_cache
+                        combined_stale = cache_manager.is_html_stale(
+                            output_path.name,
+                            None,
+                            show_stats=show_stats,
+                        )[0]
+                else:
+                    combined_stale = True
+
+                # Determine if we need to do any work
+                needs_work = (
+                    bool(modified_files)
+                    or bool(stale_sessions)
+                    or combined_stale
+                    or not output_path.exists()
+                )
+
+                # Build archived suffix for output (shown on both cached and work paths)
+                archived_suffix = (
+                    f", {archived_count} archived" if archived_count > 0 else ""
+                )
+
+                if not needs_work:
+                    # Fast path: nothing to do, just collect stats for index
+                    stats.files_loaded_from_cache = len(jsonl_files)
+                    stats.total_time = time.time() - project_start_time
+                    # Show progress
+                    print(
+                        f"  {project_dir.name}: cached{archived_suffix} ({stats.total_time:.1f}s)"
+                    )
+                else:
+                    # Slow path: update cache and regenerate output
+                    stats.files_updated = len(modified_files) if modified_files else 0
+                    stats.files_loaded_from_cache = (
+                        len(jsonl_files) - stats.files_updated
+                    )
+                    stats.sessions_regenerated = len(stale_sessions)
+
+                    # Track if cache was updated (for index regeneration)
+                    if modified_files:
+                        any_cache_updated = True
+                        projects_with_updates += 1
+                    elif combined_stale or stale_sessions:
+                        any_cache_updated = True
+
+                    # Generate output for this project (handles cache updates internally)
+                    output_path = convert_jsonl_to(
+                        output_format,
+                        project_dir,
+                        None,
+                        from_date,
+                        to_date,
+                        generate_individual_sessions,
+                        use_cache,
+                        silent=silent,
+                        image_export_mode=image_export_mode,
+                        page_size=page_size,
+                        skip_combined=skip_combined,
+                        show_stats=show_stats,
+                    )
+
+                    # Track timing
+                    stats.total_time = time.time() - project_start_time
+                    # Show progress
+                    progress_parts: List[str] = []
+                    if stats.files_updated > 0:
+                        progress_parts.append(f"{stats.files_updated} files updated")
+                    if stats.sessions_regenerated > 0:
+                        progress_parts.append(
+                            f"{stats.sessions_regenerated} sessions"
+                        )
+                    detail = (
+                        ", ".join(progress_parts) if progress_parts else "regenerated"
+                    )
+                    print(
+                        f"  {project_dir.name}: {detail}{archived_suffix} ({stats.total_time:.1f}s)"
+                    )
+
+            # Reuse jsonl_files and max_jsonl_mtime from above (already computed).
+            jsonl_count = len(jsonl_files)
+            last_modified: float = max_jsonl_mtime
 
             # Phase 3: Use fresh cached data for index aggregation
             if cache_manager is not None:
@@ -2359,6 +2404,10 @@ def process_projects_hierarchy(
     summary_parts.append(f"Processed {total_projects} projects in {elapsed:.1f}s")
     if projects_with_updates > 0:
         summary_parts.append(f"  {projects_with_updates} projects updated")
+    if projects_skipped_by_age > 0:
+        summary_parts.append(
+            f"  {projects_skipped_by_age} projects skipped (older than --projects-since={projects_since})"
+        )
     if index_regenerated:
         summary_parts.append("  Index regenerated")
     print("\n".join(summary_parts))
