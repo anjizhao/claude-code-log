@@ -2146,17 +2146,9 @@ def process_projects_hierarchy(
                         f"  {project_dir.name}: {detail}{archived_suffix} ({stats.total_time:.1f}s)"
                     )
 
-            # Get project info for index - use cached data if available
-            # Exclude agent files (they are loaded via session references)
-            jsonl_files = [
-                f
-                for f in project_dir.glob("*.jsonl")
-                if not f.name.startswith("agent-")
-            ]
+            # Reuse jsonl_files and max_jsonl_mtime from above (already computed).
             jsonl_count = len(jsonl_files)
-            last_modified: float = (
-                max(f.stat().st_mtime for f in jsonl_files) if jsonl_files else 0.0
-            )
+            last_modified: float = max_jsonl_mtime
 
             # Phase 3: Use fresh cached data for index aggregation
             if cache_manager is not None:
