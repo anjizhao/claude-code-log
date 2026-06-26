@@ -218,6 +218,7 @@ def load_transcript(
                             "agent-color",  # Agent color metadata
                             "permission-mode",  # Permission mode changes
                             "attachment",  # Tool/MCP metadata (deferred_tools_delta, mcp_instructions_delta)
+                            "ai-title",  # AI-generated session title
                         ]
                     ):
                         # Silently skip internal message types we don't render
