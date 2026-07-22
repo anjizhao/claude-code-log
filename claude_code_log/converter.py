@@ -211,12 +211,14 @@ def load_transcript(
                         entry_type
                         in [
                             "file-history-snapshot",  # Internal Claude Code file backup metadata
+                            "file-history-delta",  # Internal Claude Code file backup metadata (incremental)
                             "progress",  # Real-time progress updates (hook_progress, bash_progress)
                             "pr-link",  # PR link metadata (created/linked PRs)
                             "last-prompt",  # Last user prompt in session (metadata only)
                             "agent-name",  # Agent display name metadata
                             "agent-color",  # Agent color metadata
                             "permission-mode",  # Permission mode changes
+                            "mode",  # Session mode changes (normal, plan, etc.)
                             "attachment",  # Tool/MCP metadata (deferred_tools_delta, mcp_instructions_delta)
                             "ai-title",  # AI-generated session title
                         ]
@@ -2137,9 +2139,7 @@ def process_projects_hierarchy(
                     if stats.files_updated > 0:
                         progress_parts.append(f"{stats.files_updated} files updated")
                     if stats.sessions_regenerated > 0:
-                        progress_parts.append(
-                            f"{stats.sessions_regenerated} sessions"
-                        )
+                        progress_parts.append(f"{stats.sessions_regenerated} sessions")
                     detail = (
                         ", ".join(progress_parts) if progress_parts else "regenerated"
                     )
