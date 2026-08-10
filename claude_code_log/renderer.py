@@ -534,6 +534,7 @@ class TemplateSummary:
 
 def generate_template_messages(
     messages: list[TranscriptEntry],
+    exclude_hooks: tuple[str, ...] = (),
 ) -> Tuple[list[TemplateMessage], list[dict[str, Any]], RenderingContext]:
     """Generate root messages and session navigation from transcript messages.
 
@@ -570,7 +571,7 @@ def generate_template_messages(
 
     # Filter messages (removes summaries, warmup, empty, etc.)
     with log_timing("Filter messages", t_start):
-        filtered_messages = _filter_messages(messages)
+        filtered_messages = _filter_messages(messages, exclude_hooks=exclude_hooks)
 
     # Pass 1: Collect session metadata and token tracking
     with log_timing("Collect session info", t_start):
@@ -1541,7 +1542,10 @@ def _reorder_sidechain_template_messages(
     return result
 
 
-def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
+def _filter_messages(
+    messages: list[TranscriptEntry],
+    exclude_hooks: tuple[str, ...] = (),
+) -> list[TranscriptEntry]:
     """Filter messages to those that should be rendered.
 
     This function filters out:
@@ -1549,6 +1553,7 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
     - Queue operations except 'remove' (steering messages)
     - Messages with no meaningful content (no text and no tool items)
     - Messages matching should_skip_message() (warmup, etc.)
+    - Hook summaries whose commands all match an --exclude-hooks pattern
 
     System messages are included as they need special processing in _render_messages.
 
@@ -1557,10 +1562,13 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
 
     Args:
         messages: List of transcript entries to filter
+        exclude_hooks: Substrings to match against hook commands (case-insensitive).
+            A hook summary is skipped when every command matches at least one pattern.
 
     Returns:
         Filtered list of messages that should be rendered
     """
+    exclude_hooks_lower = tuple(p.lower() for p in exclude_hooks)
     filtered: list[TranscriptEntry] = []
 
     for message in messages:
@@ -1575,6 +1583,18 @@ def _filter_messages(messages: list[TranscriptEntry]) -> list[TranscriptEntry]:
 
         # System messages bypass other checks but are included
         if isinstance(message, SystemTranscriptEntry):
+            if (
+                exclude_hooks_lower
+                and message.subtype == "stop_hook_summary"
+                and message.hookInfos
+            ):
+                commands = [
+                    info.get("command", "").lower() for info in message.hookInfos
+                ]
+                if commands and all(
+                    any(pat in cmd for pat in exclude_hooks_lower) for cmd in commands
+                ):
+                    continue
             filtered.append(message)
             continue
 
