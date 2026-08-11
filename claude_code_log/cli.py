@@ -281,6 +281,11 @@ def _clear_html_files(input_path: Path, all_projects: bool) -> None:
     help="Show token usage statistics in generated output (hidden by default)",
 )
 @click.option(
+    "--exclude-hooks",
+    multiple=True,
+    help="Hide hook messages whose command contains this substring (case-insensitive). Can be repeated.",
+)
+@click.option(
     "--debug",
     is_flag=True,
     default=False,
@@ -304,6 +309,7 @@ def main(
     page_size: int,
     projects_since: Optional[str],
     sessions_since: Optional[str],
+    exclude_hooks: tuple[str, ...],
     debug: bool,
 ) -> None:
     """Convert Claude transcript JSONL files to HTML.
@@ -349,6 +355,7 @@ def main(
                 regenerate=regenerate,
                 projects_since=projects_since,
                 sessions_since=sessions_since,
+                exclude_hooks=exclude_hooks,
             )
 
             # Count processed projects
@@ -401,6 +408,7 @@ def main(
             show_stats=show_stats,
             regenerate=regenerate,
             sessions_since=sessions_since,
+            exclude_hooks=exclude_hooks,
         )
         if input_path.is_file():
             click.echo(f"Successfully converted {input_path} to {output_path}")

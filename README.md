@@ -71,6 +71,7 @@ The `--regenerate`, `--clear-cache`, and `--clear-output` flags are for when the
 | `--projects-dir PATH` | Custom projects directory (default: `~/.claude/projects/`). |
 | `--page-size INT` | Max messages per page for combined transcript (default: 2000). Sessions are never split across pages. |
 | `--show-stats` | Show token usage statistics in generated output (hidden by default). |
+| `--exclude-hooks TEXT` | Hide hook messages whose command contains this substring (case-insensitive). Can be repeated (e.g. `--exclude-hooks trajectory --exclude-hooks sentry`). |
 | `--debug` | Show full traceback on errors. |
 
 ## Output Files

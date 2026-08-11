@@ -562,6 +562,7 @@ class HtmlRenderer(Renderer):
         page_info: Optional[dict[str, Any]] = None,
         page_stats: Optional[dict[str, Any]] = None,
         show_stats: bool = False,
+        exclude_hooks: tuple[str, ...] = (),
     ) -> str:
         """Generate HTML from transcript messages.
 
@@ -585,7 +586,9 @@ class HtmlRenderer(Renderer):
             title = "Claude Transcript"
 
         # Get root messages (tree) and session navigation from format-neutral renderer
-        root_messages, session_nav, _ = generate_template_messages(messages)
+        root_messages, session_nav, _ = generate_template_messages(
+            messages, exclude_hooks=exclude_hooks
+        )
 
         # Flatten tree via pre-order traversal, formatting content along the way
         with log_timing("Content formatting (pre-order)", t_start):
@@ -626,6 +629,7 @@ class HtmlRenderer(Renderer):
         output_dir: Optional[Path] = None,
         skip_combined: bool = False,
         show_stats: bool = False,
+        exclude_hooks: tuple[str, ...] = (),
     ) -> str:
         """Generate HTML for a single session."""
         # Filter messages for this session (SummaryTranscriptEntry.sessionId is always None)
@@ -650,6 +654,7 @@ class HtmlRenderer(Renderer):
             combined_transcript_link=combined_link,
             output_dir=output_dir,
             show_stats=show_stats,
+            exclude_hooks=exclude_hooks,
         )
 
     def generate_projects_index(
@@ -725,6 +730,7 @@ def generate_html(
     page_info: Optional[dict[str, Any]] = None,
     page_stats: Optional[dict[str, Any]] = None,
     show_stats: bool = False,
+    exclude_hooks: tuple[str, ...] = (),
 ) -> str:
     """Generate HTML from transcript messages using Jinja2 templates.
 
@@ -737,6 +743,7 @@ def generate_html(
         page_info: Optional pagination info (page_number, prev_link, next_link).
         page_stats: Optional page statistics (message_count, date_range, token_summary).
         show_stats: Whether to display token usage statistics.
+        exclude_hooks: Substrings to match against hook commands for exclusion.
     """
     return HtmlRenderer().generate(
         messages,
@@ -745,6 +752,7 @@ def generate_html(
         page_info=page_info,
         page_stats=page_stats,
         show_stats=show_stats,
+        exclude_hooks=exclude_hooks,
     )
 
 

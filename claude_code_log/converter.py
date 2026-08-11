@@ -791,6 +791,7 @@ def _generate_paginated_html(
     working_directories: List[str],
     silent: bool = False,
     show_stats: bool = False,
+    exclude_hooks: tuple[str, ...] = (),
 ) -> Path:
     """Generate paginated HTML files for combined transcript.
 
@@ -952,6 +953,7 @@ def _generate_paginated_html(
             page_info=page_info,
             page_stats=page_stats,
             show_stats=show_stats,
+            exclude_hooks=exclude_hooks,
         )
         page_file.write_text(html_content, encoding="utf-8")
 
@@ -1016,6 +1018,7 @@ def convert_jsonl_to(
     show_stats: bool = False,
     regenerate: Optional[int] = None,
     sessions_since: Optional[str] = None,
+    exclude_hooks: tuple[str, ...] = (),
 ) -> Path:
     """Convert JSONL transcript(s) to the specified format.
 
@@ -1272,6 +1275,7 @@ def convert_jsonl_to(
                 working_directories,
                 silent=silent,
                 show_stats=show_stats,
+                exclude_hooks=exclude_hooks,
             )
         else:
             # Use single-file generation for small projects or filtered views
@@ -1305,7 +1309,11 @@ def convert_jsonl_to(
                 # For referenced images, pass the output directory
                 output_dir = output_path.parent
                 content = renderer.generate(
-                    messages, title, output_dir=output_dir, show_stats=show_stats
+                    messages,
+                    title,
+                    output_dir=output_dir,
+                    show_stats=show_stats,
+                    exclude_hooks=exclude_hooks,
                 )
                 assert content is not None
                 output_path.write_text(content, encoding="utf-8")
@@ -1337,6 +1345,7 @@ def convert_jsonl_to(
             silent=silent,
             skip_combined=skip_combined,
             show_stats=show_stats,
+            exclude_hooks=exclude_hooks,
         )
 
     return output_path
@@ -1721,6 +1730,7 @@ def _generate_individual_session_files(
     silent: bool = False,
     skip_combined: bool = False,
     show_stats: bool = False,
+    exclude_hooks: tuple[str, ...] = (),
 ) -> int:
     """Generate individual files for each session in the specified format.
 
@@ -1833,6 +1843,7 @@ def _generate_individual_session_files(
                 output_dir,
                 skip_combined=skip_combined,
                 show_stats=show_stats,
+                exclude_hooks=exclude_hooks,
             )
             assert session_content is not None
             # Write session file
@@ -1926,6 +1937,7 @@ def process_projects_hierarchy(
     regenerate: Optional[int] = None,
     projects_since: Optional[str] = None,
     sessions_since: Optional[str] = None,
+    exclude_hooks: tuple[str, ...] = (),
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files.
 
@@ -2172,6 +2184,7 @@ def process_projects_hierarchy(
                         skip_combined=skip_combined,
                         show_stats=show_stats,
                         sessions_since=sessions_since,
+                        exclude_hooks=exclude_hooks,
                     )
 
                     # Track timing
