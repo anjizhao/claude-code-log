@@ -224,19 +224,32 @@ class CacheManager:
         # Initialise database and ensure project exists
         self._init_database()
         self._project_id: Optional[int] = None
+        self._conn: Optional[sqlite3.Connection] = None
         self._ensure_project_exists()
+
+    def _open_connection(self) -> sqlite3.Connection:
+        """Open (or return existing) persistent database connection."""
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.db_path, timeout=30.0)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA foreign_keys = ON")
+            self._conn.execute("PRAGMA journal_mode = WAL")
+        return self._conn
+
+    def close(self) -> None:
+        """Close the database connection."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __del__(self) -> None:
+        if hasattr(self, "_conn"):
+            self.close()
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """Get a database connection with proper settings."""
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        try:
-            yield conn
-        finally:
-            conn.close()
+        yield self._open_connection()
 
     def _init_database(self) -> None:
         """Create schema if needed using migration runner."""
