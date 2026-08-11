@@ -45,6 +45,17 @@ def get_file_extension(format: str) -> str:
     return format
 
 
+def parse_date_to_timestamp(date_str: str, label: str = "date") -> float:
+    """Parse a natural-language or ISO date string to a unix timestamp."""
+    parsed = dateparser.parse(
+        date_str,
+        settings={"TIMEZONE": "UTC", "RETURN_AS_TIMEZONE_AWARE": True},
+    )
+    if not parsed:
+        raise ValueError(f"Could not parse {label}: {date_str}")
+    return parsed.timestamp()
+
+
 # =============================================================================
 # Transcript Loading Functions
 # =============================================================================
@@ -321,6 +332,7 @@ def load_directory_transcripts(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     silent: bool = False,
+    sessions_since_cutoff: Optional[float] = None,
 ) -> list[TranscriptEntry]:
     """Load all JSONL transcript files from a directory and combine them."""
     all_messages: list[TranscriptEntry] = []
@@ -330,6 +342,11 @@ def load_directory_transcripts(
     jsonl_files = [
         f for f in directory_path.glob("*.jsonl") if not f.name.startswith("agent-")
     ]
+
+    if sessions_since_cutoff is not None:
+        jsonl_files = [
+            f for f in jsonl_files if f.stat().st_mtime >= sessions_since_cutoff
+        ]
 
     for jsonl_file in jsonl_files:
         messages = load_transcript(
@@ -998,6 +1015,7 @@ def convert_jsonl_to(
     skip_combined: bool = False,
     show_stats: bool = False,
     regenerate: Optional[int] = None,
+    sessions_since: Optional[str] = None,
 ) -> Path:
     """Convert JSONL transcript(s) to the specified format.
 
@@ -1039,6 +1057,13 @@ def convert_jsonl_to(
 
     ext = get_file_extension(format)
 
+    # Parse --sessions-since to a unix timestamp cutoff
+    sessions_since_cutoff: Optional[float] = None
+    if sessions_since:
+        sessions_since_cutoff = parse_date_to_timestamp(
+            sessions_since, "sessions-since"
+        )
+
     # Initialize working_directories for both branches (used by pagination in directory mode)
     working_directories: List[str] = []
 
@@ -1059,7 +1084,12 @@ def convert_jsonl_to(
 
         # Phase 1: Ensure cache is fresh and populated
         cache_was_updated = ensure_fresh_cache(
-            input_path, cache_manager, from_date, to_date, silent
+            input_path,
+            cache_manager,
+            from_date,
+            to_date,
+            silent,
+            sessions_since_cutoff=sessions_since_cutoff,
         )
 
         # Phase 1b: Early exit if nothing needs regeneration
@@ -1115,7 +1145,12 @@ def convert_jsonl_to(
 
         # Phase 2: Load messages (will use fresh cache when available)
         messages = load_directory_transcripts(
-            input_path, cache_manager, from_date, to_date, silent
+            input_path,
+            cache_manager,
+            from_date,
+            to_date,
+            silent,
+            sessions_since_cutoff=sessions_since_cutoff,
         )
 
         # Get working directories from cache
@@ -1346,6 +1381,7 @@ def ensure_fresh_cache(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     silent: bool = False,
+    sessions_since_cutoff: Optional[float] = None,
 ) -> bool:
     """Ensure cache is fresh and populated. Returns True if cache was updated.
 
@@ -1387,7 +1423,12 @@ def ensure_fresh_cache(
     if not silent:
         print(f"Updating cache for {project_dir.name}...")
     messages = load_directory_transcripts(
-        project_dir, cache_manager, from_date, to_date, silent
+        project_dir,
+        cache_manager,
+        from_date,
+        to_date,
+        silent,
+        sessions_since_cutoff=sessions_since_cutoff,
     )
 
     # Update cache with fresh data
@@ -1884,6 +1925,7 @@ def process_projects_hierarchy(
     show_stats: bool = False,
     regenerate: Optional[int] = None,
     projects_since: Optional[str] = None,
+    sessions_since: Optional[str] = None,
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files.
 
@@ -1953,16 +1995,17 @@ def process_projects_hierarchy(
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=regenerate)
         regenerate_cutoff_iso = cutoff.isoformat()
 
-    # Pre-compute --projects-since cutoff as a unix timestamp for fast mtime comparison.
+    # Pre-compute cutoffs as unix timestamps for fast mtime comparison.
     projects_since_cutoff: Optional[float] = None
     if projects_since:
-        parsed = dateparser.parse(
-            projects_since,
-            settings={"TIMEZONE": "UTC", "RETURN_AS_TIMEZONE_AWARE": True},
+        projects_since_cutoff = parse_date_to_timestamp(
+            projects_since, "projects-since"
         )
-        if not parsed:
-            raise ValueError(f"Could not parse projects-since: {projects_since}")
-        projects_since_cutoff = parsed.timestamp()
+    sessions_since_cutoff: Optional[float] = None
+    if sessions_since:
+        sessions_since_cutoff = parse_date_to_timestamp(
+            sessions_since, "sessions-since"
+        )
     projects_skipped_by_age = 0
 
     for project_dir in sorted(project_dirs):
@@ -2128,6 +2171,7 @@ def process_projects_hierarchy(
                         page_size=page_size,
                         skip_combined=skip_combined,
                         show_stats=show_stats,
+                        sessions_since=sessions_since,
                     )
 
                     # Track timing
@@ -2137,9 +2181,7 @@ def process_projects_hierarchy(
                     if stats.files_updated > 0:
                         progress_parts.append(f"{stats.files_updated} files updated")
                     if stats.sessions_regenerated > 0:
-                        progress_parts.append(
-                            f"{stats.sessions_regenerated} sessions"
-                        )
+                        progress_parts.append(f"{stats.sessions_regenerated} sessions")
                     detail = (
                         ", ".join(progress_parts) if progress_parts else "regenerated"
                     )
@@ -2210,7 +2252,12 @@ def process_projects_hierarchy(
                 f"Warning: No cached data available for {project_dir.name}, using fallback processing"
             )
             messages = load_directory_transcripts(
-                project_dir, cache_manager, from_date, to_date, silent=silent
+                project_dir,
+                cache_manager,
+                from_date,
+                to_date,
+                silent=silent,
+                sessions_since_cutoff=sessions_since_cutoff,
             )
             # Ensure cache is populated with session data (including working directories)
             if cache_manager:
