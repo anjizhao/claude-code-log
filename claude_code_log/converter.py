@@ -1086,7 +1086,7 @@ def convert_jsonl_to(
                 output_path = input_path / f"combined_transcripts.{ext}"
 
         # Phase 1: Ensure cache is fresh and populated
-        cache_was_updated = ensure_fresh_cache(
+        cache_was_updated, cached_messages = ensure_fresh_cache(
             input_path,
             cache_manager,
             from_date,
@@ -1146,15 +1146,18 @@ def convert_jsonl_to(
                             )
                         return output_path
 
-        # Phase 2: Load messages (will use fresh cache when available)
-        messages = load_directory_transcripts(
-            input_path,
-            cache_manager,
-            from_date,
-            to_date,
-            silent,
-            sessions_since_cutoff=sessions_since_cutoff,
-        )
+        # Phase 2: Reuse messages from cache update, or load from cache
+        if cached_messages is not None:
+            messages = cached_messages
+        else:
+            messages = load_directory_transcripts(
+                input_path,
+                cache_manager,
+                from_date,
+                to_date,
+                silent,
+                sessions_since_cutoff=sessions_since_cutoff,
+            )
 
         # Get working directories from cache
         working_directories = (
@@ -1391,14 +1394,18 @@ def ensure_fresh_cache(
     to_date: Optional[str] = None,
     silent: bool = False,
     sessions_since_cutoff: Optional[float] = None,
-) -> bool:
-    """Ensure cache is fresh and populated. Returns True if cache was updated.
+) -> tuple[bool, Optional[list[TranscriptEntry]]]:
+    """Ensure cache is fresh and populated.
+
+    Returns (was_updated, messages). When the cache was updated, messages
+    contains the loaded transcript entries so the caller can reuse them
+    instead of loading a second time.
 
     This does the heavy lifting of loading and parsing files.
     Call has_cache_changes() first for a fast check.
     """
     if cache_manager is None:
-        return False
+        return False, None
 
     # Check if cache needs updating
     # Exclude agent files from direct check - they are loaded via session references
@@ -1408,7 +1415,7 @@ def ensure_fresh_cache(
         f for f in project_dir.glob("*.jsonl") if not f.name.startswith("agent-")
     ]
     if not session_jsonl_files:
-        return False
+        return False, None
 
     # Get cached project data
     cached_project_data = cache_manager.get_cached_project_data()
@@ -1426,7 +1433,7 @@ def ensure_fresh_cache(
     )
 
     if not needs_update:
-        return False  # Cache is already fresh
+        return False, None  # Cache is already fresh
 
     # Load and process messages to populate cache
     if not silent:
@@ -1442,7 +1449,7 @@ def ensure_fresh_cache(
 
     # Update cache with fresh data
     _update_cache_with_session_data(cache_manager, messages)
-    return True
+    return True, messages
 
 
 def _update_cache_with_session_data(

@@ -211,7 +211,7 @@ class TestHtmlRegeneration:
         cache_manager = CacheManager(project_dir, library_version)
 
         # First run: Use ensure_fresh_cache to populate cache properly
-        cache_was_updated = ensure_fresh_cache(project_dir, cache_manager)
+        cache_was_updated, _ = ensure_fresh_cache(project_dir, cache_manager)
         assert cache_was_updated is True  # Cache should be updated on first run
 
         # Verify cache has been populated
@@ -221,7 +221,7 @@ class TestHtmlRegeneration:
 
         # Second run: Cache exists, no file changes, should return False for cache update
         # No changes should mean no cache update
-        cache_was_updated = ensure_fresh_cache(project_dir, cache_manager)
+        cache_was_updated, _ = ensure_fresh_cache(project_dir, cache_manager)
         assert cache_was_updated is False
 
         # Modify JSONL file
@@ -231,7 +231,7 @@ class TestHtmlRegeneration:
             f.write(new_message)
 
         # Now cache should detect the change
-        cache_was_updated = ensure_fresh_cache(project_dir, cache_manager)
+        cache_was_updated, _ = ensure_fresh_cache(project_dir, cache_manager)
         assert cache_was_updated is True
 
     def test_force_regeneration_with_cache_update(self, tmp_path):
