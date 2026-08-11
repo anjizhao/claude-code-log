@@ -67,6 +67,7 @@ The `--regenerate`, `--clear-cache`, and `--clear-output` flags are for when the
 | `--clear-cache` | Clear all cache data and regenerate. |
 | `--clear-output` / `--clear-html` | Clear generated HTML files and regenerate. |
 | `--projects-since TEXT` | Only refresh projects with activity since this date (e.g. `"7d"`, `"1 week ago"`). Older projects still appear in the index using cached data. Only applies when processing all projects. |
+| `--sessions-since TEXT` | Only include sessions with activity since this date (e.g. `"1 week ago"`, `"7d"`). Older session files are skipped entirely based on file modification time. |
 | `--projects-dir PATH` | Custom projects directory (default: `~/.claude/projects/`). |
 | `--page-size INT` | Max messages per page for combined transcript (default: 2000). Sessions are never split across pages. |
 | `--show-stats` | Show token usage statistics in generated output (hidden by default). |

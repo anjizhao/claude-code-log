@@ -269,6 +269,12 @@ def _clear_html_files(input_path: Path, all_projects: bool) -> None:
     help='Only refresh projects with activity since this date (e.g., "1 week ago", "7d", "2026-01-01"). Older projects still appear in the master index using cached data; their HTML pages are not refreshed. Only applies when processing all projects.',
 )
 @click.option(
+    "--sessions-since",
+    type=str,
+    default=None,
+    help='Only include sessions with activity since this date (e.g., "1 week ago", "7d", "2026-01-01"). Older sessions are skipped entirely.',
+)
+@click.option(
     "--show-stats",
     is_flag=True,
     default=False,
@@ -302,6 +308,7 @@ def main(
     show_stats: bool,
     page_size: int,
     projects_since: Optional[str],
+    sessions_since: Optional[str],
     exclude_hooks: tuple[str, ...],
     debug: bool,
 ) -> None:
@@ -347,6 +354,7 @@ def main(
                 show_stats=show_stats,
                 regenerate=regenerate,
                 projects_since=projects_since,
+                sessions_since=sessions_since,
                 exclude_hooks=exclude_hooks,
             )
 
@@ -399,6 +407,7 @@ def main(
             skip_combined=skip_combined,
             show_stats=show_stats,
             regenerate=regenerate,
+            sessions_since=sessions_since,
             exclude_hooks=exclude_hooks,
         )
         if input_path.is_file():
