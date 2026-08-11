@@ -1146,10 +1146,16 @@ def convert_jsonl_to(
                             )
                         return output_path
 
-        # Phase 2: Reuse messages from cache update, or load from cache
-        if cached_messages is not None:
-            messages = cached_messages
-        else:
+        # Phase 2: Reuse messages from cache update, or defer loading.
+        # When ensure_fresh_cache did an incremental update (cached_messages is
+        # None), we avoid loading all messages unless the combined transcript
+        # or paginated pages actually need regeneration.
+        messages: Optional[list[TranscriptEntry]] = cached_messages
+
+        if messages is None and (
+            cache_manager is None or from_date is not None or to_date is not None
+        ):
+            # Must load all messages: no cache or date filtering required
             messages = load_directory_transcripts(
                 input_path,
                 cache_manager,
@@ -1167,11 +1173,10 @@ def convert_jsonl_to(
         project_title = get_project_display_name(input_path.name, working_directories)
         title = f"Claude Transcripts - {project_title}"
 
-    # Apply date filtering
-    messages = filter_messages_by_date(messages, from_date, to_date)
-
-    # Deduplicate messages (removes version stutters while preserving concurrent tool results)
-    messages = deduplicate_messages(messages)
+    # Apply date filtering and deduplication when we have all messages loaded
+    if messages is not None:
+        messages = filter_messages_by_date(messages, from_date, to_date)
+        messages = deduplicate_messages(messages)
 
     # Update title to include date range if specified
     if from_date or to_date:
@@ -1188,7 +1193,9 @@ def convert_jsonl_to(
     renderer = get_renderer(format, image_export_mode)
     cached_data = cache_manager.get_cached_project_data() if cache_manager else None
     total_message_count = (
-        cached_data.total_message_count if cached_data else len(messages)
+        cached_data.total_message_count
+        if cached_data
+        else len(messages) if messages else 0
     )
 
     if skip_combined and input_path.is_dir():
@@ -1237,6 +1244,19 @@ def convert_jsonl_to(
             print(f"Project index {output_path.name} is current, skipping regeneration")
     else:
         # Generate combined transcript (paginated or single-file)
+        # Combined transcript needs all messages — load now if deferred
+        if messages is None:
+            messages = load_directory_transcripts(
+                input_path,
+                cache_manager,
+                from_date,
+                to_date,
+                silent,
+                sessions_since_cutoff=sessions_since_cutoff,
+            )
+            messages = filter_messages_by_date(messages, from_date, to_date)
+            messages = deduplicate_messages(messages)
+
         existing_page_count = cache_manager.get_page_count() if cache_manager else 0
 
         # Decide whether to use pagination (HTML only, directory mode, no date filter)
@@ -1399,7 +1419,8 @@ def ensure_fresh_cache(
 
     Returns (was_updated, messages). When the cache was updated, messages
     contains the loaded transcript entries so the caller can reuse them
-    instead of loading a second time.
+    instead of loading a second time. When only a few files changed,
+    messages is None (the caller should load per-session from cache).
 
     This does the heavy lifting of loading and parsing files.
     Call has_cache_changes() first for a fast check.
@@ -1407,10 +1428,7 @@ def ensure_fresh_cache(
     if cache_manager is None:
         return False, None
 
-    # Check if cache needs updating
     # Exclude agent files from direct check - they are loaded via session references
-    # Note: If only an agent file changes (session unchanged), cache won't detect it.
-    # This is acceptable since agent files typically change alongside their sessions.
     session_jsonl_files = [
         f for f in project_dir.glob("*.jsonl") if not f.name.startswith("agent-")
     ]
@@ -1422,34 +1440,45 @@ def ensure_fresh_cache(
 
     # Check various invalidation conditions
     modified_files = cache_manager.get_modified_files(session_jsonl_files)
-    needs_update = (
+    needs_full_rebuild = (
         cached_project_data is None
         or from_date is not None
         or to_date is not None
-        or bool(modified_files)  # Session files changed
-        or (
-            cached_project_data.total_message_count == 0 and session_jsonl_files
-        )  # Stale cache
+        or (cached_project_data.total_message_count == 0 and session_jsonl_files)
     )
 
-    if not needs_update:
+    if not needs_full_rebuild and not modified_files:
         return False, None  # Cache is already fresh
 
-    # Load and process messages to populate cache
     if not silent:
         print(f"Updating cache for {project_dir.name}...")
-    messages = load_directory_transcripts(
-        project_dir,
-        cache_manager,
-        from_date,
-        to_date,
-        silent,
-        sessions_since_cutoff=sessions_since_cutoff,
-    )
 
-    # Update cache with fresh data
-    _update_cache_with_session_data(cache_manager, messages)
-    return True, messages
+    if needs_full_rebuild:
+        # Full rebuild: load all files and rebuild all session data
+        messages = load_directory_transcripts(
+            project_dir,
+            cache_manager,
+            from_date,
+            to_date,
+            silent,
+            sessions_since_cutoff=sessions_since_cutoff,
+        )
+        _update_cache_with_session_data(cache_manager, messages)
+        return True, messages
+
+    # Incremental update: only load and process changed files
+    changed_messages: list[TranscriptEntry] = []
+    for jsonl_file in modified_files:
+        if sessions_since_cutoff is not None:
+            if jsonl_file.stat().st_mtime < sessions_since_cutoff:
+                continue
+        msgs = load_transcript(jsonl_file, cache_manager, silent=silent)
+        changed_messages.extend(msgs)
+
+    # Update session data only for changed sessions, then recompute aggregates
+    _update_cache_with_session_data(cache_manager, changed_messages)
+    cache_manager.recompute_project_aggregates()
+    return True, None
 
 
 def _update_cache_with_session_data(
@@ -1727,7 +1756,7 @@ def _collect_project_sessions(messages: list[TranscriptEntry]) -> list[dict[str,
 
 def _generate_individual_session_files(
     format: str,
-    messages: list[TranscriptEntry],
+    messages: Optional[list[TranscriptEntry]],
     output_dir: Path,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
@@ -1741,20 +1770,13 @@ def _generate_individual_session_files(
 ) -> int:
     """Generate individual files for each session in the specified format.
 
+    When messages is None and cache_manager is available, loads messages
+    per-session from cache (avoids loading the entire project).
+
     Returns:
         Number of sessions regenerated
     """
     ext = get_file_extension(format)
-    # Pre-compute warmup sessions to exclude them
-    warmup_session_ids = get_warmup_session_ids(messages)
-
-    # Find all unique session IDs (excluding warmup sessions)
-    session_ids: set[str] = set()
-    for message in messages:
-        if hasattr(message, "sessionId"):
-            session_id: str = getattr(message, "sessionId")
-            if session_id and session_id not in warmup_session_ids:
-                session_ids.add(session_id)
 
     # Get session data from cache for better titles
     session_data: dict[str, Any] = {}
@@ -1763,12 +1785,21 @@ def _generate_individual_session_files(
         project_cache = cache_manager.get_cached_project_data()
         if project_cache:
             session_data = {s.session_id: s for s in project_cache.sessions.values()}
-        # Get working directories for project title
         working_directories = cache_manager.get_working_directories()
 
-    # Only generate HTML for sessions that are tracked in the sessions table
-    # (filters out warmup-only and sessions without user messages)
-    session_ids = session_ids & set(session_data.keys())
+    if messages is not None:
+        warmup_session_ids = get_warmup_session_ids(messages)
+        session_ids: set[str] = set()
+        for message in messages:
+            if hasattr(message, "sessionId"):
+                sid: str = getattr(message, "sessionId")
+                if sid and sid not in warmup_session_ids:
+                    session_ids.add(sid)
+        session_ids = session_ids & set(session_data.keys())
+    else:
+        # No messages provided — use session IDs from cache
+        # (warmup sessions are already filtered out of the sessions table)
+        session_ids = set(session_data.keys())
 
     project_title = get_project_display_name(output_dir.name, working_directories)
 
@@ -1841,9 +1872,21 @@ def _generate_individual_session_files(
             )
 
         if should_regenerate_session:
+            # Load messages for this session: use provided list or load from cache
+            if messages is not None:
+                session_messages = messages
+            elif cache_manager is not None:
+                session_messages = cache_manager.load_session_messages(
+                    session_id
+                )
+                if session_messages is None:
+                    session_messages = []
+            else:
+                session_messages = []
+
             # Generate session content
             session_content = renderer.generate_session(
-                messages,
+                session_messages,
                 session_id,
                 session_title,
                 cache_manager,
@@ -1859,18 +1902,10 @@ def _generate_individual_session_files(
 
             # Update html_cache to track this generation (HTML only)
             if cache_manager is not None and format == "html":
-                # Use message count from cache (pre-deduplication) to match
-                # the count used in is_html_stale()
                 if session_id in session_data:
                     session_message_count = session_data[session_id].message_count
                 else:
-                    # Fallback: count from messages list (less accurate due to dedup)
-                    session_message_count = sum(
-                        1
-                        for m in messages
-                        if hasattr(m, "sessionId")
-                        and getattr(m, "sessionId") == session_id
-                    )
+                    session_message_count = len(session_messages)
                 cache_manager.update_html_cache(
                     session_file_name,
                     session_id,

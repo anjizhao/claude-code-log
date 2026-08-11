@@ -692,6 +692,76 @@ class CacheManager:
             )
             conn.commit()
 
+    def load_session_messages(self, session_id: str) -> Optional[List[TranscriptEntry]]:
+        """Load cached messages for a single session by session ID."""
+        if self._project_id is None:
+            return None
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT content FROM messages WHERE project_id = ? AND session_id = ? "
+                "ORDER BY timestamp NULLS LAST",
+                (self._project_id, session_id),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        return [self._deserialize_entry(row) for row in rows]
+
+    def recompute_project_aggregates(self) -> None:
+        """Recompute project-level aggregates from session and message tables."""
+        if self._project_id is None:
+            return
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM messages WHERE project_id = ?",
+                (self._project_id,),
+            ).fetchone()
+            total_message_count = row["cnt"] if row else 0
+
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(total_input_tokens), 0) as total_input,
+                    COALESCE(SUM(total_output_tokens), 0) as total_output,
+                    COALESCE(SUM(total_cache_creation_tokens), 0) as total_cache_creation,
+                    COALESCE(SUM(total_cache_read_tokens), 0) as total_cache_read,
+                    MIN(first_timestamp) as earliest,
+                    MAX(last_timestamp) as latest
+                FROM sessions WHERE project_id = ?
+                """,
+                (self._project_id,),
+            ).fetchone()
+
+            conn.execute(
+                """
+                UPDATE projects SET
+                    total_message_count = ?,
+                    total_input_tokens = ?,
+                    total_output_tokens = ?,
+                    total_cache_creation_tokens = ?,
+                    total_cache_read_tokens = ?,
+                    earliest_timestamp = ?,
+                    latest_timestamp = ?,
+                    last_updated = ?
+                WHERE id = ?
+                """,
+                (
+                    total_message_count,
+                    row["total_input"] if row else 0,
+                    row["total_output"] if row else 0,
+                    row["total_cache_creation"] if row else 0,
+                    row["total_cache_read"] if row else 0,
+                    row["earliest"] if row else "",
+                    row["latest"] if row else "",
+                    datetime.now().isoformat(),
+                    self._project_id,
+                ),
+            )
+            conn.commit()
+
     def get_working_directories(self) -> List[str]:
         """Get list of working directories associated with this project.
 
