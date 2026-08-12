@@ -224,19 +224,32 @@ class CacheManager:
         # Initialise database and ensure project exists
         self._init_database()
         self._project_id: Optional[int] = None
+        self._conn: Optional[sqlite3.Connection] = None
         self._ensure_project_exists()
+
+    def _open_connection(self) -> sqlite3.Connection:
+        """Open (or return existing) persistent database connection."""
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.db_path, timeout=30.0)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA foreign_keys = ON")
+            self._conn.execute("PRAGMA journal_mode = WAL")
+        return self._conn
+
+    def close(self) -> None:
+        """Close the database connection."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __del__(self) -> None:
+        if hasattr(self, "_conn"):
+            self.close()
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """Get a database connection with proper settings."""
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        try:
-            yield conn
-        finally:
-            conn.close()
+        yield self._open_connection()
 
     def _init_database(self) -> None:
         """Create schema if needed using migration runner."""
@@ -673,6 +686,76 @@ class CacheManager:
                     total_cache_read_tokens,
                     earliest_timestamp,
                     latest_timestamp,
+                    datetime.now().isoformat(),
+                    self._project_id,
+                ),
+            )
+            conn.commit()
+
+    def load_session_messages(self, session_id: str) -> Optional[List[TranscriptEntry]]:
+        """Load cached messages for a single session by session ID."""
+        if self._project_id is None:
+            return None
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT content FROM messages WHERE project_id = ? AND session_id = ? "
+                "ORDER BY timestamp NULLS LAST",
+                (self._project_id, session_id),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        return [self._deserialize_entry(row) for row in rows]
+
+    def recompute_project_aggregates(self) -> None:
+        """Recompute project-level aggregates from session and message tables."""
+        if self._project_id is None:
+            return
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM messages WHERE project_id = ?",
+                (self._project_id,),
+            ).fetchone()
+            total_message_count = row["cnt"] if row else 0
+
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(total_input_tokens), 0) as total_input,
+                    COALESCE(SUM(total_output_tokens), 0) as total_output,
+                    COALESCE(SUM(total_cache_creation_tokens), 0) as total_cache_creation,
+                    COALESCE(SUM(total_cache_read_tokens), 0) as total_cache_read,
+                    MIN(first_timestamp) as earliest,
+                    MAX(last_timestamp) as latest
+                FROM sessions WHERE project_id = ?
+                """,
+                (self._project_id,),
+            ).fetchone()
+
+            conn.execute(
+                """
+                UPDATE projects SET
+                    total_message_count = ?,
+                    total_input_tokens = ?,
+                    total_output_tokens = ?,
+                    total_cache_creation_tokens = ?,
+                    total_cache_read_tokens = ?,
+                    earliest_timestamp = ?,
+                    latest_timestamp = ?,
+                    last_updated = ?
+                WHERE id = ?
+                """,
+                (
+                    total_message_count,
+                    row["total_input"] if row else 0,
+                    row["total_output"] if row else 0,
+                    row["total_cache_creation"] if row else 0,
+                    row["total_cache_read"] if row else 0,
+                    row["earliest"] if row else "",
+                    row["latest"] if row else "",
                     datetime.now().isoformat(),
                     self._project_id,
                 ),
