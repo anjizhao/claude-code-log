@@ -88,6 +88,21 @@ def normalize_usage_info(usage_data: dict[str, Any] | None) -> UsageInfo | None:
 # =============================================================================
 
 
+def _summarize_document(item_data: dict[str, Any]) -> TextContent:
+    """Replace a document content item (e.g. PDF) with a short text summary."""
+    source = item_data.get("source", {})
+    media_type = source.get("media_type", "unknown")
+    data = source.get("data", "")
+    size_bytes = len(data) * 3 // 4
+    if size_bytes >= 1024 * 1024:
+        size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+    elif size_bytes >= 1024:
+        size_str = f"{size_bytes / 1024:.1f} KB"
+    else:
+        size_str = f"{size_bytes} bytes"
+    return TextContent(type="text", text=f"[Embedded document: {media_type}, {size_str}]")
+
+
 def create_content_item(
     item_data: dict[str, Any],
     type_filter: Sequence[str] | None = None,
@@ -104,6 +119,9 @@ def create_content_item(
     """
     try:
         content_type = item_data.get("type", "")
+
+        if content_type == "document":
+            return _summarize_document(item_data)
 
         if type_filter is None or content_type in type_filter:
             model_class = CONTENT_ITEM_CREATORS.get(content_type)
