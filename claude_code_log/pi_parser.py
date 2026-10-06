@@ -13,18 +13,16 @@ Pi format differences from Claude Code:
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .cache import CacheManager
+from typing import Any, Optional
 
 from .factories import create_transcript_entry
 from .models import (
     CustomTitleTranscriptEntry,
     TranscriptEntry,
 )
+from .parser import extract_session_id
 
 
 @dataclass
@@ -35,20 +33,6 @@ class _SessionContext:
     cwd: str = ""
     version: str = ""
     latest_session_name: Optional[str] = None
-
-
-def _extract_session_id(jsonl_path: Path) -> str:
-    """Extract session ID from a Pi JSONL filename.
-
-    Pi filenames: {timestamp}_{session-uuid}.jsonl
-    Claude Code filenames: {session-uuid}.jsonl
-
-    Returns the session UUID portion.
-    """
-    stem = jsonl_path.stem
-    if "_" in stem:
-        return stem.rsplit("_", 1)[1]
-    return stem
 
 
 def _transform_content_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -225,7 +209,7 @@ def parse_pi_transcript(jsonl_path: Path, silent: bool = False) -> list[Transcri
     Transforms Pi entries into Claude Code-shaped dicts and feeds them
     through create_transcript_entry().
     """
-    ctx = _SessionContext(session_id=_extract_session_id(jsonl_path))
+    ctx = _SessionContext(session_id=extract_session_id(jsonl_path))
     messages: list[TranscriptEntry] = []
 
     try:
@@ -291,10 +275,17 @@ def parse_pi_transcript(jsonl_path: Path, silent: bool = False) -> list[Transcri
                 if entry_type in ("thinking_level_change", "usage"):
                     continue
 
+                if not silent:
+                    display_line = line[:200] + "..." if len(line) > 200 else line
+                    print(
+                        f"Line {line_no} of {jsonl_path} is not a recognised "
+                        f"Pi entry type: {display_line}"
+                    )
+
             except json.JSONDecodeError as e:
                 if not silent:
                     print(f"Line {line_no} of {jsonl_path} | JSON decode error: {e}")
-            except (ValueError, Exception) as e:
+            except Exception as e:
                 if not silent:
                     print(f"Line {line_no} of {jsonl_path} | Error: {e}")
 
@@ -329,34 +320,4 @@ def is_pi_transcript(jsonl_path: Path) -> bool:
     return False
 
 
-def load_pi_transcript(
-    jsonl_path: Path,
-    cache_manager: Optional["CacheManager"] = None,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-    silent: bool = False,
-) -> list[TranscriptEntry]:
-    """Load a Pi JSONL transcript, with cache support.
 
-    Same interface as load_transcript() in converter.py.
-    """
-    # Try cache first
-    if cache_manager is not None:
-        if from_date or to_date:
-            cached_entries = cache_manager.load_cached_entries_filtered(
-                jsonl_path, from_date, to_date
-            )
-        else:
-            cached_entries = cache_manager.load_cached_entries(jsonl_path)
-
-        if cached_entries is not None:
-            if not silent:
-                print(f"Loading {jsonl_path} from cache...")
-            return cached_entries
-
-    messages = parse_pi_transcript(jsonl_path, silent)
-
-    if cache_manager is not None:
-        cache_manager.save_cached_entries(jsonl_path, messages)
-
-    return messages

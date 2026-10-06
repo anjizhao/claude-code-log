@@ -5,13 +5,13 @@ from pathlib import Path
 import pytest
 
 from claude_code_log.pi_parser import (
-    _extract_session_id,
     _transform_content_items,
     _transform_usage,
     is_pi_transcript,
     parse_pi_transcript,
 )
-from claude_code_log.converter import extract_session_id, load_transcript
+from claude_code_log.parser import extract_session_id
+from claude_code_log.converter import load_transcript
 from claude_code_log.models import (
     AssistantTranscriptEntry,
     CustomTitleTranscriptEntry,
@@ -31,9 +31,9 @@ class TestExtractSessionId:
         path = Path("29ccd257-68b1-427f-ae5f-6524b7cb6f20.jsonl")
         assert extract_session_id(path) == "29ccd257-68b1-427f-ae5f-6524b7cb6f20"
 
-    def test_internal_extract(self):
+    def test_splits_at_last_underscore(self):
         path = Path("2026-10-06T15-00-00-000Z_abc123.jsonl")
-        assert _extract_session_id(path) == "abc123"
+        assert extract_session_id(path) == "abc123"
 
 
 class TestIsPiTranscript:
@@ -114,15 +114,15 @@ class TestParsePiTranscript:
         messages = parse_pi_transcript(pi_file)
         user_msgs = [m for m in messages if isinstance(m, UserTranscriptEntry)]
 
-        # 2 real user messages + 3 tool results wrapped as user entries
-        assert len(user_msgs) == 5
+        # 2 real user messages + 5 tool results wrapped as user entries
+        assert len(user_msgs) == 7
 
     def test_assistant_messages(self):
         pi_file = PI_TEST_DATA / "2026-10-06T15-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl"
         messages = parse_pi_transcript(pi_file)
         assistant_msgs = [m for m in messages if isinstance(m, AssistantTranscriptEntry)]
 
-        assert len(assistant_msgs) == 4
+        assert len(assistant_msgs) == 6
 
     def test_assistant_has_usage(self):
         pi_file = PI_TEST_DATA / "2026-10-06T15-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl"
@@ -244,6 +244,35 @@ class TestSessionWithMetadata:
                 assert "cache_warm" not in msg.content
 
 
+    def test_write_tool(self):
+        pi_file = PI_TEST_DATA / "2026-10-06T15-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl"
+        messages = parse_pi_transcript(pi_file)
+        from claude_code_log.models import ToolUseContent
+
+        write_calls = []
+        for msg in messages:
+            if isinstance(msg, AssistantTranscriptEntry):
+                for item in msg.message.content:
+                    if isinstance(item, ToolUseContent) and item.name == "write":
+                        write_calls.append(item)
+        assert len(write_calls) == 1
+        assert "test_parser.py" in write_calls[0].input["path"]
+
+    def test_ask_user_question_tool(self):
+        pi_file = PI_TEST_DATA / "2026-10-06T15-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl"
+        messages = parse_pi_transcript(pi_file)
+        from claude_code_log.models import ToolUseContent
+
+        ask_calls = []
+        for msg in messages:
+            if isinstance(msg, AssistantTranscriptEntry):
+                for item in msg.message.content:
+                    if isinstance(item, ToolUseContent) and item.name == "ask_user_question":
+                        ask_calls.append(item)
+        assert len(ask_calls) == 1
+        assert "questions" in ask_calls[0].input
+
+
 class TestAutoDetection:
     """Test that load_transcript auto-detects Pi format."""
 
@@ -262,6 +291,45 @@ class TestAutoDetection:
         cc_file = Path(__file__).parent / "test_data" / "representative_messages.jsonl"
         messages = load_transcript(cc_file)
         assert len(messages) > 0
+
+
+class TestCliPiFlag:
+    """Test that --pi CLI flag works."""
+
+    def test_pi_flag_processes_directory(self, tmp_path):
+        """Test --pi with a custom projects dir containing Pi sessions."""
+        import shutil
+        from click.testing import CliRunner
+        from claude_code_log.cli import main
+
+        # Set up a fake Pi sessions directory
+        project_dir = tmp_path / "--Users-test--"
+        project_dir.mkdir()
+        shutil.copy(
+            PI_TEST_DATA / "2026-10-06T15-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl",
+            project_dir,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["--projects-dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "Successfully processed" in result.output
+
+        # Check HTML files were generated
+        assert (tmp_path / "index.html").exists()
+        assert (project_dir / "index.html").exists()
+        session_htmls = list(project_dir.glob("session-*.html"))
+        assert len(session_htmls) == 1
+        assert "aaaa1111" in session_htmls[0].name
+
+    def test_pi_and_projects_dir_mutually_exclusive(self):
+        from click.testing import CliRunner
+        from claude_code_log.cli import main
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["--pi", "--projects-dir", "/tmp/test"])
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output
 
 
 class TestHtmlGeneration:

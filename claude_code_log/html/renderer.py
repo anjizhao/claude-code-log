@@ -736,6 +736,7 @@ def generate_html(
     page_stats: Optional[dict[str, Any]] = None,
     show_stats: bool = False,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> str:
     """Generate HTML from transcript messages using Jinja2 templates.
 
@@ -749,8 +750,9 @@ def generate_html(
         page_stats: Optional page statistics (message_count, date_range, token_summary).
         show_stats: Whether to display token usage statistics.
         exclude_hooks: Substrings to match against hook commands for exclusion.
+        favicon: Optional favicon URL override.
     """
-    return HtmlRenderer().generate(
+    return HtmlRenderer(favicon=favicon).generate(
         messages,
         title,
         combined_transcript_link,
@@ -789,11 +791,12 @@ def generate_projects_index_html(
 def generate_project_sessions_index_html(
     project_data: dict[str, Any],
     show_stats: bool = False,
+    favicon: Optional[str] = None,
 ) -> str:
     """Generate a project-level session index page.
 
     This is a convenience function that delegates to HtmlRenderer.generate_project_sessions_index.
     """
-    return HtmlRenderer().generate_project_sessions_index(
+    return HtmlRenderer(favicon=favicon).generate_project_sessions_index(
         project_data, show_stats=show_stats
     )

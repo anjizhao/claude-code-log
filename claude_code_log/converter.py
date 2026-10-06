@@ -26,8 +26,8 @@ from .cache import (
     get_all_cached_projects,
     get_library_version,
 )
-from .parser import parse_timestamp
-from .pi_parser import is_pi_transcript, load_pi_transcript
+from .parser import extract_session_id, parse_timestamp
+from .pi_parser import is_pi_transcript, parse_pi_transcript
 from .factories import create_transcript_entry
 from .models import (
     TranscriptEntry,
@@ -39,19 +39,6 @@ from .models import (
     ToolResultContent,
 )
 from .renderer import get_renderer, is_html_outdated
-
-
-def extract_session_id(jsonl_path: Path) -> str:
-    """Extract session ID from a JSONL filename.
-
-    Handles both formats:
-    - Claude Code: {session-uuid}.jsonl
-    - Pi: {timestamp}_{session-uuid}.jsonl
-    """
-    stem = jsonl_path.stem
-    if "_" in stem:
-        return stem.rsplit("_", 1)[1]
-    return stem
 
 
 def get_file_extension(format: str) -> str:
@@ -158,14 +145,7 @@ def load_transcript(
         return []
 
     _loaded_files.add(jsonl_path)
-
-    # Detect Pi transcript format and delegate
-    if is_pi_transcript(jsonl_path):
-        return load_pi_transcript(
-            jsonl_path, cache_manager, from_date, to_date, silent
-        )
-
-    # Try to load from cache first
+    # Try to load from cache first (works for both Pi and Claude Code)
     if cache_manager is not None:
         # Use filtered loading if date parameters are provided
         if from_date or to_date:
@@ -180,7 +160,14 @@ def load_transcript(
                 print(f"Loading {jsonl_path} from cache...")
             return cached_entries
 
-    # Parse from source file
+    # Cache miss — detect Pi transcript format and delegate
+    if is_pi_transcript(jsonl_path):
+        messages = parse_pi_transcript(jsonl_path, silent)
+        if cache_manager is not None:
+            cache_manager.save_cached_entries(jsonl_path, messages)
+        return messages
+
+    # Parse Claude Code format from source file
     messages: list[TranscriptEntry] = []
     agent_ids: set[str] = set()  # Collect agentId references while parsing
 
@@ -813,6 +800,7 @@ def _generate_paginated_html(
     silent: bool = False,
     show_stats: bool = False,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> Path:
     """Generate paginated HTML files for combined transcript.
 
@@ -975,6 +963,7 @@ def _generate_paginated_html(
             page_stats=page_stats,
             show_stats=show_stats,
             exclude_hooks=exclude_hooks,
+            favicon=favicon,
         )
         page_file.write_text(html_content, encoding="utf-8")
 
@@ -1249,7 +1238,7 @@ def convert_jsonl_to(
             from .html.renderer import generate_project_sessions_index_html
 
             content = generate_project_sessions_index_html(
-                project_data, show_stats=show_stats
+                project_data, show_stats=show_stats, favicon=favicon
             )
             output_path.write_text(content, encoding="utf-8")
 
@@ -1321,6 +1310,7 @@ def convert_jsonl_to(
                 silent=silent,
                 show_stats=show_stats,
                 exclude_hooks=exclude_hooks,
+                favicon=favicon,
             )
         else:
             # Use single-file generation for small projects or filtered views
