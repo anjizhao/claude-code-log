@@ -2137,7 +2137,7 @@ def process_projects_hierarchy(
                 archived_count = 0
             else:
                 # Valid session IDs are from existing JSONL files (file stem = session ID)
-                valid_session_ids = {f.stem for f in jsonl_files}
+                valid_session_ids = {extract_session_id(f) for f in jsonl_files}
                 modified_files = (
                     cache_manager.get_modified_files(jsonl_files)
                     if cache_manager
