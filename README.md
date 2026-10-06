@@ -1,6 +1,6 @@
 # Claude Code Log
 
-A CLI tool that converts Claude Code transcript JSONL files into readable HTML pages.
+A CLI tool that converts Claude Code and [Pi](https://github.com/AiCodeBot/pi) transcript JSONL files into readable HTML pages.
 
 > Forked from [daaain/claude-code-log](https://github.com/daaain/claude-code-log). See that repo for demos, feature overview, and the full changelog.
 
@@ -32,13 +32,16 @@ uvx claude-code-log@latest
 ## Usage
 
 ```bash
-# Process all projects (default)
+# Process all Claude Code projects (default)
 claude-code-log
 
 # Process all projects and open in browser
 claude-code-log --open-browser
 
-# Process a single file
+# Process all Pi sessions
+claude-code-log --pi
+
+# Process a single file (auto-detects Claude Code or Pi format)
 claude-code-log path/to/transcript.jsonl
 
 # Process a specific project directory
@@ -55,7 +58,7 @@ The `--regenerate`, `--clear-cache`, and `--clear-output` flags are for when the
 
 | Option | Description |
 |---|---|
-| `INPUT_PATH` | Path to a JSONL file, directory, or project path. Defaults to `~/.claude/projects/` with `--all-projects`. |
+| `INPUT_PATH` | Path to a JSONL file, directory, or project path. Defaults to `~/.claude/projects/` with `--all-projects`, or `~/.pi/agent/sessions/` with `--pi`. |
 | `-o`, `--output PATH` | Custom output file path. |
 | `--open-browser` | Open the generated HTML in the default browser. |
 | `--from-date TEXT` | Filter messages from this date. Supports natural language (e.g. `"yesterday"`, `"2 hours ago"`, `"2025-06-08"`). |
@@ -72,6 +75,7 @@ The `--regenerate`, `--clear-cache`, and `--clear-output` flags are for when the
 | `--page-size INT` | Max messages per page for combined transcript (default: 2000). Sessions are never split across pages. |
 | `--show-stats` | Show token usage statistics in generated output (hidden by default). |
 | `--exclude-hooks TEXT` | Hide hook messages whose command contains this substring (case-insensitive). Can be repeated (e.g. `--exclude-hooks trajectory --exclude-hooks sentry`). |
+| `--pi` | Process Pi agent sessions from `~/.pi/agent/sessions/`. Mutually exclusive with `--projects-dir`. |
 | `--debug` | Show full traceback on errors. |
 
 ## Output Files
@@ -79,7 +83,7 @@ The `--regenerate`, `--clear-cache`, and `--clear-output` flags are for when the
 When processing all projects (the default), the tool generates HTML files alongside the source JSONL files:
 
 ```
-~/.claude/projects/
+~/.claude/projects/                   # or ~/.pi/agent/sessions/ with --pi
 ├── index.html                        # Top-level index with project cards
 ├── -Users-you-code-project-a/
 │   ├── index.html                   # Project session index
@@ -93,6 +97,16 @@ When processing all projects (the default), the tool generates HTML files alongs
 ```
 
 When processing a single file or directory, output goes to the same location as the input (or use `-o` to specify).
+
+### Pi Transcript Support
+
+Pi transcript files are auto-detected by their format (first line contains `{"type": "session", ...}`). The tool normalizes Pi's format to the internal representation used for Claude Code, so all features (fold/unfold, copy buttons, timeline, caching, index pages) work the same way.
+
+Pi-specific metadata is rendered as follows:
+- **Model changes** appear as inline system messages
+- **Session renames** appear as inline system messages; the latest name is used as the session title
+- **Compaction summaries** appear as compacted conversation messages
+- **System prompts** and **thinking level changes** are skipped (not useful for reading)
 
 ## Development
 

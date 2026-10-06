@@ -11,6 +11,8 @@ For transcript entry and content item creation, see factories/.
 from datetime import datetime
 from typing import Optional
 
+from pathlib import Path
+
 from .models import ContentItem, TextContent
 
 
@@ -19,6 +21,19 @@ def extract_text_content(content: Optional[list[ContentItem]]) -> str:
     if not content:
         return ""
     return "\n".join(item.text for item in content if isinstance(item, TextContent))
+
+
+def extract_session_id(jsonl_path: Path) -> str:
+    """Extract session ID from a JSONL filename.
+
+    Handles both formats:
+    - Claude Code: {session-uuid}.jsonl
+    - Pi: {timestamp}_{session-uuid}.jsonl
+    """
+    stem = jsonl_path.stem
+    if "_" in stem:
+        return stem.rsplit("_", 1)[1]
+    return stem
 
 
 def parse_timestamp(timestamp_str: str) -> Optional[datetime]:

@@ -1,10 +1,10 @@
 # Claude Code Log
 
-A Python CLI tool that converts Claude Code transcript JSONL files into readable HTML format.
+A Python CLI tool that converts Claude Code and Pi transcript JSONL files into readable HTML format.
 
 ## Project Overview
 
-This tool processes Claude Code transcript files (stored as JSONL) and generates clean, minimalist HTML pages with comprehensive session navigation and token usage tracking. It's designed to create a readable log of your Claude interactions with rich metadata and easy navigation.
+This tool processes Claude Code and Pi transcript files (stored as JSONL) and generates clean, minimalist HTML pages with comprehensive session navigation and token usage tracking. It's designed to create a readable log of your AI coding agent interactions with rich metadata and easy navigation.
 
 ## Key Features
 
@@ -20,10 +20,13 @@ This tool processes Claude Code transcript files (stored as JSONL) and generates
 ## Usage
 
 ```bash
-# Process all projects (default)
+# Process all Claude Code projects (default)
 claude-code-log
 
-# Single file/directory
+# Process all Pi sessions
+claude-code-log --pi
+
+# Single file (auto-detects format)
 claude-code-log path/to/transcript.jsonl
 
 # With browser open
@@ -35,9 +38,9 @@ claude-code-log --from-date "last week"
 ```
 
 **Output Files Generated:**
-- `~/.claude/projects/index.html` - Master index with project cards
-- `~/.claude/projects/project-name/index.html` - Project session index
-- `~/.claude/projects/project-name/session-{id}.html` - Individual session pages
+- `~/.claude/projects/index.html` (or `~/.pi/agent/sessions/index.html` with `--pi`) - Master index
+- `project-name/index.html` - Project session index
+- `project-name/session-{id}.html` - Individual session pages
 
 ## Regeneration
 

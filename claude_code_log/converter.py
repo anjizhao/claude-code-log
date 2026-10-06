@@ -26,7 +26,8 @@ from .cache import (
     get_all_cached_projects,
     get_library_version,
 )
-from .parser import parse_timestamp
+from .parser import extract_session_id, parse_timestamp
+from .pi_parser import is_pi_transcript, parse_pi_transcript
 from .factories import create_transcript_entry
 from .models import (
     TranscriptEntry,
@@ -144,7 +145,7 @@ def load_transcript(
         return []
 
     _loaded_files.add(jsonl_path)
-    # Try to load from cache first
+    # Try to load from cache first (works for both Pi and Claude Code)
     if cache_manager is not None:
         # Use filtered loading if date parameters are provided
         if from_date or to_date:
@@ -159,7 +160,14 @@ def load_transcript(
                 print(f"Loading {jsonl_path} from cache...")
             return cached_entries
 
-    # Parse from source file
+    # Cache miss — detect Pi transcript format and delegate
+    if is_pi_transcript(jsonl_path):
+        messages = parse_pi_transcript(jsonl_path, silent)
+        if cache_manager is not None:
+            cache_manager.save_cached_entries(jsonl_path, messages)
+        return messages
+
+    # Parse Claude Code format from source file
     messages: list[TranscriptEntry] = []
     agent_ids: set[str] = set()  # Collect agentId references while parsing
 
@@ -356,7 +364,7 @@ def load_directory_transcripts(
         # A /fork writes a cross-reference custom-title into the parent
         # session's file, which can overwrite the forked session's own
         # /rename title when all files are combined.
-        session_id = jsonl_file.stem
+        session_id = extract_session_id(jsonl_file)
         all_messages.extend(
             m
             for m in messages
@@ -792,6 +800,7 @@ def _generate_paginated_html(
     silent: bool = False,
     show_stats: bool = False,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> Path:
     """Generate paginated HTML files for combined transcript.
 
@@ -954,6 +963,7 @@ def _generate_paginated_html(
             page_stats=page_stats,
             show_stats=show_stats,
             exclude_hooks=exclude_hooks,
+            favicon=favicon,
         )
         page_file.write_text(html_content, encoding="utf-8")
 
@@ -1019,6 +1029,7 @@ def convert_jsonl_to(
     regenerate: Optional[int] = None,
     sessions_since: Optional[str] = None,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> Path:
     """Convert JSONL transcript(s) to the specified format.
 
@@ -1190,7 +1201,7 @@ def convert_jsonl_to(
 
     # Generate output file (check if regeneration needed)
     assert output_path is not None
-    renderer = get_renderer(format, image_export_mode)
+    renderer = get_renderer(format, image_export_mode, favicon=favicon)
     cached_data = cache_manager.get_cached_project_data() if cache_manager else None
     total_message_count = (
         cached_data.total_message_count
@@ -1227,7 +1238,7 @@ def convert_jsonl_to(
             from .html.renderer import generate_project_sessions_index_html
 
             content = generate_project_sessions_index_html(
-                project_data, show_stats=show_stats
+                project_data, show_stats=show_stats, favicon=favicon
             )
             output_path.write_text(content, encoding="utf-8")
 
@@ -1299,6 +1310,7 @@ def convert_jsonl_to(
                 silent=silent,
                 show_stats=show_stats,
                 exclude_hooks=exclude_hooks,
+                favicon=favicon,
             )
         else:
             # Use single-file generation for small projects or filtered views
@@ -1369,6 +1381,7 @@ def convert_jsonl_to(
             skip_combined=skip_combined,
             show_stats=show_stats,
             exclude_hooks=exclude_hooks,
+            favicon=favicon,
         )
 
     return output_path
@@ -1767,6 +1780,7 @@ def _generate_individual_session_files(
     skip_combined: bool = False,
     show_stats: bool = False,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> int:
     """Generate individual files for each session in the specified format.
 
@@ -1804,7 +1818,7 @@ def _generate_individual_session_files(
     project_title = get_project_display_name(output_dir.name, working_directories)
 
     # Get renderer once outside the loop
-    renderer = get_renderer(format, image_export_mode)
+    renderer = get_renderer(format, image_export_mode, favicon=favicon)
     regenerated_count = 0
 
     # Generate HTML file for each session
@@ -1980,6 +1994,7 @@ def process_projects_hierarchy(
     projects_since: Optional[str] = None,
     sessions_since: Optional[str] = None,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files.
 
@@ -2116,7 +2131,7 @@ def process_projects_hierarchy(
                 archived_count = 0
             else:
                 # Valid session IDs are from existing JSONL files (file stem = session ID)
-                valid_session_ids = {f.stem for f in jsonl_files}
+                valid_session_ids = {extract_session_id(f) for f in jsonl_files}
                 modified_files = (
                     cache_manager.get_modified_files(jsonl_files)
                     if cache_manager
@@ -2227,6 +2242,7 @@ def process_projects_hierarchy(
                         show_stats=show_stats,
                         sessions_since=sessions_since,
                         exclude_hooks=exclude_hooks,
+                        favicon=favicon,
                     )
 
                     # Track timing
@@ -2476,7 +2492,7 @@ def process_projects_hierarchy(
     # Generate index (always regenerate if outdated)
     ext = get_file_extension(output_format)
     index_path = projects_path / f"index.{ext}"
-    renderer = get_renderer(output_format, image_export_mode)
+    renderer = get_renderer(output_format, image_export_mode, favicon=favicon)
     index_regenerated = False
     if renderer.is_outdated(index_path) or from_date or to_date or any_cache_updated:
         index_content = renderer.generate_projects_index(

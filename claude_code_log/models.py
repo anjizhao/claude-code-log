@@ -132,10 +132,10 @@ class UserMessageModel(BaseModel):
 class AssistantMessageModel(BaseModel):
     """Assistant message model."""
 
-    id: str
-    type: Literal["message"]
+    id: str = ""
+    type: Literal["message"] = "message"
     role: Literal["assistant"]
-    model: str
+    model: str = ""
     content: list[ContentItem]
     stop_reason: Optional[str] = None
     stop_sequence: Optional[str] = None
@@ -153,14 +153,14 @@ ToolUseResult = Union[
 
 
 class BaseTranscriptEntry(BaseModel):
-    parentUuid: Optional[str]
-    isSidechain: bool
-    userType: str
-    cwd: str
-    sessionId: str
-    version: str
-    uuid: str
-    timestamp: str
+    parentUuid: Optional[str] = None
+    isSidechain: bool = False
+    userType: str = "human"
+    cwd: str = ""
+    sessionId: str = ""
+    version: str = ""
+    uuid: str = ""
+    timestamp: str = ""
     isMeta: Optional[bool] = None
     agentId: Optional[str] = None  # Agent ID for sidechain messages
     gitBranch: Optional[str] = None  # Git branch name when available

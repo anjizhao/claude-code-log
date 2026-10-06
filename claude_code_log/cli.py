@@ -12,6 +12,8 @@ from .converter import (
     convert_jsonl_to,
     process_projects_hierarchy,
 )
+from .html.utils import FAVICON_PI
+from .pi_parser import is_pi_transcript
 from .cache import (
     CacheManager,
     get_cache_db_path,
@@ -22,6 +24,11 @@ from .cache import (
 def get_default_projects_dir() -> Path:
     """Get the default Claude projects directory path."""
     return Path.home() / ".claude" / "projects"
+
+
+def get_default_pi_sessions_dir() -> Path:
+    """Get the default Pi agent sessions directory path."""
+    return Path.home() / ".pi" / "agent" / "sessions"
 
 
 def convert_project_path_to_claude_dir(
@@ -286,6 +293,12 @@ def _clear_html_files(input_path: Path, all_projects: bool) -> None:
     help="Hide hook messages whose command contains this substring (case-insensitive). Can be repeated.",
 )
 @click.option(
+    "--pi",
+    "pi_mode",
+    is_flag=True,
+    help="Process Pi agent sessions from ~/.pi/agent/sessions/",
+)
+@click.option(
     "--debug",
     is_flag=True,
     default=False,
@@ -309,6 +322,7 @@ def main(
     page_size: int,
     projects_since: Optional[str],
     sessions_since: Optional[str],
+    pi_mode: bool,
     exclude_hooks: tuple[str, ...],
     debug: bool,
 ) -> None:
@@ -320,6 +334,15 @@ def main(
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
     try:
+        # Handle --pi flag
+        if pi_mode:
+            if projects_dir is not None:
+                raise click.UsageError(
+                    "--pi and --projects-dir are mutually exclusive"
+                )
+            input_path = get_default_pi_sessions_dir()
+            all_projects = True
+
         # Handle default case - process all projects hierarchy if no input path
         if input_path is None:
             input_path = projects_dir or get_default_projects_dir()
@@ -334,6 +357,11 @@ def main(
         if clear_output:
             _clear_html_files(input_path, all_projects)
             click.echo("HTML files cleared. Regenerating...")
+
+        # Determine favicon
+        favicon = FAVICON_PI if pi_mode else None
+        if not favicon and input_path and input_path.is_file() and is_pi_transcript(input_path):
+            favicon = FAVICON_PI
 
         # Handle --all-projects flag or default behavior
         if all_projects:
@@ -356,6 +384,7 @@ def main(
                 projects_since=projects_since,
                 sessions_since=sessions_since,
                 exclude_hooks=exclude_hooks,
+                favicon=favicon,
             )
 
             # Count processed projects
@@ -409,6 +438,7 @@ def main(
             regenerate=regenerate,
             sessions_since=sessions_since,
             exclude_hooks=exclude_hooks,
+            favicon=favicon,
         )
         if input_path.is_file():
             click.echo(f"Successfully converted {input_path} to {output_path}")
