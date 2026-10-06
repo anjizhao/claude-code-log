@@ -27,6 +27,7 @@ from .cache import (
     get_library_version,
 )
 from .parser import parse_timestamp
+from .pi_parser import is_pi_transcript, load_pi_transcript
 from .factories import create_transcript_entry
 from .models import (
     TranscriptEntry,
@@ -38,6 +39,19 @@ from .models import (
     ToolResultContent,
 )
 from .renderer import get_renderer, is_html_outdated
+
+
+def extract_session_id(jsonl_path: Path) -> str:
+    """Extract session ID from a JSONL filename.
+
+    Handles both formats:
+    - Claude Code: {session-uuid}.jsonl
+    - Pi: {timestamp}_{session-uuid}.jsonl
+    """
+    stem = jsonl_path.stem
+    if "_" in stem:
+        return stem.rsplit("_", 1)[1]
+    return stem
 
 
 def get_file_extension(format: str) -> str:
@@ -144,6 +158,13 @@ def load_transcript(
         return []
 
     _loaded_files.add(jsonl_path)
+
+    # Detect Pi transcript format and delegate
+    if is_pi_transcript(jsonl_path):
+        return load_pi_transcript(
+            jsonl_path, cache_manager, from_date, to_date, silent
+        )
+
     # Try to load from cache first
     if cache_manager is not None:
         # Use filtered loading if date parameters are provided
@@ -356,7 +377,7 @@ def load_directory_transcripts(
         # A /fork writes a cross-reference custom-title into the parent
         # session's file, which can overwrite the forked session's own
         # /rename title when all files are combined.
-        session_id = jsonl_file.stem
+        session_id = extract_session_id(jsonl_file)
         all_messages.extend(
             m
             for m in messages

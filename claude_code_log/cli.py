@@ -24,6 +24,11 @@ def get_default_projects_dir() -> Path:
     return Path.home() / ".claude" / "projects"
 
 
+def get_default_pi_sessions_dir() -> Path:
+    """Get the default Pi agent sessions directory path."""
+    return Path.home() / ".pi" / "agent" / "sessions"
+
+
 def convert_project_path_to_claude_dir(
     input_path: Path, base_projects_dir: Optional[Path] = None
 ) -> Path:
@@ -286,6 +291,12 @@ def _clear_html_files(input_path: Path, all_projects: bool) -> None:
     help="Hide hook messages whose command contains this substring (case-insensitive). Can be repeated.",
 )
 @click.option(
+    "--pi",
+    "pi_mode",
+    is_flag=True,
+    help="Process Pi agent sessions from ~/.pi/agent/sessions/",
+)
+@click.option(
     "--debug",
     is_flag=True,
     default=False,
@@ -309,6 +320,7 @@ def main(
     page_size: int,
     projects_since: Optional[str],
     sessions_since: Optional[str],
+    pi_mode: bool,
     exclude_hooks: tuple[str, ...],
     debug: bool,
 ) -> None:
@@ -320,6 +332,15 @@ def main(
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
     try:
+        # Handle --pi flag
+        if pi_mode:
+            if projects_dir is not None:
+                raise click.UsageError(
+                    "--pi and --projects-dir are mutually exclusive"
+                )
+            input_path = get_default_pi_sessions_dir()
+            all_projects = True
+
         # Handle default case - process all projects hierarchy if no input path
         if input_path is None:
             input_path = projects_dir or get_default_projects_dir()
