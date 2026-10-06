@@ -20,7 +20,8 @@ uv sync
 ```
 claude_code_log/
 ├── cli.py              # Command-line interface with project discovery
-├── parser.py           # Data extraction and parsing from JSONL files
+├── parser.py           # Data extraction, parsing, and session ID extraction
+├── pi_parser.py        # Pi transcript format normalization
 ├── renderer.py         # Format-neutral message processing and tree building
 ├── renderer_timings.py # Performance timing instrumentation
 ├── converter.py        # High-level conversion orchestration
@@ -46,7 +47,7 @@ claude_code_log/
         └── timeline.html
 
 scripts/                # Development utilities
-test/test_data/         # Representative JSONL samples
+test/test_data/         # Representative JSONL samples (Claude Code and Pi)
 dev-docs/               # Architecture documentation
 ```
 

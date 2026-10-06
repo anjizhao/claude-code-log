@@ -12,8 +12,10 @@ This document describes how Claude Code transcript data flows from raw JSONL ent
 ## 1. Data Flow Overview
 
 ```
-JSONL File
-    ↓ (parser.py)
+JSONL File (Claude Code or Pi format)
+    ↓ (converter.py: load_transcript → auto-detects format)
+    ├─ Claude Code: parsed via factories/transcript_factory.py
+    └─ Pi: normalized via pi_parser.py, then through same factory
 list[TranscriptEntry]
     ↓ (factories/)
 list[TemplateMessage] with MessageContent
@@ -24,6 +26,8 @@ Tree of TemplateMessage (roots with children)
     ↓ (html/renderer.py)
 Final HTML output
 ```
+
+Pi transcripts are normalized to the same `TranscriptEntry` types before entering the pipeline, so all downstream code (factories, renderer, HTML output) works unchanged.
 
 **Key cardinality rules**:
 - Each transcript entry has a `uuid`, but a single entry's `list[ContentItem]` may be chunked and produce multiple `MessageContent` objects (e.g., tool_use items are split into separate messages)
