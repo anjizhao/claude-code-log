@@ -1040,6 +1040,7 @@ def convert_jsonl_to(
     regenerate: Optional[int] = None,
     sessions_since: Optional[str] = None,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> Path:
     """Convert JSONL transcript(s) to the specified format.
 
@@ -1211,7 +1212,7 @@ def convert_jsonl_to(
 
     # Generate output file (check if regeneration needed)
     assert output_path is not None
-    renderer = get_renderer(format, image_export_mode)
+    renderer = get_renderer(format, image_export_mode, favicon=favicon)
     cached_data = cache_manager.get_cached_project_data() if cache_manager else None
     total_message_count = (
         cached_data.total_message_count
@@ -1390,6 +1391,7 @@ def convert_jsonl_to(
             skip_combined=skip_combined,
             show_stats=show_stats,
             exclude_hooks=exclude_hooks,
+            favicon=favicon,
         )
 
     return output_path
@@ -1788,6 +1790,7 @@ def _generate_individual_session_files(
     skip_combined: bool = False,
     show_stats: bool = False,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> int:
     """Generate individual files for each session in the specified format.
 
@@ -1825,7 +1828,7 @@ def _generate_individual_session_files(
     project_title = get_project_display_name(output_dir.name, working_directories)
 
     # Get renderer once outside the loop
-    renderer = get_renderer(format, image_export_mode)
+    renderer = get_renderer(format, image_export_mode, favicon=favicon)
     regenerated_count = 0
 
     # Generate HTML file for each session
@@ -2001,6 +2004,7 @@ def process_projects_hierarchy(
     projects_since: Optional[str] = None,
     sessions_since: Optional[str] = None,
     exclude_hooks: tuple[str, ...] = (),
+    favicon: Optional[str] = None,
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files.
 
@@ -2248,6 +2252,7 @@ def process_projects_hierarchy(
                         show_stats=show_stats,
                         sessions_since=sessions_since,
                         exclude_hooks=exclude_hooks,
+                        favicon=favicon,
                     )
 
                     # Track timing
@@ -2497,7 +2502,7 @@ def process_projects_hierarchy(
     # Generate index (always regenerate if outdated)
     ext = get_file_extension(output_format)
     index_path = projects_path / f"index.{ext}"
-    renderer = get_renderer(output_format, image_export_mode)
+    renderer = get_renderer(output_format, image_export_mode, favicon=favicon)
     index_regenerated = False
     if renderer.is_outdated(index_path) or from_date or to_date or any_cache_updated:
         index_content = renderer.generate_projects_index(

@@ -12,6 +12,8 @@ from .converter import (
     convert_jsonl_to,
     process_projects_hierarchy,
 )
+from .html.utils import FAVICON_PI
+from .pi_parser import is_pi_transcript
 from .cache import (
     CacheManager,
     get_cache_db_path,
@@ -356,6 +358,11 @@ def main(
             _clear_html_files(input_path, all_projects)
             click.echo("HTML files cleared. Regenerating...")
 
+        # Determine favicon
+        favicon = FAVICON_PI if pi_mode else None
+        if not favicon and input_path and input_path.is_file() and is_pi_transcript(input_path):
+            favicon = FAVICON_PI
+
         # Handle --all-projects flag or default behavior
         if all_projects:
             if not input_path.exists():
@@ -377,6 +384,7 @@ def main(
                 projects_since=projects_since,
                 sessions_since=sessions_since,
                 exclude_hooks=exclude_hooks,
+                favicon=favicon,
             )
 
             # Count processed projects
@@ -430,6 +438,7 @@ def main(
             regenerate=regenerate,
             sessions_since=sessions_since,
             exclude_hooks=exclude_hooks,
+            favicon=favicon,
         )
         if input_path.is_file():
             click.echo(f"Successfully converted {input_path} to {output_path}")

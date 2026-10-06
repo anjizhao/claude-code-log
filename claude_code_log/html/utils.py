@@ -22,6 +22,10 @@ import mistune
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .renderer_code import highlight_code_with_pygments, truncate_highlighted_preview
+
+FAVICON_CLAUDE = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0.5 10 7.25' shape-rendering='crispEdges'><defs><linearGradient id='g' gradientUnits='userSpaceOnUse' x1='0' y1='0' x2='10' y2='0'><stop offset='0%25' stop-color='%23f3d6d2'/><stop offset='11%25' stop-color='%23f1dcce'/><stop offset='22%25' stop-color='%23f0e4ca'/><stop offset='33%25' stop-color='%23eeecc7'/><stop offset='44%25' stop-color='%23e3ecc3'/><stop offset='55%25' stop-color='%23d5eac0'/><stop offset='66%25' stop-color='%23c6e8bd'/><stop offset='77%25' stop-color='%23b9e6bc'/><stop offset='88%25' stop-color='%23b6e3c5'/><stop offset='100%25' stop-color='%23b3e1cf'/></linearGradient></defs><rect x='1' y='1' width='8' height='5' fill='url(%23g)'/><rect x='0' y='2.75' width='1' height='1.5' fill='url(%23g)'/><rect x='9' y='2.75' width='1' height='1.5' fill='url(%23g)'/><rect x='2' y='3' width='1' height='1' fill='%23000'/><rect x='7' y='3' width='1' height='1' fill='%23000'/><rect x='1' y='6' width='1' height='1.75' fill='url(%23g)'/><rect x='3' y='6' width='1' height='1.75' fill='url(%23g)'/><rect x='6' y='6' width='1' height='1.75' fill='url(%23g)'/><rect x='8' y='6' width='1' height='1.75' fill='url(%23g)'/></svg>"
+
+FAVICON_PI = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 560 560' fill='none'><defs><linearGradient id='g' gradientUnits='userSpaceOnUse' x1='0' y1='0' x2='560' y2='0'><stop offset='0%25' stop-color='%23f3d6d2'/><stop offset='11%25' stop-color='%23f1dcce'/><stop offset='22%25' stop-color='%23f0e4ca'/><stop offset='33%25' stop-color='%23eeecc7'/><stop offset='44%25' stop-color='%23e3ecc3'/><stop offset='55%25' stop-color='%23d5eac0'/><stop offset='66%25' stop-color='%23c6e8bd'/><stop offset='77%25' stop-color='%23b9e6bc'/><stop offset='88%25' stop-color='%23b6e3c5'/><stop offset='100%25' stop-color='%23b3e1cf'/></linearGradient></defs><path fill='url(%23g)' d='M420 280H280V140H0V0H420V280Z'/><path fill='url(%23g)' d='M560 560H420V280H560V560Z'/><path fill='url(%23g)' d='M140 560H0V140H140V280H280V420H140V560Z'/></svg>"
 from ..models import (
     AssistantTextMessage,
     BashInputMessage,
@@ -445,4 +449,5 @@ def get_template_environment() -> Environment:
     # Cast to Any to bypass Jinja2's overly strict globals type
     globals_dict: Any = env.globals
     globals_dict["starts_with_emoji"] = starts_with_emoji
+    globals_dict["favicon"] = FAVICON_CLAUDE
     return env

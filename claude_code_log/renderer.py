@@ -2368,13 +2368,18 @@ class Renderer:
         return None
 
 
-def get_renderer(format: str, image_export_mode: Optional[str] = None) -> Renderer:
+def get_renderer(
+    format: str,
+    image_export_mode: Optional[str] = None,
+    favicon: Optional[str] = None,
+) -> Renderer:
     """Get a renderer instance for the specified format.
 
     Args:
         format: The output format ("html").
         image_export_mode: Image export mode ("placeholder", "embedded", "referenced").
             Defaults to "embedded".
+        favicon: Optional favicon URL override.
 
     Returns:
         A Renderer instance for the specified format.
@@ -2386,7 +2391,7 @@ def get_renderer(format: str, image_export_mode: Optional[str] = None) -> Render
         from .html.renderer import HtmlRenderer
 
         mode = image_export_mode or "embedded"
-        return HtmlRenderer(image_export_mode=mode)
+        return HtmlRenderer(image_export_mode=mode, favicon=favicon)
     raise ValueError(f"Unsupported format: {format}")
 
 

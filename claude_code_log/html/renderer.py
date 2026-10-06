@@ -156,14 +156,16 @@ def check_html_version(html_file_path: Path) -> Optional[str]:
 class HtmlRenderer(Renderer):
     """HTML renderer for Claude Code transcripts."""
 
-    def __init__(self, image_export_mode: str = "embedded"):
+    def __init__(self, image_export_mode: str = "embedded", favicon: Optional[str] = None):
         """Initialize the HTML renderer.
 
         Args:
             image_export_mode: Image export mode - "placeholder", "embedded", or "referenced".
+            favicon: Optional favicon URL override. Defaults to FAVICON_CLAUDE.
         """
         super().__init__()
         self.image_export_mode = image_export_mode
+        self.favicon = favicon
         self._output_dir: Path | None = None
         self._image_counter = 0
 
@@ -615,6 +617,7 @@ class HtmlRenderer(Renderer):
                     page_info=page_info,
                     page_stats=page_stats,
                     show_stats=show_stats,
+                    **({"favicon": self.favicon} if self.favicon else {}),
                 )
             )
 
@@ -677,6 +680,7 @@ class HtmlRenderer(Renderer):
                 summary=template_summary,
                 library_version=get_library_version(),
                 show_stats=show_stats,
+                **({"favicon": self.favicon} if self.favicon else {}),
             )
         )
 
@@ -703,6 +707,7 @@ class HtmlRenderer(Renderer):
                 token_summary=project.token_summary,
                 library_version=get_library_version(),
                 show_stats=show_stats,
+                **({"favicon": self.favicon} if self.favicon else {}),
             )
         )
 
