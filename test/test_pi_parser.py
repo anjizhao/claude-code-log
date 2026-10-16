@@ -65,6 +65,19 @@ class TestTransformContentItems:
         result = _transform_content_items(items)
         assert result == [{"type": "text", "text": "hello"}]
 
+    def test_image_to_claude_format(self):
+        items = [{"type": "image", "data": "iVBORw0KGgo", "mimeType": "image/png"}]
+        result = _transform_content_items(items)
+        assert result == [{
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo"},
+        }]
+
+    def test_image_default_mime_type(self):
+        items = [{"type": "image", "data": "abc123"}]
+        result = _transform_content_items(items)
+        assert result[0]["source"]["media_type"] == "image/png"
+
     def test_mixed_content(self):
         items = [
             {"type": "text", "text": "I'll check"},

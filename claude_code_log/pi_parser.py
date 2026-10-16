@@ -57,6 +57,15 @@ def _transform_content_items(items: list[dict[str, Any]]) -> list[dict[str, Any]
             if sig:
                 transformed["signature"] = sig
             result.append(transformed)
+        elif item_type == "image":
+            result.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": item.get("mimeType", "image/png"),
+                    "data": item.get("data", ""),
+                },
+            })
         else:
             result.append(item)
     return result
@@ -96,6 +105,8 @@ def _transform_user_message(
     content = msg.get("content", [])
     if isinstance(content, str):
         content = [{"type": "text", "text": content}]
+    else:
+        content = _transform_content_items(content)
 
     entry = _make_base_fields(pi_entry, ctx)
     entry["type"] = "user"
