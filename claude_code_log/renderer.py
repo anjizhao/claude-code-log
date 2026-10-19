@@ -1999,6 +1999,7 @@ def title_for_projects_index(
     project_summaries: list[dict[str, Any]],
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    is_pi: bool = False,
 ) -> str:
     """Generate a title for the projects index page.
 
@@ -2013,7 +2014,8 @@ def title_for_projects_index(
     Returns:
         A title string for the projects index page.
     """
-    title = "Claude Code Projects"
+    brand = "Pi" if is_pi else "Claude Code"
+    title = f"{brand} Projects"
 
     if project_summaries:
         # Collect all working directories from all projects
@@ -2032,7 +2034,7 @@ def title_for_projects_index(
 
             if len(working_paths) == 1:
                 # Single working directory - use its name
-                title = f"Claude Code Projects - {working_paths[0].name}"
+                title = f"{brand} Projects - {working_paths[0].name}"
             else:
                 # Multiple working directories - try to find common parent
                 try:
@@ -2053,7 +2055,7 @@ def title_for_projects_index(
 
                         if len(common_parts) > 1:  # More than just root "/"
                             common_path = Path(*common_parts)
-                            title = f"Claude Code Projects - {common_path.name}"
+                            title = f"{brand} Projects - {common_path.name}"
                 except Exception:
                     # Fall back to default title if path analysis fails
                     pass
@@ -2353,6 +2355,7 @@ class Renderer:
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         show_stats: bool = False,
+        is_pi: bool = False,
     ) -> Optional[str]:
         """Generate a projects index page.
 
