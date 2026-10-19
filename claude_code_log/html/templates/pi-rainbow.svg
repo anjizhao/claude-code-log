@@ -1,0 +1,19 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 560 560' fill='none'>
+  <defs>
+    <linearGradient id='g' gradientUnits='userSpaceOnUse' x1='0' y1='0' x2='560' y2='0'>
+      <stop offset='0%' stop-color='#f3d6d2'/>
+      <stop offset='11%' stop-color='#f1dcce'/>
+      <stop offset='22%' stop-color='#f0e4ca'/>
+      <stop offset='33%' stop-color='#eeecc7'/>
+      <stop offset='44%' stop-color='#e3ecc3'/>
+      <stop offset='55%' stop-color='#d5eac0'/>
+      <stop offset='66%' stop-color='#c6e8bd'/>
+      <stop offset='77%' stop-color='#b9e6bc'/>
+      <stop offset='88%' stop-color='#b6e3c5'/>
+      <stop offset='100%' stop-color='#b3e1cf'/>
+    </linearGradient>
+  </defs>
+  <path fill='url(#g)' d='M420 280H280V140H0V0H420V280Z'/>
+  <path fill='url(#g)' d='M560 560H420V280H560V560Z'/>
+  <path fill='url(#g)' d='M140 560H0V140H140V280H280V420H140V560Z'/>
+</svg>
