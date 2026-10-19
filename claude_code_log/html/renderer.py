@@ -666,9 +666,10 @@ class HtmlRenderer(Renderer):
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         show_stats: bool = False,
+        is_pi: bool = False,
     ) -> str:
         """Generate an HTML projects index page."""
-        title = title_for_projects_index(project_summaries, from_date, to_date)
+        title = title_for_projects_index(project_summaries, from_date, to_date, is_pi=is_pi)
         template_projects, template_summary = prepare_projects_index(project_summaries)
 
         env = get_template_environment()

@@ -385,6 +385,7 @@ def main(
                 sessions_since=sessions_since,
                 exclude_hooks=exclude_hooks,
                 favicon=favicon,
+                is_pi=pi_mode,
             )
 
             # Count processed projects

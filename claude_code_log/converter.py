@@ -1995,6 +1995,7 @@ def process_projects_hierarchy(
     sessions_since: Optional[str] = None,
     exclude_hooks: tuple[str, ...] = (),
     favicon: Optional[str] = None,
+    is_pi: bool = False,
 ) -> Path:
     """Process the entire ~/.claude/projects/ hierarchy and create linked HTML files.
 
@@ -2496,7 +2497,8 @@ def process_projects_hierarchy(
     index_regenerated = False
     if renderer.is_outdated(index_path) or from_date or to_date or any_cache_updated:
         index_content = renderer.generate_projects_index(
-            project_summaries, from_date, to_date, show_stats=show_stats
+            project_summaries, from_date, to_date, show_stats=show_stats,
+            is_pi=is_pi,
         )
         assert index_content is not None
         index_path.write_text(index_content, encoding="utf-8")
