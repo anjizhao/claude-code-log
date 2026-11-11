@@ -82,7 +82,7 @@ You can view archived sessions as HTML or Markdown without restoring them:
 
 ## Permanently Deleting Sessions
 
-To fully remove a session (both the JSONL file and all cached data), you need to delete from three places: the JSONL file on disk, and the `messages`, `sessions`, and `cached_files` tables in the cache DB.
+To fully remove a session (both the JSONL file and all cached data), you need to delete from the JSONL file on disk and from several cache DB tables: `messages`, `sessions`, `cached_files`, `html_cache`, and (if the session appears on a combined page) `page_sessions`.
 
 ### 1. Find the session
 
@@ -96,13 +96,22 @@ JOIN projects p ON s.project_id = p.id
 WHERE p.project_path LIKE '%your-project-name%';
 ```
 
-### 2. Find the cached_files entry
+### 2. Find the cached_files and html_cache entries
 
 ```sql
+-- Find the cached_files entry
 SELECT DISTINCT cf.id, cf.file_path
 FROM cached_files cf
 JOIN messages m ON m.file_id = cf.id
 WHERE m.session_id = 'your-session-id';
+
+-- Find the html_cache entry
+SELECT id, html_path FROM html_cache
+WHERE source_session_id = 'your-session-id';
+
+-- Find any page_sessions entry (for combined pages)
+SELECT ps.id, ps.page_id FROM page_sessions ps
+WHERE ps.session_id = 'your-session-id';
 ```
 
 ### 3. Delete everything
@@ -111,11 +120,13 @@ WHERE m.session_id = 'your-session-id';
 # Delete the JSONL file (skip if already deleted)
 rm ~/.claude/projects/{project-name}/{session-id}.jsonl
 
-# Delete from the cache DB (replace SESSION_ID and FILE_ID with actual values)
+# Delete from the cache DB (replace SESSION_ID, FILE_ID, and HTML_CACHE_ID with actual values)
 sqlite3 ~/.claude/projects/claude-code-log-cache.db \
   "DELETE FROM messages WHERE session_id = 'SESSION_ID';
    DELETE FROM sessions WHERE session_id = 'SESSION_ID';
-   DELETE FROM cached_files WHERE id = FILE_ID;"
+   DELETE FROM cached_files WHERE id = FILE_ID;
+   DELETE FROM html_cache WHERE id = HTML_CACHE_ID;
+   DELETE FROM page_sessions WHERE session_id = 'SESSION_ID';"  -- safe even if no rows match
 ```
 
 Also delete the generated HTML file if one exists:
