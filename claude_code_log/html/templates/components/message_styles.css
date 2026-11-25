@@ -12,6 +12,23 @@
     margin-top: -4px;
 }
 
+/* Spacing above and below content comes only from the header margin and the
+   message padding, so outer margins of the first/last content elements
+   (markdown paragraphs, tool wrappers) are removed. */
+.message > .content > :first-child,
+.message > .content > :first-child > :first-child,
+.message .collapsible-code .preview-content > :first-child,
+.message .collapsible-code .code-full > :first-child {
+    margin-top: 0;
+}
+
+.message > .content > :last-child,
+.message > .content > :last-child > :last-child,
+.message .collapsible-code .preview-content > :last-child,
+.message .collapsible-code .code-full > :last-child {
+    margin-bottom: 0;
+}
+
 /* Fold Bar - compact overlay pill in bottom-right corner */
 .fold-bar {
     position: absolute;
@@ -854,22 +871,13 @@ details summary {
 
 /* Collapsible code blocks (Read/Edit/Write tools) */
 
-/* When an untitled tool result starts with a collapsible block, float the
-   timestamp header so the "N lines" summary shares its line instead of
-   sitting below an empty title row. */
-.message.tool_result:has(> .header > span:first-child:empty):has(
-    > .content > details.collapsible-code:first-child,
-    > .content > div:first-child > details.collapsible-code:first-child
-) > .header {
+/* Untitled tool results float the timestamp onto the first line of content
+   instead of giving it an empty title row. */
+.message.tool_result:has(> .header > span:first-child:empty) > .header {
     float: right;
-    margin-top: 0.25em;
+    margin-top: 0.125em;
     margin-bottom: 0;
     margin-left: 1em;
-}
-
-.message.tool_result:has(> .header > span:first-child:empty)
-    > .content > div:first-child:has(> details.collapsible-code:first-child) {
-    margin-top: 0;
 }
 
 .tool_result .collapsible-code > summary .line-count,
