@@ -22,6 +22,7 @@ from typing import Any, cast
 
 from .utils import (
     escape_html,
+    render_collapsible_code,
     render_file_content_collapsible,
     render_markdown_collapsible,
 )
@@ -412,18 +413,12 @@ def format_bash_output(output: BashOutput) -> str:
     if len(content) <= 200:
         return f"<pre>{full_html}</pre>"
 
-    # For longer content, use collapsible details
     preview_html = escape_html(content[:200]) + "..."
-    return f"""
-    <details class="collapsible-details">
-        <summary>
-            <div class="preview-content"><pre>{preview_html}</pre></div>
-        </summary>
-        <div class="details-content">
-            <pre>{full_html}</pre>
-        </div>
-    </details>
-    """
+    return render_collapsible_code(
+        f"<pre>{preview_html}</pre>",
+        f"<pre>{full_html}</pre>",
+        len(content.splitlines()),
+    )
 
 
 def format_task_output(output: TaskOutput) -> str:
@@ -807,17 +802,11 @@ def format_tool_result_content_raw(tool_result: ToolResultContent) -> str:
         if len(raw_content) <= 200:
             return f"<pre>{full_html}</pre>"
 
-        # For longer content, use collapsible details
-        return f"""
-    <details class="collapsible-details">
-        <summary>
-            <div class="preview-content"><pre>{preview_html}</pre></div>
-        </summary>
-        <div class="details-content">
-            <pre>{full_html}</pre>
-        </div>
-    </details>
-    """
+        return render_collapsible_code(
+            f"<pre>{preview_html}</pre>",
+            f"<pre>{full_html}</pre>",
+            len(raw_content.splitlines()),
+        )
 
 
 # -- Public Exports -----------------------------------------------------------
