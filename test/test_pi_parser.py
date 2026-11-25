@@ -6,6 +6,7 @@ import pytest
 
 from claude_code_log.pi_parser import (
     _transform_content_items,
+    _transform_tool_call,
     _transform_usage,
     is_pi_transcript,
     parse_pi_transcript,
@@ -53,7 +54,7 @@ class TestTransformContentItems:
     def test_tool_call_to_tool_use(self):
         items = [{"type": "toolCall", "id": "t1", "name": "bash", "arguments": {"command": "ls"}}]
         result = _transform_content_items(items)
-        assert result == [{"type": "tool_use", "id": "t1", "name": "bash", "input": {"command": "ls"}}]
+        assert result == [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]
 
     def test_thinking_signature_rename(self):
         items = [{"type": "thinking", "thinking": "hmm", "thinkingSignature": "sig123"}]
@@ -87,7 +88,63 @@ class TestTransformContentItems:
         assert len(result) == 2
         assert result[0]["type"] == "text"
         assert result[1]["type"] == "tool_use"
-        assert result[1]["input"] == {"path": "a.py"}
+        assert result[1]["name"] == "Read"
+        assert result[1]["input"] == {"file_path": "a.py"}
+
+
+class TestTransformToolCall:
+    def test_read_keeps_offset_and_limit(self):
+        assert _transform_tool_call(
+            "read", {"path": "a.py", "offset": 10, "limit": 5}
+        ) == ("Read", {"file_path": "a.py", "offset": 10, "limit": 5})
+
+    def test_write(self):
+        assert _transform_tool_call(
+            "write", {"path": "a.py", "content": "x = 1\n"}
+        ) == ("Write", {"file_path": "a.py", "content": "x = 1\n"})
+
+    def test_bash_arguments_unchanged(self):
+        args = {"command": "ls", "timeout": 30}
+        assert _transform_tool_call("bash", args) == ("Bash", args)
+
+    def test_single_edit_becomes_edit(self):
+        args = {"path": "a.py", "edits": [{"oldText": "a", "newText": "b"}]}
+        assert _transform_tool_call("edit", args) == (
+            "Edit",
+            {"file_path": "a.py", "old_string": "a", "new_string": "b"},
+        )
+
+    def test_multiple_edits_become_multiedit(self):
+        args = {
+            "path": "a.py",
+            "edits": [
+                {"oldText": "a", "newText": "b"},
+                {"oldText": "c", "newText": "d"},
+            ],
+        }
+        assert _transform_tool_call("edit", args) == (
+            "MultiEdit",
+            {
+                "file_path": "a.py",
+                "edits": [
+                    {"old_string": "a", "new_string": "b"},
+                    {"old_string": "c", "new_string": "d"},
+                ],
+            },
+        )
+
+    @pytest.mark.parametrize(
+        ("name", "args"),
+        [
+            ("write", {"content": "no path"}),
+            ("edit", {"path": "a.py", "oldText": "a", "newText": "b"}),
+            ("edit", {"path": "a.py", "edits": [{"oldText": "a"}]}),
+            ("bash", {}),
+            ("codemode", {"code": "return 1"}),
+        ],
+    )
+    def test_unexpected_shape_unchanged(self, name, args):
+        assert _transform_tool_call(name, args) == (name, args)
 
 
 class TestTransformUsage:
@@ -266,10 +323,10 @@ class TestSessionWithMetadata:
         for msg in messages:
             if isinstance(msg, AssistantTranscriptEntry):
                 for item in msg.message.content:
-                    if isinstance(item, ToolUseContent) and item.name == "write":
+                    if isinstance(item, ToolUseContent) and item.name == "Write":
                         write_calls.append(item)
         assert len(write_calls) == 1
-        assert "test_parser.py" in write_calls[0].input["path"]
+        assert "test_parser.py" in write_calls[0].input["file_path"]
 
     def test_ask_user_question_tool(self):
         pi_file = PI_TEST_DATA / "2026-10-06T15-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl"
@@ -358,6 +415,18 @@ class TestHtmlGeneration:
         assert "<!DOCTYPE html>" in html
         assert "Help me fix the bug" in html
         assert "parser.py" in html
+
+    def test_builtin_tools_use_typed_renderers(self):
+        from claude_code_log.html.renderer import generate_html
+
+        pi_file = PI_TEST_DATA / "2026-10-06T15-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl"
+        messages = load_transcript(pi_file)
+        html = generate_html(messages, "Pi Test Session")
+
+        assert "📄 Read <span class='tool-summary'>/Users/test/project/parser.py</span>" in html
+        assert "📝 Edit <span class='tool-summary'>/Users/test/project/parser.py</span>" in html
+        assert "📝 Write <span class='tool-summary'>/Users/test/project/test_parser.py</span>" in html
+        assert "edit-tool-content" in html
 
     def test_session_with_metadata_renders(self):
         from claude_code_log.html.renderer import generate_html
