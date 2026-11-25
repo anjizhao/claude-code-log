@@ -2916,13 +2916,32 @@
   }
   
   /* Collapsible code blocks (Read/Edit/Write tools) */
-  .tool_result .collapsible-code {
-      margin-top: -2.5em;
+  
+  /* When an untitled tool result starts with a collapsible block, float the
+     timestamp header so the "N lines" summary shares its line instead of
+     sitting below an empty title row. */
+  .message.tool_result:has(> .header > span:first-child:empty):has(
+      > .content > details.collapsible-code:first-child,
+      > .content > div:first-child > details.collapsible-code:first-child
+  ) > .header {
+      float: right;
+      margin-top: 0.25em;
+      margin-bottom: 0;
+      margin-left: 1em;
+  }
+  
+  .message.tool_result:has(> .header > span:first-child:empty)
+      > .content > div:first-child:has(> details.collapsible-code:first-child) {
+      margin-top: 0;
+  }
+  
+  .tool_result .collapsible-code > summary .line-count,
+  .tool_result .collapsible-code > summary::marker {
+      font-size: 0.8em;
   }
   
   .tool_result .collapsible-code summary {
       cursor: pointer;
-      padding-top: 0.5em;
       background: var(--color-bg-secondary);
       border-radius: 4px;
   }
@@ -7985,13 +8004,32 @@
   }
   
   /* Collapsible code blocks (Read/Edit/Write tools) */
-  .tool_result .collapsible-code {
-      margin-top: -2.5em;
+  
+  /* When an untitled tool result starts with a collapsible block, float the
+     timestamp header so the "N lines" summary shares its line instead of
+     sitting below an empty title row. */
+  .message.tool_result:has(> .header > span:first-child:empty):has(
+      > .content > details.collapsible-code:first-child,
+      > .content > div:first-child > details.collapsible-code:first-child
+  ) > .header {
+      float: right;
+      margin-top: 0.25em;
+      margin-bottom: 0;
+      margin-left: 1em;
+  }
+  
+  .message.tool_result:has(> .header > span:first-child:empty)
+      > .content > div:first-child:has(> details.collapsible-code:first-child) {
+      margin-top: 0;
+  }
+  
+  .tool_result .collapsible-code > summary .line-count,
+  .tool_result .collapsible-code > summary::marker {
+      font-size: 0.8em;
   }
   
   .tool_result .collapsible-code summary {
       cursor: pointer;
-      padding-top: 0.5em;
       background: var(--color-bg-secondary);
       border-radius: 4px;
   }
@@ -13125,13 +13163,32 @@
   }
   
   /* Collapsible code blocks (Read/Edit/Write tools) */
-  .tool_result .collapsible-code {
-      margin-top: -2.5em;
+  
+  /* When an untitled tool result starts with a collapsible block, float the
+     timestamp header so the "N lines" summary shares its line instead of
+     sitting below an empty title row. */
+  .message.tool_result:has(> .header > span:first-child:empty):has(
+      > .content > details.collapsible-code:first-child,
+      > .content > div:first-child > details.collapsible-code:first-child
+  ) > .header {
+      float: right;
+      margin-top: 0.25em;
+      margin-bottom: 0;
+      margin-left: 1em;
+  }
+  
+  .message.tool_result:has(> .header > span:first-child:empty)
+      > .content > div:first-child:has(> details.collapsible-code:first-child) {
+      margin-top: 0;
+  }
+  
+  .tool_result .collapsible-code > summary .line-count,
+  .tool_result .collapsible-code > summary::marker {
+      font-size: 0.8em;
   }
   
   .tool_result .collapsible-code summary {
       cursor: pointer;
-      padding-top: 0.5em;
       background: var(--color-bg-secondary);
       border-radius: 4px;
   }
@@ -18329,13 +18386,32 @@
   }
   
   /* Collapsible code blocks (Read/Edit/Write tools) */
-  .tool_result .collapsible-code {
-      margin-top: -2.5em;
+  
+  /* When an untitled tool result starts with a collapsible block, float the
+     timestamp header so the "N lines" summary shares its line instead of
+     sitting below an empty title row. */
+  .message.tool_result:has(> .header > span:first-child:empty):has(
+      > .content > details.collapsible-code:first-child,
+      > .content > div:first-child > details.collapsible-code:first-child
+  ) > .header {
+      float: right;
+      margin-top: 0.25em;
+      margin-bottom: 0;
+      margin-left: 1em;
+  }
+  
+  .message.tool_result:has(> .header > span:first-child:empty)
+      > .content > div:first-child:has(> details.collapsible-code:first-child) {
+      margin-top: 0;
+  }
+  
+  .tool_result .collapsible-code > summary .line-count,
+  .tool_result .collapsible-code > summary::marker {
+      font-size: 0.8em;
   }
   
   .tool_result .collapsible-code summary {
       cursor: pointer;
-      padding-top: 0.5em;
       background: var(--color-bg-secondary);
       border-radius: 4px;
   }
