@@ -15,7 +15,7 @@ Pi format differences from Claude Code:
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from .factories import create_transcript_entry
 from .models import (
@@ -35,21 +35,65 @@ class _SessionContext:
     latest_session_name: Optional[str] = None
 
 
+def _transform_tool_call(
+    name: str, args: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    """Map Pi built-in tool calls to the matching Claude Code tool name and input.
+
+    Calls with an unexpected argument shape are returned unchanged so they
+    still render with the generic parameter table.
+    """
+    path = args.get("path")
+    if name == "bash" and isinstance(args.get("command"), str):
+        return "Bash", args
+    if not isinstance(path, str):
+        return name, args
+
+    if name == "read":
+        return "Read", {
+            "file_path": path,
+            **{k: v for k, v in args.items() if k in ("offset", "limit")},
+        }
+    if name == "write" and isinstance(args.get("content"), str):
+        return "Write", {"file_path": path, "content": args["content"]}
+    if name == "edit":
+        edits = args.get("edits")
+        if not isinstance(edits, list) or not edits:
+            return name, args
+        converted: list[dict[str, str]] = []
+        for edit in cast(list[Any], edits):
+            if not isinstance(edit, dict):
+                return name, args
+            old_text = cast(dict[str, Any], edit).get("oldText")
+            new_text = cast(dict[str, Any], edit).get("newText")
+            if not isinstance(old_text, str) or not isinstance(new_text, str):
+                return name, args
+            converted.append({"old_string": old_text, "new_string": new_text})
+        if len(converted) == 1:
+            return "Edit", {"file_path": path, **converted[0]}
+        return "MultiEdit", {"file_path": path, "edits": converted}
+    return name, args
+
+
 def _transform_content_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Transform Pi content items to Claude Code format.
 
     - toolCall -> tool_use, arguments -> input
+    - Pi built-in tools (read, write, edit, bash) -> Claude Code tool shapes
     - thinkingSignature -> signature
     """
     result = []
     for item in items:
         item_type = item.get("type")
         if item_type == "toolCall":
+            name, tool_input = _transform_tool_call(
+                item.get("name", ""), item.get("arguments", {})
+            )
             result.append({
                 "type": "tool_use",
                 "id": item.get("id", ""),
-                "name": item.get("name", ""),
-                "input": item.get("arguments", {}),
+                "name": name,
+                "input": tool_input,
             })
         elif item_type == "thinking":
             transformed = {"type": "thinking", "thinking": item.get("thinking", "")}
